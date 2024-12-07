@@ -4,14 +4,14 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
-  async rewrites() {
-    return [
-      {
-        source: '/api/:path*',
-        destination: '/api/:path*',
-      },
-    ];
+  webpack: (config) => {
+    config.resolve.alias = {
+      ...config.resolve.alias,
+      '@': '.',
+    }
+    return config
   },
+  transpilePackages: ["@radix-ui/react-icons", "lucide-react"],
 };
 
 export default nextConfig;
