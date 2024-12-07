@@ -9,7 +9,7 @@ import { useEffect, useState } from "react"
 import { useSession } from "next-auth/react"
 import { useRouter } from "next/navigation"
 import { ArrowLeft, Plus, Trash2, FileText, Loader2, Edit, Check, X, Copy } from 'lucide-react'
-import { Button } from "@/components/ui/atoms/Button"
+import { Button } from "@/components/ui/atoms/button"
 import { Input } from "@/components/ui/atoms/input"
 import { Card } from "@/components/ui/atoms/card"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/atoms/dialog"

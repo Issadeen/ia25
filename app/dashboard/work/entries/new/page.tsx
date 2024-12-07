@@ -11,7 +11,7 @@ import {
   Sun,
   Moon,
 } from "lucide-react"
-import { Button } from "@/components/ui/atoms/Button"
+import { Button } from "@/components/ui/atoms/button"
 import { Input } from "@/components/ui/atoms/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/atoms/card"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"

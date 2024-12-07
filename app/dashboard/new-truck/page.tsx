@@ -6,7 +6,7 @@ import { useSession } from "next-auth/react"
 import { useRouter } from "next/navigation"
 import { useTheme } from "next-themes"
 import { ArrowLeft, Moon, Sun, Save } from "lucide-react"
-import { Button } from "@/components/ui/atoms/Button"
+import { Button } from "@/components/ui/atoms/button" // Fix import path
 import { Card } from "@/components/ui/atoms/card"
 import { Input } from "@/components/ui/atoms/input"
 import { Label } from "@/components/ui/atoms/label"

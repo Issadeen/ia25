@@ -2,7 +2,7 @@
 
 // ...existing imports...
 import { useState } from "react"
-import { Button } from "@/components/ui/atoms/Button"
+import { Button } from "@/components/ui/atoms/button"
 import { Input } from "@/components/ui/atoms/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Label } from "@/components/ui/atoms/label"

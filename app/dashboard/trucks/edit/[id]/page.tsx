@@ -6,7 +6,7 @@ import { useRouter, useParams } from 'next/navigation'
 import { useTheme } from 'next-themes'
 import { useToast } from '@/components/ui/use-toast'
 import { ArrowLeft, Moon, Sun } from 'lucide-react'
-import { Button } from "@/components/ui/atoms/Button"
+import { Button } from "@/components/ui/atoms/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/atoms/card"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { ref as databaseRef, get, update } from 'firebase/database'

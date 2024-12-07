@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react"
 import { signIn } from "next-auth/react"
 import { useRouter } from "next/navigation"
-import { Button } from "@/components/ui/atoms/Button"
+import { Button } from "@/components/ui/atoms/button"
 import { FormField } from "@/components/ui/molecules/FormField"
 import { useToast } from "@/components/ui/use-toast"
 import { Card } from "@/components/ui/atoms/card"

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation"
 import { useEffect, useState, useRef, useCallback } from "react"
 import { useTheme } from "next-themes"
 import { LogOut, Truck, Briefcase, Plus, Wallet, Moon, Sun } from 'lucide-react'
-import { Button } from "@/components/ui/atoms/Button"
+import { Button } from "@/components/ui/atoms/button"
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar"
 import { auth, storage } from "@/lib/firebase"
 import { ref, uploadBytes, getDownloadURL, listAll } from "firebase/storage"

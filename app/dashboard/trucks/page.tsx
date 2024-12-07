@@ -8,7 +8,7 @@ import { useSession } from "next-auth/react"
 import { useRouter } from 'next/navigation'
 import { useTheme } from "next-themes"
 import { Truck, Copy, Edit, Trash2, ArrowLeft, Check, ArrowUp, Moon, Sun } from 'lucide-react'
-import { Button } from "@/components/ui/atoms/Button"
+import { Button } from "@/components/ui/atoms/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/atoms/card"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { ref as databaseRef, onValue, remove, get } from 'firebase/database'
