@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Truck Entry Allocation</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-900 text-white font-sans">
+    <div class="container mx-auto max-w-screen-md p-8 bg-gray-700 rounded-lg shadow-md">
+        <h1 class="text-3xl mb-8 text-center">Truck Entry Allocation</h1>
+        <div class="form mb-8">
+            <label for="truckNumber" class="block mb-1">Truck Number:</label>
+            <input type="text" id="truckNumber" class="w-full px-4 py-2 mb-4 bg-gray-800 border border-gray-600 rounded-lg text-white">
+            <label for="destination" class="block mb-1">Destination:</label>
+            <input type="text" id="destination" class="w-full px-4 py-2 mb-4 bg-gray-800 border border-gray-600 rounded-lg text-white">
+            <label for="product" class="block mb-1">Product:</label>
+            <input type="text" id="product" class="w-full px-4 py-2 mb-4 bg-gray-800 border border-gray-600 rounded-lg text-white">
+            <label for="at20Quantity" class="block mb-1">AT20 Quantity:</label>
+            <input type="number" id="at20Quantity" class="w-full px-4 py-2 mb-4 bg-gray-800 border border-gray-600 rounded-lg text-white">
+            <label for="motherEntry" class="block mb-1">Select Mother Entry:</label>
+            <select id="motherEntry" class="w-full px-4 py-2 mb-4 bg-gray-800 border border-gray-600 rounded-lg text-white"></select>
+            <label for="currentBalance" class="block mb-1">Current Balance:</label>
+            <input type="text" id="currentBalance" class="w-full px-4 py-2 mb-4 bg-gray-800 border border-gray-600 rounded-lg text-white" disabled>
+            <button id="cancelButton" class="px-6 py-3 mr-4 bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors duration-300">Cancel</button>
+            <button id="submitButton" class="px-6 py-3 bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors duration-300">Submit</button>
+            <button id="backButton" onclick="window.location.href='kentry.html'" class="px-6 py-3 bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors duration-300">Back</button>
+        </div>
+        <div id="result"></div>
+    </div>
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-database.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-auth.js"></script>
+  <script type="module">
+        // Initialize Firebase
+        const firebaseConfig = {
+            apiKey: "AIzaSyDklv5Sgwiy84_fCOqiQRCiuTBVRZ_2EvY",
+            authDomain: "my-1-wb.firebaseapp.com",
+            projectId: "my-1-wb",
+            storageBucket: "my-1-wb.appspot.com",
+            messagingSenderId: "865633557898",
+            appId: "1:865633557898:web:5e8a848b08d7475054bc73"
+        };
+    
+        firebase.initializeApp(firebaseConfig);
+        const database = firebase.database();
+
+document.addEventListener('DOMContentLoaded', function() {
+    // Populate the "Select Mother Entry" dropdown
+    populateMotherEntriesDropdown();
+
+    
+
+    // Add event listener to "Submit" button
+    document.getElementById('submitButton').addEventListener('click', submitForm);
+
+    // Add event listener to "Cancel" button
+    document.getElementById('cancelButton').addEventListener('click', cancelForm);
+});
+
+function populateMotherEntriesDropdown() {
+    // Get product and destination input fields
+    const productInput = document.getElementById('product');
+    const destinationInput = document.getElementById('destination');
+
+    // Add event listeners to input fields
+    productInput.addEventListener('change', populateMotherEntriesDropdown);
+    destinationInput.addEventListener('change', populateMotherEntriesDropdown);
+
+    function populateMotherEntriesDropdown() {
+        // Get user inputs
+        const product = productInput.value;
+        const destination = destinationInput.value.toLowerCase(); // Convert to lower case
+
+        // Only proceed if both product and destination are provided
+        if (!product || !destination) {
+            return;
+        }
+
+        // Fetch TR800 entries from Realtime Database
+        database.ref('tr800')
+            .orderByChild('product_destination')
+            .equalTo(product + "_" + destination)
+            .once('value')
+            .then(function(snapshot) {
+                if (snapshot.exists()) {
+                    const motherEntryDropdown = document.getElementById('motherEntry');
+
+                    // Clear previous options
+                    motherEntryDropdown.innerHTML = '';
+
+                    // Create an option for each mother entry
+                    snapshot.forEach(function(childSnapshot) {
+                        let data = childSnapshot.val();
+                        
+                        // Check if status is not 'cancelled' and remainingQuantity is not 0
+                        if (data.status !== 'cancelled' && data.remainingQuantity > 0) {
+                            let option = document.createElement('option');
+                            option.value = data.number;
+                            option.textContent = data.number + ' (' + data.remainingQuantity + ')'; // Display remainingQuantity
+                            motherEntryDropdown.appendChild(option);
+                        }
+                    });
+                } else {
+                    // Display a message if no active entries found
+                    alert('No active mother entries found for the input product and destination.');
+                }
+            })
+            .catch(error => {
+                // Handle any errors
+                console.error(error);
+                alert('Failed to fetch mother entries. Please try again.');
+            });
+    }
+}
+// Get current balance input field
+const currentBalanceInput = document.getElementById('currentBalance');
+
+// Add event listener to mother entry dropdown
+document.getElementById('motherEntry').addEventListener('change', function() {
+    // Get selected mother entry
+    const selectedMotherEntry = this.value;
+
+    // Fetch the selected mother entry from Firebase
+    database.ref('tr800')
+        .orderByChild('number')
+        .equalTo(selectedMotherEntry)
+        .once('value')
+        .then(function(snapshot) {
+            if (snapshot.exists()) {
+                snapshot.forEach(function(childSnapshot) {
+                    let data = childSnapshot.val();
+                    // Update current balance input field
+                    currentBalanceInput.value = data.remainingQuantity;
+                });
+            } else {
+                // Reset current balance if no matching entry found
+                currentBalanceInput.value = '';
+            }
+        })
+        .catch(error => {
+            // Handle any errors
+            console.error(error);
+            alert('Failed to fetch current balance. Please try again.');
+        });
+});
+function submitForm() {
+    let truckNumber = document.getElementById('truckNumber').value;
+    // Replace all occurrences of '/' with '-'
+    truckNumber = truckNumber.replace(/\//g, '-');
+
+    const destination = document.getElementById('destination').value.toLowerCase(); // Convert to lower case
+    const product = document.getElementById('product').value;
+    const at20Quantity = parseFloat(document.getElementById('at20Quantity').value);
+    const selectedMotherEntry = document.getElementById('motherEntry').value;
+
+    // Validate form fields
+    if (!truckNumber || !destination || !product || isNaN(at20Quantity) || !selectedMotherEntry) {
+        alert('Please fill all fields and select a mother entry.');
+        return;
+    }
+
+    // Fetch the selected mother entry from Firebase
+    database.ref('tr800')
+        .orderByChild('number')
+        .equalTo(selectedMotherEntry)
+        .once('value')
+        .then(snapshot => {
+            if (snapshot.exists()) {
+                snapshot.forEach(childSnapshot => {
+                    let data = childSnapshot.val();
+
+                    // Check if at20Quantity is greater than the remaining quantity
+                    if (at20Quantity > data.remainingQuantity) {
+                        alert('The quantity you are trying to subtract is greater than the remaining quantity in the mother entry.');
+                        return;
+                    }
+
+                    let newRemainingQuantity = data.remainingQuantity - at20Quantity;
+
+                    // Check if newRemainingQuantity is a number
+                    if (isNaN(newRemainingQuantity)) {
+                        console.error('newRemainingQuantity is not a number:', newRemainingQuantity);
+                        return;
+                    }
+
+                    // Update remaining quantity and status
+                    let updates = {};
+                    updates['/tr800/' + childSnapshot.key + '/remainingQuantity'] = newRemainingQuantity;
+
+                    // Check if status exists in the original data and is not undefined
+                    if ('status' in data && data.status !== undefined) {
+                        updates['/tr800/' + childSnapshot.key + '/status'] = newRemainingQuantity === 0 ? 'cleared' : data.status;
+                    } else {
+                        updates['/tr800/' + childSnapshot.key + '/status'] = newRemainingQuantity === 0 ? 'cleared' : 'default status';
+                    }
+
+                    // Update Firebase
+                    return database.ref().update(updates)
+                        .then(() => {
+                            // Add data to Firebase
+                            const newEntryKey = database.ref().child('truckEntries').push().key;
+                            const entryUpdates = {};
+                            entryUpdates['/truckEntries/' + truckNumber + '/' + newEntryKey] = {
+                                entryNumber: selectedMotherEntry,
+                                subtractedQuantity: at20Quantity
+                            };
+
+                            // Update Firebase
+                            return database.ref().update(entryUpdates);
+                        })
+                        .then(() => {
+                            alert('Form submitted successfully.');
+                            // Clear the form
+                            document.getElementById('truckNumber').value = '';
+                            document.getElementById('destination').value = '';
+                            document.getElementById('product').value = '';
+                            document.getElementById('at20Quantity').value = '';
+                            document.getElementById('motherEntry').selectedIndex = 0;
+                            document.getElementById('currentBalance').value = '';
+                        })
+                        .catch(error => {
+                            console.error('Error submitting form:', error);
+                            alert('Failed to submit form. Please try again.');
+                        });
+                });
+            } else {
+                // Display a message if no matching entry found
+                alert('No matching mother entry found.');
+            }
+        })
+        .catch(error => {
+            // Handle any errors
+            console.error(error);
+            alert('Failed to fetch mother entry. Please try again.');
+        });
+}
+
+function cancelForm() {
+    // Clear the form
+    document.getElementById('truckNumber').value = '';
+    document.getElementById('destination').value = '';
+    document.getElementById('product').value = '';
+    document.getElementById('at20Quantity').value = '';
+    document.getElementById('motherEntry').selectedIndex = 0;
+    document.getElementById('currentBalance').value = '';
+}
+
+    </script>
+</body>
+</html>
