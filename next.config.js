@@ -1,7 +1,10 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  // Images will now be optimized by Next.js
+  output: 'standalone',
+  images: {
+    unoptimized: false
+  }
 };
 
 export default nextConfig;
