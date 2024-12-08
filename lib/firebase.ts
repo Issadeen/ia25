@@ -1,4 +1,4 @@
-import { initializeApp, getApps, getApp } from 'firebase/app';
+import { initializeApp, getApp, getApps } from 'firebase/app';
 import { getFirestore } from 'firebase/firestore';
 import { getAuth } from 'firebase/auth';
 import { getStorage } from "firebase/storage";
@@ -14,12 +14,11 @@ const firebaseConfig = {
   databaseURL: process.env.NEXT_PUBLIC_FIREBASE_DATABASE_URL, // Add this line
 };
 
-
-const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
+const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 const db = getFirestore(app);
-const auth = getAuth(app);
+export const auth = getAuth(app);
 const storage = getStorage(app);
 const database = getDatabase(app);  // Ensure this line is present
 
-export { app, db, auth, storage, database };  // Ensure database is exported
+export { app, db, storage, database };  // Ensure database is exported
 

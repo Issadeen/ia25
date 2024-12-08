@@ -2,8 +2,8 @@ import CredentialsProvider from "next-auth/providers/credentials";
 import { FirestoreAdapter } from '@next-auth/firebase-adapter';
 import { adminDb, adminAuth } from '@/lib/firebase-admin';
 import type { NextAuthOptions } from 'next-auth';
-import type { Session } from 'next-auth';
-import type { User } from 'next-auth';
+import { signInWithEmailAndPassword } from 'firebase/auth';
+import { auth } from '@/lib/firebase';
 
 export const authOptions: NextAuthOptions = {
   providers: [
@@ -14,24 +14,27 @@ export const authOptions: NextAuthOptions = {
         password: { label: "Password", type: "password" }
       },
       async authorize(credentials) {
-        try {
-          if (!credentials?.email || !credentials?.password) {
-            return null;
-          }
-
-          const userRecord = await adminAuth.getUserByEmail(credentials.email);
-          
-          // Here you would verify the password against Firebase
-          // For now, we're just checking if the user exists
-          if (userRecord) {
-            return {
-              id: userRecord.uid,
-              email: userRecord.email,
-              name: userRecord.displayName,
-            };
-          }
+        if (!credentials?.email || !credentials?.password) {
           return null;
-        } catch (error) {
+        }
+
+        try {
+          // First, verify the credentials with Firebase client SDK
+          const userCredential = await signInWithEmailAndPassword(
+            auth,
+            credentials.email,
+            credentials.password
+          );
+
+          // Then get the user details from Admin SDK
+          const userRecord = await adminAuth.getUser(userCredential.user.uid);
+
+          return {
+            id: userRecord.uid,
+            email: userRecord.email,
+            name: userRecord.displayName || userRecord.email?.split('@')[0],
+          };
+        } catch (error: unknown) {
           console.error('Auth error:', error);
           return null;
         }
@@ -49,9 +52,15 @@ export const authOptions: NextAuthOptions = {
     strategy: "jwt",
   },
   callbacks: {
+    async jwt({ token, user }) {
+      if (user) {
+        token.uid = user.id;
+      }
+      return token;
+    },
     async session({ session, token }) {
       if (session.user) {
-        session.user.id = token.sub as string;
+        session.user.id = token.uid as string;
       }
       return session;
     },
