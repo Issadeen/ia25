@@ -16,6 +16,9 @@ export async function GET(req: NextRequest) {
     // Now TypeScript knows session.user.id is defined
     const customToken = await adminAuth.createCustomToken(session.user.id);
 
+    // Ensure the custom Firebase token is used during login
+    session.firebaseToken = customToken;
+
     return NextResponse.json({ customToken });
   } catch (error) {
     console.error('Error creating custom token:', error);

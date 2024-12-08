@@ -34,6 +34,7 @@ declare module "next-auth/jwt" {
     email?: string;
     accessToken?: string;
     idToken?: string;
+    firebaseToken?: string;  // Add this line
     exp?: number; // Add this line
   }
 }

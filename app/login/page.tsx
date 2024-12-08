@@ -34,6 +34,9 @@ export default function LoginPage() {
       if (error.includes('CredentialsSignin')) {
         return "Invalid email or password. Please try again.";
       }
+      if (error.includes('401')) {
+        return "Unauthorized access. Please check your credentials.";
+      }
     }
     return "Authentication failed. Please check your credentials.";
   }
@@ -61,6 +64,18 @@ export default function LoginPage() {
           variant: "destructive",
         });
       } else {
+        // Fetch the custom Firebase token
+        const response = await fetch('/api/auth/firebase-token');
+        const { customToken } = await response.json();
+
+        // Validate the custom token
+        if (!customToken) {
+          throw new Error("Failed to retrieve custom Firebase token");
+        }
+
+        // Store the custom token in session storage
+        sessionStorage.setItem('firebaseToken', customToken);
+
         router.push("/dashboard");
       }
     } catch (error) {
@@ -170,4 +185,3 @@ export default function LoginPage() {
     </div>
   )
 }
-
