@@ -2,8 +2,6 @@ import CredentialsProvider from "next-auth/providers/credentials";
 import { FirestoreAdapter } from '@next-auth/firebase-adapter';
 import { adminDb, adminAuth } from '@/lib/firebase-admin';
 import type { NextAuthOptions } from 'next-auth';
-import type { User } from 'next-auth';
-import type { JWT } from 'next-auth/jwt';
 
 export const authOptions: NextAuthOptions = {
   providers: [
@@ -14,7 +12,7 @@ export const authOptions: NextAuthOptions = {
         email: { label: "Email", type: "email" },
         password: { label: "Password", type: "password" }
       },
-      async authorize(credentials, req) {
+      async authorize(credentials) {
         if (!credentials?.email || !credentials?.password) {
           throw new Error('Missing credentials');
         }
@@ -44,68 +42,43 @@ export const authOptions: NextAuthOptions = {
           const userRecord = await adminAuth.getUser(data.localId);
           return {
             id: userRecord.uid,
-            email: userRecord.email || undefined,
-            name: userRecord.displayName || userRecord.email?.split('@')[0],
+            email: userRecord.email || '',
+            name: userRecord.displayName || userRecord.email?.split('@')[0] || '',
           };
         } catch (error) {
           console.error('Auth error:', error);
-          throw error;
+          return null;
         }
       }
     })
   ],
-  adapter: FirestoreAdapter(adminDb),
-  secret: process.env.NEXTAUTH_SECRET,
-  debug: process.env.NODE_ENV === 'development',
-  pages: {
-    signIn: '/login', // point to your custom login page
-    error: '/auth/error',
-  },
   session: {
     strategy: "jwt",
-    maxAge: 30 * 24 * 60 * 60, // 30 days
+    maxAge: 30 * 24 * 60 * 60,
+  },
+  jwt: {
+    maxAge: 30 * 24 * 60 * 60,
+    secret: process.env.NEXTAUTH_SECRET,
   },
   callbacks: {
-    async signIn({ user, account }) {
-      if (account?.type === 'credentials') {
-        return true;
-      }
-      return false;
-    },
     async jwt({ token, user }) {
       if (user) {
         token.uid = user.id;
-        // Ensure email is string or undefined, not null
-        token.email = user.email || undefined;
+        token.email = user.email ?? '';
       }
-      console.log('JWT callback:', { token });
       return token;
     },
     async session({ session, token }) {
-      if (session.user) {
+      if (session?.user) {
         session.user.id = token.uid as string;
-        // Ensure email is string or undefined, not null
-        session.user.email = token.email || undefined;
+        session.user.email = token.email;
       }
-      console.log('Session callback:', { session });
       return session;
-    },
-    async redirect({ url, baseUrl }) {
-      // Handle production and development URLs
-      if (url.startsWith(baseUrl)) return url;
-      if (url.startsWith('/')) return `${baseUrl}${url}`;
-      return baseUrl;
-    },
+    }
   },
-  logger: {
-    error(code, ...message) {
-      console.error(code, message);
-    },
-    warn(code, ...message) {
-      console.warn(code, message);
-    },
-    debug(code, ...message) {
-      console.debug(code, message);
-    },
+  pages: {
+    signIn: '/login',
+    error: '/auth/error',
   },
+  debug: true,
 };
