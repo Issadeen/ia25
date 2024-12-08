@@ -6,10 +6,10 @@ import { useSession } from "next-auth/react"
 import { useRouter } from "next/navigation"
 import { useTheme } from "next-themes"
 import { ArrowLeft, Moon, Sun, Save } from "lucide-react"
-import { Button } from "components/ui/atoms/button" // Fix import path
-import { Card } from "components/ui/atoms/card"
-import { Input } from "components/ui/atoms/input"
-import { Label } from "components/ui/atoms/label"
+import { Button } from "@/components/ui/button" // Fix import path
+import { Card } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { useToast } from "components/ui/use-toast"
 import { database, storage } from "lib/firebase" // Import from lib/firebase instead
 import { ref as databaseRef } from 'firebase/database' // Rename database ref

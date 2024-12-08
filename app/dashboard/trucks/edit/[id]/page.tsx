@@ -6,14 +6,14 @@ import { useRouter, useParams } from 'next/navigation'
 import { useTheme } from 'next-themes'
 import { useToast } from 'components/ui/use-toast'
 import { ArrowLeft, Moon, Sun } from 'lucide-react'
-import { Button } from "components/ui/atoms/button"
-import { Card, CardContent, CardHeader, CardTitle } from "components/ui/atoms/card"
+import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Avatar, AvatarFallback, AvatarImage } from "components/ui/avatar"
 import { ref as databaseRef, get, update } from 'firebase/database'
 import { database, storage } from 'lib/firebase'
-import { Label } from "components/ui/atoms/label"
+import { Label } from "@/components/ui/label"
 import { ref as storageRef, getDownloadURL } from 'firebase/storage'
-import { Input } from "components/ui/atoms/input"  // Add this import
+import { Input } from "@/components/ui/input"  // Add this import
 
 interface TruckDetail {
   truck_no: string;

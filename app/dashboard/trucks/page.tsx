@@ -8,8 +8,8 @@ import { useSession } from "next-auth/react"
 import { useRouter } from 'next/navigation'
 import { useTheme } from "next-themes"
 import { Truck, Copy, Edit, Trash2, ArrowLeft, Check, ArrowUp, Moon, Sun } from 'lucide-react'
-import { Button } from "components/ui/atoms/button"
-import { Card, CardContent, CardHeader, CardTitle } from "components/ui/atoms/card"
+import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Avatar, AvatarFallback, AvatarImage } from "components/ui/avatar"
 import { ref as databaseRef, onValue, remove, get } from 'firebase/database'
 import { useToast } from "components/ui/use-toast"
@@ -18,7 +18,7 @@ import Particles from "react-tsparticles"
 import { loadSlim } from "tsparticles-slim"
 import { database } from 'lib/firebase'
 import { Skeleton } from "components/ui/skeleton"
-import { Input } from "components/ui/atoms/input"
+import { Input } from "@/components/ui/input"
 
 // Add the ParticlesBackground component from dashboard
 const ParticlesBackground = () => {

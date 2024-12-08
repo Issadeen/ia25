@@ -17,7 +17,7 @@ import {
   ChevronDown, 
   ChevronUp // Add this import
 } from "lucide-react"
-import { Card, CardContent, CardHeader, CardTitle } from "components/ui/atoms/card"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Avatar, AvatarFallback, AvatarImage } from "components/ui/avatar"
 import { getDatabase, ref as dbRef, get, query, orderByChild, equalTo, update, push, remove } from 'firebase/database'
 import { motion } from 'framer-motion'
@@ -29,13 +29,13 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "components/ui/atoms/table"
-import { Button } from "components/ui/atoms/button"
-import { Label } from "components/ui/atoms/label"
-import { Input } from "components/ui/atoms/input"
+} from "@/components/ui/table"
+import { Button } from "@/components/ui/button"
+import { Label } from "@/components/ui/label"
+import { Input } from "@/components/ui/input"
 import { storage } from "lib/firebase"
 import { getDownloadURL, ref as storageRef } from "firebase/storage"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "components/ui/atoms/dialog"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import {
   Select,
   SelectContent,

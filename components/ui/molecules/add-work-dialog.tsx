@@ -2,10 +2,10 @@
 
 // ...existing imports...
 import { useState } from "react"
-import { Button } from "components/ui/atoms/button"
-import { Input } from "components/ui/atoms/input"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "components/ui/select"
-import { Label } from "components/ui/atoms/label"
+import { Label } from "@/components/ui/label"
 import { Loader2 } from "lucide-react"
 import { database } from "lib/firebase"
 import { ref, get, query, orderByChild, equalTo } from "firebase/database"
