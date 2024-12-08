@@ -1,3 +1,4 @@
+import React from 'react'; // Add this import if missing
 import { GatePassForm } from "components/ui/molecules/GatePassForm"
 import { ThemeProvider } from 'next-themes'
 import { Toaster } from "components/ui/toaster"
