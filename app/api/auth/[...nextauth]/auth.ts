@@ -1,44 +1,59 @@
-import GoogleProvider from 'next-auth/providers/google';
+import CredentialsProvider from "next-auth/providers/credentials";
 import { FirestoreAdapter } from '@next-auth/firebase-adapter';
-import { adminDb } from '@/lib/firebase-admin';
+import { adminDb, adminAuth } from '@/lib/firebase-admin';
 import type { NextAuthOptions } from 'next-auth';
 import type { Session } from 'next-auth';
 import type { User } from 'next-auth';
 
-const AUTHORIZED_EMAILS = ['issadeenabdiali@gmail.com']; // Add your test users here
-
 export const authOptions: NextAuthOptions = {
   providers: [
-    GoogleProvider({
-      clientId: process.env.GOOGLE_CLIENT_ID ?? '',
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET ?? '',
-      authorization: {
-        params: {
-          prompt: "consent",
-          access_type: "offline",
-          response_type: "code"
+    CredentialsProvider({
+      name: 'Credentials',
+      credentials: {
+        email: { label: "Email", type: "email" },
+        password: { label: "Password", type: "password" }
+      },
+      async authorize(credentials) {
+        try {
+          if (!credentials?.email || !credentials?.password) {
+            return null;
+          }
+
+          const userRecord = await adminAuth.getUserByEmail(credentials.email);
+          
+          // Here you would verify the password against Firebase
+          // For now, we're just checking if the user exists
+          if (userRecord) {
+            return {
+              id: userRecord.uid,
+              email: userRecord.email,
+              name: userRecord.displayName,
+            };
+          }
+          return null;
+        } catch (error) {
+          console.error('Auth error:', error);
+          return null;
         }
       }
-    }),
+    })
   ],
   adapter: FirestoreAdapter(adminDb),
   secret: process.env.NEXTAUTH_SECRET,
   debug: process.env.NODE_ENV === 'development',
+  pages: {
+    signIn: '/login', // point to your custom login page
+    error: '/auth/error',
+  },
+  session: {
+    strategy: "jwt",
+  },
   callbacks: {
-    async signIn({ account, profile }) {
-      if (account?.provider === 'google') {
-        return AUTHORIZED_EMAILS.includes(profile?.email ?? '');
-      }
-      return false;
-    },
-    async session({ session, user }: { session: Session; user: User }) {
+    async session({ session, token }) {
       if (session.user) {
-        session.user.id = user.id;
+        session.user.id = token.sub as string;
       }
       return session;
     },
   },
-  pages: {
-    error: '/auth/error', // Add this page to handle auth errors
-  }
 };
