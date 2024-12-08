@@ -1,6 +1,6 @@
 import * as React from "react"
-import { Label } from "@/components/ui/label"
-import { Input } from "@/components/ui/input"
+import { Label } from "components/ui/atoms/label"
+import { Input } from "components/ui/atoms/input"
 
 interface FormFieldProps extends React.InputHTMLAttributes<HTMLInputElement> {
   label: string

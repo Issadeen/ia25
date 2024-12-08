@@ -18,8 +18,8 @@ import {
   Moon,
   Sun
 } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card"
+import { Button } from "components/ui/atoms/button"
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "components/ui/atoms/card"
 import { Avatar, AvatarFallback, AvatarImage } from "components/ui/avatar"
 import { motion, AnimatePresence } from 'framer-motion'
 import { auth, storage } from "lib/firebase"

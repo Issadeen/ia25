@@ -7,7 +7,7 @@ import { useRouter } from "next/navigation"
 import { useEffect, useState, useRef, useCallback } from "react"
 import { useTheme } from "next-themes"
 import { LogOut, Truck, Briefcase, Plus, Wallet, Moon, Sun } from 'lucide-react'
-import { Button } from "@/components/ui/button"
+import { Button } from "components/ui/atoms/button"
 import { Avatar, AvatarImage, AvatarFallback } from "components/ui/avatar"
 import { auth, storage } from "lib/firebase"
 import { ref, uploadBytes, getDownloadURL, listAll } from "firebase/storage"
@@ -19,7 +19,7 @@ import Image from 'next/image'
 import { motion, AnimatePresence } from 'framer-motion'
 import { ParticlesBackground } from "components/ParticlesBackground"
 import { DashboardCard } from "components/DashboardCard"
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
+import { Card, CardHeader, CardTitle, CardContent } from "components/ui/atoms/card"
 import { AuthWrapper } from "components/AuthWrapper"
 import { GoogleAuthProvider, signInWithCredential, User as FirebaseUser, signInWithCustomToken } from "firebase/auth"
 

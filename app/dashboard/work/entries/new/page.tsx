@@ -11,9 +11,9 @@ import {
   Sun,
   Moon,
 } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Button } from "components/ui/atoms/button"
+import { Input } from "components/ui/atoms/input"
+import { Card, CardContent, CardHeader, CardTitle } from "components/ui/atoms/card"
 import { Avatar, AvatarFallback, AvatarImage } from "components/ui/avatar"
 import { motion } from 'framer-motion'
 import { auth, storage } from "lib/firebase"
