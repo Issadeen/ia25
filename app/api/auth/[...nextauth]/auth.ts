@@ -1,5 +1,4 @@
 import CredentialsProvider from "next-auth/providers/credentials";
-import { FirestoreAdapter } from '@next-auth/firebase-adapter';
 import { adminDb, adminAuth } from '@/lib/firebase-admin';
 import type { NextAuthOptions } from 'next-auth';
 
@@ -29,13 +28,17 @@ export const authOptions: NextAuthOptions = {
           );
 
           const data = await response.json();
-          console.log('Firebase response:', response.status);
+          console.log('Firebase auth response:', data);
 
           if (!response.ok) {
+            console.error('Authentication failed:', data.error);
             return null;
           }
 
           const userRecord = await adminAuth.getUser(data.localId);
+          console.log('Fetched user record:', userRecord);
+
+          // Optionally, you can use adminDb here if needed
           return {
             id: userRecord.uid,
             email: userRecord.email || '',
