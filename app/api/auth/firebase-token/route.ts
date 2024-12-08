@@ -1,30 +1,20 @@
 export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
-import admin from 'firebase-admin';
 import { getServerSession } from 'next-auth';
-import { authOptions } from 'lib/auth';
-
-if (!admin.apps.length) {
-  admin.initializeApp({
-    credential: admin.credential.cert({
-      projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-      privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
-    }),
-    databaseURL: process.env.NEXT_PUBLIC_FIREBASE_DATABASE_URL,
-  });
-}
+import { authOptions } from '../[...nextauth]/route';
+import { adminAuth } from '@/lib/firebase-admin';
 
 export async function GET(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
 
-    if (!session?.user?.email) {
+    if (!session?.user?.email || !session?.user?.id) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const customToken = await admin.auth().createCustomToken(session.user.email);
+    // Now TypeScript knows session.user.id is defined
+    const customToken = await adminAuth.createCustomToken(session.user.id);
 
     return NextResponse.json({ customToken });
   } catch (error) {
