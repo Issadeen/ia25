@@ -2,32 +2,28 @@ import CredentialsProvider from "next-auth/providers/credentials";
 import { FirestoreAdapter } from '@next-auth/firebase-adapter';
 import { adminDb, adminAuth } from '@/lib/firebase-admin';
 import type { NextAuthOptions } from 'next-auth';
-import { signInWithEmailAndPassword } from 'firebase/auth';
-import { auth } from '@/lib/firebase';
 
 export const authOptions: NextAuthOptions = {
   providers: [
     CredentialsProvider({
-      name: 'Credentials',
       credentials: {
         email: { label: "Email", type: "email" },
         password: { label: "Password", type: "password" }
       },
       async authorize(credentials) {
         if (!credentials?.email || !credentials?.password) {
-          return null;
+          throw new Error('Missing credentials');
         }
 
         try {
-          // First, verify the credentials with Firebase client SDK
-          const userCredential = await signInWithEmailAndPassword(
-            auth,
-            credentials.email,
-            credentials.password
-          );
-
-          // Then get the user details from Admin SDK
-          const userRecord = await adminAuth.getUser(userCredential.user.uid);
+          // Get user by email using Admin SDK
+          const userRecord = await adminAuth.getUserByEmail(credentials.email);
+          
+          // Verify the password with Admin SDK
+          await adminAuth.verifyIdToken(credentials.password)
+            .catch(() => {
+              throw new Error('Invalid password');
+            });
 
           return {
             id: userRecord.uid,

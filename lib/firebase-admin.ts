@@ -1,8 +1,6 @@
 import { getApps, initializeApp, cert, App } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 import { getAuth } from 'firebase-admin/auth';
-import { signInWithEmailAndPassword } from 'firebase/auth';
-import { auth } from './firebase'; // Make sure to import your client-side Firebase auth
 
 let adminApp: App;
 
@@ -18,16 +16,6 @@ if (!getApps().length) {
 } else {
   adminApp = getApps()[0];
 }
-
-export const signInWithFirebase = async (email: string, password: string) => {
-  try {
-    const result = await signInWithEmailAndPassword(auth, email, password);
-    return result.user;
-  } catch (error) {
-    console.error('Firebase sign in error:', error);
-    throw error;
-  }
-};
 
 export const adminAuth = getAuth(adminApp);
 export const adminDb = getFirestore(adminApp);
