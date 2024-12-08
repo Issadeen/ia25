@@ -644,3 +644,12 @@ export default function DashboardPage() {
             </motion.div>
           )}
         </AnimatePresence>      </div>    </div>  )}
+
+// When accessing 'idToken', ensure it exists on 'session'
+const { data: session } = useSession();
+
+useEffect(() => {
+  if (session?.idToken) {
+    // Use 'session.idToken' here
+  }
+}, [session]);

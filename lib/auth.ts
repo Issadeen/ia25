@@ -3,39 +3,39 @@ import GoogleProvider from "next-auth/providers/google";
 import CredentialsProvider from "next-auth/providers/credentials";
 import axios from 'axios';
 import { JWT } from "next-auth/jwt"
+import { DefaultSession, DefaultUser } from "next-auth";
 
-// Add these type declarations at the top of the file
+// Module augmentation for 'next-auth'
 declare module "next-auth" {
-  interface Session {
-    user: {
-      id?: string | null;    // Modified this line
-      name?: string | null;
-      email?: string | null;
-      image?: string | null;
-    }
+  interface User extends DefaultUser {
+    id: string;
+    firebaseToken?: string;
     accessToken?: string;
+    // Add 'idToken' if you use it
     idToken?: string;
-    firebaseToken?: string;  // Add this line
-    exp?: number; // Add this line
+    refreshToken?: string; // Add this line
   }
 
-  interface User {
-    id: string;
-    refreshToken?: string;  // Add this line
-    idToken?: string;       // Add this line
-    email?: string | null;
-    firebaseToken?: string;  // Add this line
+  interface Session {
+    user: User;
+    firebaseToken?: string;
+    accessToken?: string;
+    // Add 'idToken' if you use it
+    idToken?: string;
+    refreshToken?: string; // Add this line if needed
+    exp?: number; // Add this line
   }
 }
 
+// Module augmentation for 'next-auth/jwt'
 declare module "next-auth/jwt" {
   interface JWT {
-    id?: string;
-    email?: string;
+    uid: string;
+    email?: string | null;
+    firebaseToken?: string;
     accessToken?: string;
+    // Add 'idToken' if you use it
     idToken?: string;
-    firebaseToken?: string;  // Add this line
-    exp?: number; // Add this line
   }
 }
 

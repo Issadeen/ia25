@@ -12,12 +12,6 @@ declare module "next-auth" {
     firebaseToken?: string;
     accessToken?: string;
   }
-  
-  interface Session {
-    user: User;
-    firebaseToken?: string;
-    accessToken?: string;
-  }
 }
 
 declare module "next-auth/jwt" {
@@ -119,4 +113,5 @@ export const authOptions: NextAuthOptions = {
     },
   },
   debug: process.env.NODE_ENV === 'development',
+
 };
