@@ -1,6 +1,8 @@
-"use client"
+"use client";
 
-import { useSession, signOut, getSession } from "next-auth/react"
+export const dynamic = 'force-dynamic';
+
+import { useSession, signOut } from "next-auth/react"
 import { useRouter } from "next/navigation"
 import { useEffect, useState, useRef, useCallback } from "react"
 import { useTheme } from "next-themes"
@@ -644,12 +646,3 @@ export default function DashboardPage() {
             </motion.div>
           )}
         </AnimatePresence>      </div>    </div>  )}
-
-// When accessing 'idToken', ensure it exists on 'session'
-const { data: session } = useSession();
-
-useEffect(() => {
-  if (session?.idToken) {
-    // Use 'session.idToken' here
-  }
-}, [session]);
