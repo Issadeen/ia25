@@ -1,6 +1,8 @@
-import React from 'react'; // Add this import if missing
+'use client'
+
+import React from 'react'
 import { GatePassForm } from "components/ui/molecules/GatePassForm"
-import { ThemeProvider } from 'next-themes'
+import { ThemeProvider } from '@/components/theme-provider'
 import { Toaster } from "components/ui/toaster"
 
 export default function GatePassPage() {
