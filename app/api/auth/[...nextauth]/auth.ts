@@ -8,57 +8,55 @@ import type { JWT } from 'next-auth/jwt';
 export const authOptions: NextAuthOptions = {
   providers: [
     CredentialsProvider({
+      id: 'credentials',
       name: 'Credentials',
       credentials: {
         email: { label: "Email", type: "email" },
         password: { label: "Password", type: "password" }
       },
       async authorize(credentials, req) {
+        if (!credentials?.email || !credentials?.password) {
+          throw new Error('Missing credentials');
+        }
+
         try {
-          console.log('Attempting authentication with credentials:', credentials?.email);
-          
           const response = await fetch(
             `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${process.env.NEXT_PUBLIC_FIREBASE_API_KEY}`,
             {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
-                email: credentials?.email,
-                password: credentials?.password,
+                email: credentials.email,
+                password: credentials.password,
                 returnSecureToken: true,
               }),
             }
           );
 
           const data = await response.json();
-          console.log('Firebase response status:', response.status);
 
           if (!response.ok) {
-            console.error('Firebase auth error:', data.error);
-            return null;
+            const error = data.error?.message || 'Invalid credentials';
+            console.error('Firebase auth error:', error);
+            throw new Error(error);
           }
 
           const userRecord = await adminAuth.getUser(data.localId);
-          
-          const user = {
+          return {
             id: userRecord.uid,
-            email: userRecord.email,
+            email: userRecord.email || undefined,
             name: userRecord.displayName || userRecord.email?.split('@')[0],
-            image: userRecord.photoURL,
           };
-          
-          console.log('Authentication successful:', user);
-          return user;
         } catch (error) {
           console.error('Auth error:', error);
-          return null;
+          throw error;
         }
       }
     })
   ],
   adapter: FirestoreAdapter(adminDb),
   secret: process.env.NEXTAUTH_SECRET,
-  debug: true,
+  debug: process.env.NODE_ENV === 'development',
   pages: {
     signIn: '/login', // point to your custom login page
     error: '/auth/error',
@@ -68,6 +66,12 @@ export const authOptions: NextAuthOptions = {
     maxAge: 30 * 24 * 60 * 60, // 30 days
   },
   callbacks: {
+    async signIn({ user, account }) {
+      if (account?.type === 'credentials') {
+        return true;
+      }
+      return false;
+    },
     async jwt({ token, user }) {
       if (user) {
         token.uid = user.id;
