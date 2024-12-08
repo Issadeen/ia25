@@ -3,26 +3,26 @@
 // Add AnimatePresence and motion imports
 import { motion } from 'framer-motion'
 // Add Avatar imports
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { Avatar, AvatarFallback, AvatarImage } from "components/ui/avatar"
 // Remove useTheme and Sun/Moon imports since they're now in theme-toggle
 import { useEffect, useState } from "react"
 import { useSession } from "next-auth/react"
 import { useRouter } from "next/navigation"
 import { ArrowLeft, Plus, Trash2, FileText, Loader2, Edit, Check, X, Copy } from 'lucide-react'
-import { Button } from "@/components/ui/atoms/button"
-import { Input } from "@/components/ui/atoms/input"
-import { Card } from "@/components/ui/atoms/card"
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/atoms/dialog"
-import { database, storage } from "@/lib/firebase"
+import { Button } from "components/ui/atoms/button"
+import { Input } from "components/ui/atoms/input"
+import { Card } from "components/ui/atoms/card"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "components/ui/atoms/dialog"
+import { database, storage } from "lib/firebase"
 import { ref, onValue, update, remove, push, get, query, orderByChild, equalTo, set } from "firebase/database"
 import { ref as storageRef, getDownloadURL } from "firebase/storage"
-import { toast } from "@/components/ui/use-toast"
-import { AddWorkDialog } from "@/components/ui/molecules/add-work-dialog"
-import { ThemeToggle } from "@/components/ui/molecules/theme-toggle"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { toast } from "components/ui/use-toast"
+import { AddWorkDialog } from "components/ui/molecules/add-work-dialog"
+import { ThemeToggle } from "components/ui/molecules/theme-toggle"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "components/ui/select"
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
-import { Label } from "@/components/ui/atoms/label"
+import { Label } from "components/ui/atoms/label"
 
 // Add new interfaces
 interface Payment {

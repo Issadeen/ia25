@@ -2,14 +2,14 @@
 
 // ...existing imports...
 import { useState } from "react"
-import { Button } from "@/components/ui/atoms/button"
-import { Input } from "@/components/ui/atoms/input"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Label } from "@/components/ui/atoms/label"
+import { Button } from "components/ui/atoms/button"
+import { Input } from "components/ui/atoms/input"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "components/ui/select"
+import { Label } from "components/ui/atoms/label"
 import { Loader2 } from "lucide-react"
-import { database } from "@/lib/firebase"
+import { database } from "lib/firebase"
 import { ref, get, query, orderByChild, equalTo } from "firebase/database"
-import { toast } from "@/components/ui/use-toast"
+import { toast } from "components/ui/use-toast"
 
 interface WorkFormData {
   owner: string

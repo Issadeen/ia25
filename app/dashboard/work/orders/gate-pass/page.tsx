@@ -1,6 +1,6 @@
-import { GatePassForm } from "@/components/ui/molecules/GatePassForm"
+import { GatePassForm } from "components/ui/molecules/GatePassForm"
 import { ThemeProvider } from 'next-themes'
-import { Toaster } from "@/components/ui/toaster"
+import { Toaster } from "components/ui/toaster"
 
 export default function GatePassPage() {
   return (

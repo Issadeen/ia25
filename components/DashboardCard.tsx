@@ -2,7 +2,7 @@ import { useTheme } from "next-themes"
 import { useRouter } from "next/navigation"
 import { motion } from 'framer-motion'
 import { ChevronRight } from 'lucide-react'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/atoms/card"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "components/ui/atoms/card"
 
 interface DashboardCardProps {
   icon: React.ComponentType<{ className?: string }>;

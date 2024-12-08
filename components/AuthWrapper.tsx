@@ -1,4 +1,4 @@
-import { useInactivityTimer } from '@/hooks/useInactivityTimer';
+import { useInactivityTimer } from 'hooks/useInactivityTimer';
 
 interface AuthWrapperProps {
   children: React.ReactNode;

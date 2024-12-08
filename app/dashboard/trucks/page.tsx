@@ -1,6 +1,6 @@
 'use client'
 
-import { storage } from '@/lib/firebase'
+import { storage } from 'lib/firebase'
 import { ref as storageRef, getDownloadURL, ref } from 'firebase/storage'
 import React from 'react'
 import { useState, useEffect, useCallback } from 'react'
@@ -8,17 +8,17 @@ import { useSession } from "next-auth/react"
 import { useRouter } from 'next/navigation'
 import { useTheme } from "next-themes"
 import { Truck, Copy, Edit, Trash2, ArrowLeft, Check, ArrowUp, Moon, Sun } from 'lucide-react'
-import { Button } from "@/components/ui/atoms/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/atoms/card"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { Button } from "components/ui/atoms/button"
+import { Card, CardContent, CardHeader, CardTitle } from "components/ui/atoms/card"
+import { Avatar, AvatarFallback, AvatarImage } from "components/ui/avatar"
 import { ref as databaseRef, onValue, remove, get } from 'firebase/database'
-import { useToast } from "@/components/ui/use-toast"
+import { useToast } from "components/ui/use-toast"
 import type { Engine } from "tsparticles-engine"
 import Particles from "react-tsparticles"
 import { loadSlim } from "tsparticles-slim"
-import { database } from '@/lib/firebase'
-import { Skeleton } from "@/components/ui/skeleton"
-import { Input } from "@/components/ui/atoms/input"
+import { database } from 'lib/firebase'
+import { Skeleton } from "components/ui/skeleton"
+import { Input } from "components/ui/atoms/input"
 
 // Add the ParticlesBackground component from dashboard
 const ParticlesBackground = () => {

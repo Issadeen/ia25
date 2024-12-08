@@ -3,7 +3,7 @@ export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server';
 import admin from 'firebase-admin';
 import { getServerSession } from 'next-auth';
-import { authOptions } from '@/lib/auth';
+import { authOptions } from 'lib/auth';
 
 if (!admin.apps.length) {
   admin.initializeApp({

@@ -5,13 +5,13 @@ import { useSession } from "next-auth/react"
 import { useRouter } from "next/navigation"
 import { useTheme } from "next-themes"
 import { ArrowLeft, Search, Sun, Moon } from 'lucide-react'
-import { Button } from "@/components/ui/atoms/button"
-import { Input } from "@/components/ui/atoms/input"
-import { Label } from "@/components/ui/atoms/label"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/atoms/card"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { database } from "@/lib/firebase"
-import { storage } from "@/lib/firebase"  // Add this line
+import { Button } from "components/ui/atoms/button"
+import { Input } from "components/ui/atoms/input"
+import { Label } from "components/ui/atoms/label"
+import { Card, CardContent, CardHeader, CardTitle } from "components/ui/atoms/card"
+import { Avatar, AvatarFallback, AvatarImage } from "components/ui/avatar"
+import { database } from "lib/firebase"
+import { storage } from "lib/firebase"  // Add this line
 import { get, set, query, orderByChild, equalTo, ref } from 'firebase/database'
 import { ref as storageRef, getDownloadURL } from 'firebase/storage'  // Add this line
 import * as PDFLib from 'pdf-lib'
