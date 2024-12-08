@@ -79,7 +79,7 @@ export const authOptions: NextAuthOptions = {
           };
         } catch (error) {
           console.error('Authorization error:', error);
-          return null;
+          throw new Error('Authorization failed');
         }
       }
     })
