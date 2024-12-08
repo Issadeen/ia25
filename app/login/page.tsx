@@ -38,17 +38,19 @@ export default function LoginPage() {
     return "Authentication failed. Please check your credentials.";
   }
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setIsLoading(true);
     setErrorMessage("");
+
+    const email = e.currentTarget.email.value;
+    const password = e.currentTarget.password.value;
 
     try {
       const result = await signIn("credentials", {
         email,
         password,
         redirect: false,
-        callbackUrl: "/dashboard"
       });
 
       if (result?.error) {
@@ -59,7 +61,7 @@ export default function LoginPage() {
           variant: "destructive",
         });
       } else {
-        window.location.href = "/dashboard";
+        router.push("/dashboard");
       }
     } catch (error) {
       setErrorMessage(getErrorMessage(error));
