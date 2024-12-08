@@ -1,10 +1,12 @@
-
-module.exports = {
+/** @type {import('next').NextConfig} */
+const nextConfig = {
   webpack: (config) => {
     config.resolve.fallback = {
-      // ...existing fallbacks...
-      encoding: require.resolve('encoding')
+      ...config.resolve.fallback,
+      encoding: require.resolve('encoding'),
     };
     return config;
   },
 };
+
+module.exports = nextConfig;
