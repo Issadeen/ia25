@@ -4,7 +4,14 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
-  webpack: (config) => {
+  experimental: {
+    turbo: {
+      resolveAlias: {
+        '@': '.',
+      }
+    }
+  },
+  webpack: (config, { buildId, dev, isServer, defaultLoaders, webpack }) => {
     config.resolve.alias = {
       ...config.resolve.alias,
       '@': '.',
