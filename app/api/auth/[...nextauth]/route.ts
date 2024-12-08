@@ -1,18 +1,25 @@
 import NextAuth from 'next-auth';
 import { authOptions } from './auth';
+import { NextApiRequest, NextApiResponse } from 'next';
 
 export const dynamic = 'force-dynamic';
 
-async function handler(req: Request, res: Response) {
-  // Handle CORS
-  const origin = req.headers.get('origin');
-  if (origin) {
-    res.headers.set('Access-Control-Allow-Origin', origin);
-    res.headers.set('Access-Control-Allow-Credentials', 'true');
-  }
+// Create the handler using NextAuth
+const handler = NextAuth(authOptions);
 
-  return NextAuth(authOptions)(req, res);
-}
-
+// Export the handler methods
 export { handler as GET, handler as POST };
+
+// Add OPTIONS handler for CORS
+export async function OPTIONS() {
+  return new Response(null, {
+    status: 200,
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+      'Access-Control-Allow-Credentials': 'true',
+    },
+  });
+}
 
