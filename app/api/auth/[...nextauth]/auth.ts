@@ -2,6 +2,7 @@ import CredentialsProvider from "next-auth/providers/credentials";
 import { FirestoreAdapter } from '@next-auth/firebase-adapter';
 import { adminDb, adminAuth } from '@/lib/firebase-admin';
 import type { NextAuthOptions } from 'next-auth';
+import type { User } from 'next-auth';
 
 export const authOptions: NextAuthOptions = {
   providers: [
@@ -16,14 +17,30 @@ export const authOptions: NextAuthOptions = {
         }
 
         try {
-          // Get user by email using Admin SDK
-          const userRecord = await adminAuth.getUserByEmail(credentials.email);
-          
-          // Verify the password with Admin SDK
-          await adminAuth.verifyIdToken(credentials.password)
-            .catch(() => {
-              throw new Error('Invalid password');
-            });
+          // Sign in the user using Firebase Authentication REST API
+          const response = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${process.env.NEXT_PUBLIC_FIREBASE_API_KEY}`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              email: credentials.email,
+              password: credentials.password,
+              returnSecureToken: true,
+            }),
+          });
+
+          const data = await response.json();
+
+          if (!response.ok) {
+            throw new Error(data.error.message || 'Failed to authenticate');
+          }
+
+          const idToken = data.idToken;
+
+          // Verify the ID token with Firebase Admin SDK
+          const decodedToken = await adminAuth.verifyIdToken(idToken);
+          const userRecord = await adminAuth.getUser(decodedToken.uid);
 
           return {
             id: userRecord.uid,
