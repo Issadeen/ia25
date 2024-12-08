@@ -2,30 +2,30 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
 export function middleware(request: NextRequest) {
-  // Skip auth routes completely
+  // Don't apply middleware to auth routes
   if (request.nextUrl.pathname.startsWith('/api/auth')) {
     return NextResponse.next();
   }
 
+  // Handle root redirect
+  if (request.nextUrl.pathname === '/') {
+    return NextResponse.redirect(new URL('/login', request.url));
+  }
+
   const response = NextResponse.next();
   
-  // Handle CORS for non-auth routes
-  const origin = request.headers.get('origin') || '';
-  if (['http://localhost:3000', 'https://ia25.vercel.app'].includes(origin)) {
+  // Add CORS headers
+  const origin = request.headers.get('origin');
+  if (origin && ['http://localhost:3000', 'https://ia25.vercel.app'].includes(origin)) {
     response.headers.set('Access-Control-Allow-Origin', origin);
     response.headers.set('Access-Control-Allow-Credentials', 'true');
-    response.headers.set('Access-Control-Allow-Methods', 'GET,DELETE,PATCH,POST,PUT,OPTIONS');
-    response.headers.set(
-      'Access-Control-Allow-Headers',
-      'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, Authorization'
-    );
+    response.headers.set('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
+    response.headers.set('Access-Control-Allow-Headers', '*');
   }
 
   return response;
 }
 
 export const config = {
-  matcher: [
-    '/((?!_next/static|_next/image|favicon.ico).*)',
-  ],
+  matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
 };
