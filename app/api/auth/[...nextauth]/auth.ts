@@ -7,20 +7,17 @@ import type { User } from 'next-auth';
 export const authOptions: NextAuthOptions = {
   providers: [
     CredentialsProvider({
+      name: 'Credentials',
       credentials: {
         email: { label: "Email", type: "email" },
         password: { label: "Password", type: "password" }
       },
       async authorize(credentials) {
         if (!credentials?.email || !credentials?.password) {
-          console.log('Missing credentials');
-          return null;
+          throw new Error('Missing credentials');
         }
 
         try {
-          console.log('Attempting authentication for:', credentials.email);
-          
-          // Sign in using Firebase Auth REST API
           const response = await fetch(
             `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${process.env.NEXT_PUBLIC_FIREBASE_API_KEY}`,
             {
@@ -35,49 +32,49 @@ export const authOptions: NextAuthOptions = {
           );
 
           const data = await response.json();
-          console.log('Firebase Auth Response:', response.status);
 
           if (!response.ok) {
-            console.error('Firebase Auth Error:', data.error);
-            return null;
+            throw new Error(data.error?.message || 'Authentication failed');
           }
 
-          // Get user details from Firebase Admin
           const userRecord = await adminAuth.getUser(data.localId);
-          console.log('User authenticated successfully:', userRecord.uid);
 
           return {
             id: userRecord.uid,
             email: userRecord.email,
             name: userRecord.displayName || userRecord.email?.split('@')[0],
+            image: userRecord.photoURL,
           };
         } catch (error) {
           console.error('Auth error:', error);
-          return null;
+          throw error;
         }
       }
     })
   ],
   adapter: FirestoreAdapter(adminDb),
   secret: process.env.NEXTAUTH_SECRET,
-  debug: true,
+  debug: process.env.NODE_ENV === 'development',
   pages: {
     signIn: '/login', // point to your custom login page
     error: '/auth/error',
   },
   session: {
     strategy: "jwt",
+    maxAge: 30 * 24 * 60 * 60, // 30 days
   },
   callbacks: {
-    async jwt({ token, user }) {
+    async jwt({ token, user, account }) {
       if (user) {
         token.uid = user.id;
+        token.email = user.email ?? undefined;
       }
       return token;
     },
     async session({ session, token }) {
       if (session.user) {
         session.user.id = token.uid as string;
+        session.user.email = token.email as string;
       }
       return session;
     },
