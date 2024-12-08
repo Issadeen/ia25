@@ -30,7 +30,7 @@
     "clsx": "^2.1.1",
     "file-saver": "^2.0.5",
     "firebase": "^11.0.2",
-    "firebase-admin": "^13.0.1",
+    "firebase-admin": "^11.4.1",
     "framer-motion": "^11.0.0",
     "jspdf": "^2.5.2",
     "jspdf-autotable": "^3.8.4",
