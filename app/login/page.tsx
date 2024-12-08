@@ -34,6 +34,9 @@ export default function LoginPage() {
       if (error.includes('CredentialsSignin')) {
         return "Invalid email or password. Please try again.";
       }
+      if (error.includes('401')) {
+        return "Unauthorized access. Please check your credentials.";
+      }
     }
     return "Authentication failed. Please check your credentials.";
   }
