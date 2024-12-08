@@ -4,9 +4,12 @@ import type { NextRequest } from 'next/server';
 export function middleware(request: NextRequest) {
   const response = NextResponse.next();
   const origin = request.headers.get('origin') || '';
-  
-  // Allow both local development and production URLs
   const allowedOrigins = ['http://localhost:3000', 'https://ia25.vercel.app'];
+  
+  // Redirect root to login if not authenticated
+  if (request.nextUrl.pathname === '/') {
+    return NextResponse.redirect(new URL('/login', request.url));
+  }
   
   if (allowedOrigins.includes(origin)) {
     response.headers.set('Access-Control-Allow-Origin', origin);
@@ -22,5 +25,8 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/api/:path*', '!/api/auth/:path*'], // Exclude auth routes
+  matcher: [
+    '/api/:path*',
+    '/((?!api|_next/static|_next/image|favicon.ico).*)',
+  ]
 };

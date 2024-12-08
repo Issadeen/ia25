@@ -78,6 +78,11 @@ export const authOptions: NextAuthOptions = {
       }
       return session;
     },
+    async redirect({ url, baseUrl }) {
+      // Handle production and development URLs
+      if (url.startsWith(baseUrl)) return url;
+      if (url.startsWith('/')) return `${baseUrl}${url}`;
+      return baseUrl;
+    },
   },
-  // Remove custom cookies configuration
 };
