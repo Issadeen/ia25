@@ -27,6 +27,7 @@
     "axios": "^1.7.8",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "encoding": "^0.1.13",
     "file-saver": "^2.0.5",
     "firebase": "^9.22.0",
     "firebase-admin": "^11.10.1",
@@ -36,7 +37,7 @@
     "lucide-react": "^0.300.0",
     "next": "^13.4.3",
     "next-auth": "^4.23.0",
-    "next-themes": "^0.2.0",
+    "next-themes": "^0.3.2",
     "node-fetch": "^3.3.1",
     "pdf-lib": "^1.17.1",
     "postcss": "^8.4.49",
@@ -52,8 +53,7 @@
     "tailwindcss-animate": "^1.0.7",
     "tsparticles-engine": "^2.12.0",
     "tsparticles-slim": "^2.12.0",
-    "zod": "^3.23.8",
-    "encoding": "^0.1.13"
+    "zod": "^3.23.8"
   },
   "devDependencies": {
     "@shadcn/ui": "^0.0.4",
