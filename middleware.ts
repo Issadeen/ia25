@@ -1,15 +1,21 @@
-export { default } from "next-auth/middleware";
+import { NextResponse } from 'next/server';
+import type { NextRequest } from 'next/server';
+
+export function middleware(request: NextRequest) {
+  const response = NextResponse.next();
+
+  // Add CORS headers
+  response.headers.set('Access-Control-Allow-Credentials', 'true');
+  response.headers.set('Access-Control-Allow-Origin', 'https://ia25.vercel.app');
+  response.headers.set('Access-Control-Allow-Methods', 'GET,DELETE,PATCH,POST,PUT');
+  response.headers.set(
+    'Access-Control-Allow-Headers',
+    'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version'
+  );
+
+  return response;
+}
 
 export const config = {
-  matcher: [
-    /*
-     * Match all request paths except:
-     * - api/auth (authentication routes)
-     * - _next/static (static files)
-     * - _next/image (image optimization files)
-     * - favicon.ico (favicon file)
-     * - login page
-     */
-    "/((?!api/auth|_next/static|_next/image|favicon.ico|login).*)",
-  ],
+  matcher: '/api/:path*',
 };

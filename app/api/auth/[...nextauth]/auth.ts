@@ -13,41 +13,45 @@ export const authOptions: NextAuthOptions = {
       },
       async authorize(credentials) {
         if (!credentials?.email || !credentials?.password) {
-          throw new Error('Missing credentials');
+          console.log('Missing credentials');
+          return null;
         }
 
         try {
-          // Sign in the user using Firebase Authentication REST API
-          const response = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${process.env.NEXT_PUBLIC_FIREBASE_API_KEY}`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              email: credentials.email,
-              password: credentials.password,
-              returnSecureToken: true,
-            }),
-          });
+          console.log('Attempting authentication for:', credentials.email);
+          
+          // Sign in using Firebase Auth REST API
+          const response = await fetch(
+            `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${process.env.NEXT_PUBLIC_FIREBASE_API_KEY}`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                email: credentials.email,
+                password: credentials.password,
+                returnSecureToken: true,
+              }),
+            }
+          );
 
           const data = await response.json();
+          console.log('Firebase Auth Response:', response.status);
 
           if (!response.ok) {
-            throw new Error(data.error.message || 'Failed to authenticate');
+            console.error('Firebase Auth Error:', data.error);
+            return null;
           }
 
-          const idToken = data.idToken;
-
-          // Verify the ID token with Firebase Admin SDK
-          const decodedToken = await adminAuth.verifyIdToken(idToken);
-          const userRecord = await adminAuth.getUser(decodedToken.uid);
+          // Get user details from Firebase Admin
+          const userRecord = await adminAuth.getUser(data.localId);
+          console.log('User authenticated successfully:', userRecord.uid);
 
           return {
             id: userRecord.uid,
             email: userRecord.email,
             name: userRecord.displayName || userRecord.email?.split('@')[0],
           };
-        } catch (error: unknown) {
+        } catch (error) {
           console.error('Auth error:', error);
           return null;
         }
@@ -56,7 +60,7 @@ export const authOptions: NextAuthOptions = {
   ],
   adapter: FirestoreAdapter(adminDb),
   secret: process.env.NEXTAUTH_SECRET,
-  debug: process.env.NODE_ENV === 'development',
+  debug: true,
   pages: {
     signIn: '/login', // point to your custom login page
     error: '/auth/error',
@@ -78,4 +82,16 @@ export const authOptions: NextAuthOptions = {
       return session;
     },
   },
+  cookies: {
+    sessionToken: {
+      name: `${process.env.NODE_ENV === 'production' ? '__Secure-' : ''}next-auth.session-token`,
+      options: {
+        httpOnly: true,
+        sameSite: 'lax',
+        path: '/',
+        secure: process.env.NODE_ENV === 'production',
+        domain: process.env.NODE_ENV === 'production' ? '.vercel.app' : undefined
+      }
+    }
+  }
 };
