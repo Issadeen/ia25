@@ -2,6 +2,11 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
 export function middleware(request: NextRequest) {
+  // Skip middleware for auth-related routes
+  if (request.nextUrl.pathname.startsWith('/api/auth')) {
+    return NextResponse.next();
+  }
+
   const response = NextResponse.next();
   const origin = request.headers.get('origin') || '';
   const allowedOrigins = ['http://localhost:3000', 'https://ia25.vercel.app'];
@@ -26,7 +31,6 @@ export function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    '/api/:path*',
-    '/((?!api|_next/static|_next/image|favicon.ico).*)',
-  ]
+    '/((?!_next/static|_next/image|favicon.ico).*)',
+  ],
 };

@@ -12,21 +12,13 @@ export { handler as GET, handler as POST };
 
 // Add OPTIONS handler for CORS
 export async function OPTIONS(req: Request) {
-  const origin = req.headers.get('origin') || '';
-  const allowedOrigins = ['http://localhost:3000', 'https://ia25.vercel.app'];
-  
-  if (!allowedOrigins.includes(origin)) {
-    return new Response(null, { status: 204 });
-  }
-
   return new Response(null, {
     status: 200,
     headers: {
-      'Access-Control-Allow-Origin': origin,
-      'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Headers': '*',
       'Access-Control-Allow-Credentials': 'true',
-      'Access-Control-Max-Age': '86400',
     },
   });
 }
