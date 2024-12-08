@@ -29,7 +29,7 @@
     "clsx": "^2.1.1",
     "encoding": "^0.1.13",
     "file-saver": "^2.0.5",
-    "firebase": "^9.22.0",
+    "firebase": "^10.9.0",
     "firebase-admin": "^11.10.1",
     "framer-motion": "^10.12.16",
     "jspdf": "^2.5.2",
