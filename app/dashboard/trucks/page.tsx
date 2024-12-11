@@ -1,7 +1,10 @@
 'use client'
 
 import { storage, database } from '@/lib/firebase'
-import { ref as storageRef, getDownloadURL, ref } from 'firebase/storage'
+import type { FirebaseStorage } from 'firebase/storage'
+import type { Database } from 'firebase/database'
+import { ref as storageRef, getDownloadURL } from 'firebase/storage'
+import { ref as databaseRef, onValue, remove, get } from 'firebase/database'
 import React from 'react'
 import { useState, useEffect, useCallback } from 'react'
 import { useSession } from "next-auth/react"
@@ -11,7 +14,6 @@ import { Truck, Copy, Edit, Trash2, ArrowLeft, Check, ArrowUp, Moon, Sun } from 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { ref as databaseRef, onValue, remove, get } from 'firebase/database'
 import { useToast } from "@/components/ui/use-toast"
 import type { Engine } from "tsparticles-engine"
 import Particles from "react-tsparticles"
@@ -231,6 +233,7 @@ const TruckDetails: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('')
   const [isLoading, setIsLoading] = useState(true) // Add loading state
   const [lastUploadedImage, setLastUploadedImage] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null);
 
   // Add mounted state
   useEffect(() => {
@@ -244,26 +247,51 @@ const TruckDetails: React.FC = () => {
     }
   }, [status, router])
 
-  // Update the data fetching effect
+  // Update the data fetching effect with better error handling
   useEffect(() => {
-    if (!database) return; // Add this check
-    
-    const trucksRef = databaseRef(database, 'trucks');
-    const unsubscribe = onValue(trucksRef, (snapshot) => {
-      const data = snapshot.val();
-      if (data) {
-        const truckList = Object.keys(data).map(key => ({
-          id: key,
-          ...data[key]
-        }));
-        setTrucks(truckList);
-      }
+    if (!database) {
+      setError('Database not initialized');
       setIsLoading(false);
-    });
+      return;
+    }
+    
+    try {
+      const trucksRef = databaseRef(database, 'trucks');
+      const unsubscribe = onValue(trucksRef, 
+        (snapshot) => {
+          try {
+            const data = snapshot.val();
+            if (data) {
+              const truckList = Object.keys(data).map(key => ({
+                id: key,
+                ...data[key]
+              }));
+              setTrucks(truckList);
+            } else {
+              setTrucks([]); // Set empty array if no data
+            }
+          } catch (err) {
+            console.error('Error processing trucks data:', err);
+            setError('Error loading trucks');
+          } finally {
+            setIsLoading(false);
+          }
+        },
+        (error) => {
+          console.error('Database error:', error);
+          setError('Error connecting to database');
+          setIsLoading(false);
+        }
+      );
 
-    // Cleanup subscription on unmount
-    return () => unsubscribe();
-  }, [])
+      // Cleanup subscription
+      return () => unsubscribe();
+    } catch (err) {
+      console.error('Setup error:', err);
+      setError('Error setting up database connection');
+      setIsLoading(false);
+    }
+  }, []);
 
   // Add this single effect for profile picture handling
   useEffect(() => {
@@ -447,6 +475,28 @@ const TruckDetails: React.FC = () => {
     truck.driver.toLowerCase().includes(searchQuery.toLowerCase()) ||
     truck.transporter.toLowerCase().includes(searchQuery.toLowerCase())
   )
+
+  // Add error display in the render
+  if (error) {
+    return (
+      <div className="flex items-center justify-center min-h-screen p-4">
+        <Card className="w-full max-w-md">
+          <CardHeader>
+            <CardTitle className="text-red-500">Error</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p>{error}</p>
+            <Button 
+              className="mt-4"
+              onClick={() => window.location.reload()}
+            >
+              Retry
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   // Return loading state if not mounted
   if (!mounted) {
