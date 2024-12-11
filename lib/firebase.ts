@@ -31,34 +31,57 @@ const validateConfig = () => {
 
   if (missingFields.length > 0) {
     throw new Error(
-      `Missing Firebase configuration fields: ${missingFields.join(', ')}`
-    );
+      `Missing Firebase configuration fields: ${missingFields.join(', ')}`)
   }
 };
 
-// Initialize Firebase with validation
-let app: FirebaseApp;
-let auth: Auth;
-let storage: FirebaseStorage;
-let database: Database;
+// Initialize Firebase with validation and retry mechanism
+let app: FirebaseApp | undefined;
+let auth: Auth | undefined;
+let storage: FirebaseStorage | undefined;
+let database: Database | undefined;
+let initializationAttempts = 0;
+const MAX_ATTEMPTS = 3;
 
-try {
-  validateConfig();
-  
-  if (!getApps().length) {
-    app = initializeApp(firebaseConfig);
-  } else {
-    app = getApps()[0];
+const initializeFirebase = async () => {
+  try {
+    validateConfig();
+    
+    if (!getApps().length) {
+      app = initializeApp(firebaseConfig);
+    } else {
+      app = getApps()[0];
+    }
+
+    if (!app) throw new Error('Failed to initialize Firebase app');
+
+    auth = getAuth(app);
+    await setPersistence(auth, browserLocalPersistence);
+    storage = getStorage(app);
+    database = getDatabase(app);
+
+    return true;
+  } catch (error) {
+    console.error(`Firebase initialization attempt ${initializationAttempts + 1} failed:`, error);
+    return false;
   }
+};
 
-  auth = getAuth(app);
-  setPersistence(auth, browserLocalPersistence);
-  storage = getStorage(app);
-  database = getDatabase(app);
-} catch (error) {
-  console.error('Firebase initialization error:', error);
-  // In production, you might want to show a user-friendly error
-}
+// Try to initialize Firebase with retries
+const initializeWithRetry = async () => {
+  while (initializationAttempts < MAX_ATTEMPTS && !database) {
+    const success = await initializeFirebase();
+    if (success) break;
+    initializationAttempts++;
+    await new Promise(resolve => setTimeout(resolve, 1000 * initializationAttempts));
+  }
+};
 
-export { auth, storage, database };
+// Initialize immediately
+initializeWithRetry();
+
+// Export with getters to ensure initialization
+export const getFirebaseAuth = () => auth;
+export const getFirebaseStorage = () => storage;
+export const getFirebaseDatabase = () => database;
 

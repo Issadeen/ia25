@@ -6,26 +6,29 @@ let adminAuth: Auth | undefined;
 export const initAdmin = () => {
   try {
     if (!getApps().length) {
-      const projectId = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
-      if (!projectId) {
-        throw new Error('NEXT_PUBLIC_FIREBASE_PROJECT_ID is not defined');
+      const privateKey = process.env.FIREBASE_PRIVATE_KEY;
+      if (!privateKey) {
+        throw new Error('FIREBASE_PRIVATE_KEY is not defined');
+      }
+
+      const serviceAccount = {
+        projectId: process.env.FIREBASE_PROJECT_ID,
+        clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+        privateKey: privateKey.replace(/\\n/g, '\n'),
+      };
+
+      // Validate required credentials
+      if (!serviceAccount.projectId || !serviceAccount.clientEmail) {
+        throw new Error('Missing Firebase Admin credentials');
       }
 
       initializeApp({
-        credential: cert({
-          projectId: projectId,
-          clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-          privateKey: process.env.FIREBASE_PRIVATE_KEY 
-            ? process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n') 
-            : undefined,
-        }),
+        credential: cert(serviceAccount),
+        databaseURL: process.env.NEXT_PUBLIC_FIREBASE_DATABASE_URL,
       });
     }
 
-    if (!adminAuth) {
-      adminAuth = getAuth();
-    }
-    return adminAuth;
+    return getAuth();
   } catch (error) {
     console.error('Firebase Admin Init Error:', error);
     throw error;

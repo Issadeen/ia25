@@ -1,6 +1,6 @@
 'use client'
 
-import { auth, storage, database } from '@/lib/firebase'
+import { getFirebaseAuth, getFirebaseStorage, getFirebaseDatabase } from '@/lib/firebase'
 import { signInWithCustomToken } from 'firebase/auth'
 import type { FirebaseStorage } from 'firebase/storage'
 import type { Database } from 'firebase/database'
@@ -253,18 +253,29 @@ const TruckDetails: React.FC = () => {
   useEffect(() => {
     const initializeAuth = async () => {
       if (!session?.user?.email) return;
-      
+
       try {
-        // Get custom token from your backend
+        const auth = getFirebaseAuth();
+        if (!auth) {
+          throw new Error('Firebase auth is not initialized');
+        }
+
         const response = await fetch('/api/auth/firebase-token');
-        if (!response.ok) throw new Error('Failed to get Firebase token');
-        
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`Failed to get Firebase token: ${errorText}`);
+        }
+
         const { customToken } = await response.json();
+        if (!customToken) {
+          throw new Error('Custom token is missing in the response');
+        }
+
         await signInWithCustomToken(auth, customToken);
         setAuthInitialized(true);
       } catch (error) {
         console.error('Firebase auth error:', error);
-        setError('Authentication failed');
+        setError(error instanceof Error ? error.message : 'Authentication failed');
       }
     };
 
@@ -273,7 +284,10 @@ const TruckDetails: React.FC = () => {
 
   // Update the data fetching effect with better error handling
   useEffect(() => {
-    if (!database || !authInitialized) {
+    if (!authInitialized) return;
+
+    const database = getFirebaseDatabase();
+    if (!database) {
       setError('Database not initialized');
       setIsLoading(false);
       return;
@@ -321,7 +335,10 @@ const TruckDetails: React.FC = () => {
   useEffect(() => {
     const fetchImageUrl = async () => {
       const userEmail = session?.user?.email
-      if (!userEmail || session?.user?.image) return
+      if (!userEmail || session?.user?.image) return;
+
+      const storage = getFirebaseStorage();
+      if (!storage) return;
 
       try {
         const filename = `${userEmail}.jpg`
@@ -341,6 +358,16 @@ const TruckDetails: React.FC = () => {
       toast({
         title: "Error",
         description: "You must be logged in to delete",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    const database = getFirebaseDatabase();
+    if (!database) {
+      toast({
+        title: "Error",
+        description: "Database not initialized",
         variant: "destructive"
       });
       return;
@@ -411,6 +438,9 @@ const TruckDetails: React.FC = () => {
 
   // Modify the verify access function to handle typing
   const verifyAccess = async (workId: string): Promise<{ email: string; workId: string } | null> => {
+    const database = getFirebaseDatabase();
+    if (!database) return null;
+    
     const usersRef = databaseRef(database, 'users');
     const snapshot = await get(usersRef);
     

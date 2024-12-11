@@ -1,13 +1,13 @@
 "use client";
 
+// Update imports to use getters
+import { getFirebaseAuth, getFirebaseStorage } from "@/lib/firebase";
 import { useSession, signOut } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, useCallback } from "react";
 import { useTheme } from "next-themes";
 import { toast } from "@/components/ui/use-toast";
 import { motion, AnimatePresence } from "framer-motion";
-import { auth, storage } from "@/lib/firebase";
-import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { updateProfile, User as FirebaseUser } from "firebase/auth";
 import {
   GoogleAuthProvider,
@@ -83,7 +83,7 @@ export default function DashboardPage() {
 
   useEffect(() => {
     const initFirebase = async () => {
-      if (status !== "authenticated" || auth.currentUser) {
+      if (status !== "authenticated" || getFirebaseAuth().currentUser) {
         return;
       }
 
@@ -94,7 +94,7 @@ export default function DashboardPage() {
         }
         
         const { customToken } = await response.json();
-        await signInWithCustomToken(auth, customToken);
+        await signInWithCustomToken(getFirebaseAuth(), customToken);
       } catch (error) {
         console.error("Firebase Auth Error:", error);
         toast({
@@ -110,8 +110,11 @@ export default function DashboardPage() {
 
   useEffect(() => {
     const fetchProfilePic = async () => {
+      const storage = getFirebaseStorage();
+      if (!storage || !session?.user?.email) return;
+
       try {
-        const currentUser = auth.currentUser as FirebaseUser | null;
+        const currentUser = getFirebaseAuth().currentUser as FirebaseUser | null;
 
         if (!currentUser) return;
 
@@ -140,13 +143,16 @@ export default function DashboardPage() {
       }
     };
 
-    if (auth.currentUser || profileUpdated) {
+    if (getFirebaseAuth().currentUser || profileUpdated) {
       fetchProfilePic();
     }
-  }, [auth.currentUser, profileUpdated]);
+  }, [getFirebaseAuth().currentUser, profileUpdated]);
 
   const handleUploadImage = useCallback(
     async (imageBlob: Blob) => {
+      const auth = getFirebaseAuth();
+      const storage = getFirebaseStorage();
+
       if (!auth.currentUser) {
         toast({
           title: "Error",

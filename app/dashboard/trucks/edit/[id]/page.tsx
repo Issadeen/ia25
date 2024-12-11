@@ -10,10 +10,10 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { ref as databaseRef, get, update } from 'firebase/database'
-import { database, storage } from '@/lib/firebase'
-import { Label } from "@/components/ui/label"
 import { ref as storageRef, getDownloadURL } from 'firebase/storage'
-import { Input } from "@/components/ui/input"  // Add this import
+import { getFirebaseDatabase, getFirebaseStorage } from '@/lib/firebase'
+import { Label } from "@/components/ui/label"
+import { Input } from "@/components/ui/input"
 
 interface TruckDetail {
   truck_no: string;
@@ -93,30 +93,42 @@ export default function EditTruck() {
   // Fetch truck data once verified
   useEffect(() => {
     if (isVerified && params.id) {
-      // Fetch the truck data from Firebase
-      const truckRef = databaseRef(database, `trucks/${params.id}`) // Changed ref to databaseRef
+      const database = getFirebaseDatabase();
+      if (!database) {
+        toast({
+          title: 'Error',
+          description: 'Database not initialized',
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      const truckRef = databaseRef(database, `trucks/${params.id}`);
       get(truckRef).then((snapshot) => {
         if (snapshot.exists()) {
-          setTruckData(snapshot.val() as TruckDetail)
+          setTruckData(snapshot.val() as TruckDetail);
         } else {
           toast({
             title: 'Error',
             description: 'Truck not found',
             variant: 'destructive',
-          })
-          router.push('/dashboard/trucks')
+          });
+          router.push('/dashboard/trucks');
         }
-        setLoading(false)
-      })
+        setLoading(false);
+      });
     }
-  }, [isVerified, params.id, router, toast])
+  }, [isVerified, params.id, router, toast]);
 
   useEffect(() => {
     const fetchImageUrl = async () => {
       if (session?.user?.email && !session?.user?.image) {
-        const path = generateProfileImageFilename(session.user.email); // Define `path` outside `try`
+        const storage = getFirebaseStorage();
+        if (!storage) return;
+
+        const path = generateProfileImageFilename(session.user.email);
         try {
-          const url = await getDownloadURL(storageRef(storage, `profile-pics/${path}`)); // Use `storageRef` from 'firebase/storage'
+          const url = await getDownloadURL(storageRef(storage, `profile-pics/${path}`));
           if (url) {
             setLastUploadedImage(url);
           }
@@ -135,24 +147,34 @@ export default function EditTruck() {
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!truckData || !params.id || !isVerified) return
+    e.preventDefault();
+    if (!truckData || !params.id || !isVerified) return;
+
+    const database = getFirebaseDatabase();
+    if (!database) {
+      toast({
+        title: 'Error',
+        description: 'Database not initialized',
+        variant: 'destructive',
+      });
+      return;
+    }
 
     try {
-      await update(databaseRef(database, `trucks/${params.id}`), truckData) // Changed ref to databaseRef
+      await update(databaseRef(database, `trucks/${params.id}`), truckData);
       toast({
         title: "Success",
         description: "Truck details updated successfully",
-      })
-      router.push('/dashboard/trucks')
+      });
+      router.push('/dashboard/trucks');
     } catch (error) {
       toast({
         title: "Error",
         description: "Failed to update truck details",
         variant: "destructive"
-      })
+      });
     }
-  }
+  };
 
   const handleInputChange = (field: keyof TruckDetail, value: string) => {
     if (truckData) {

@@ -11,14 +11,25 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const adminAuth = initAdmin();
-    const customToken = await adminAuth.createCustomToken(session.user.email);
-    
-    return NextResponse.json({ customToken });
-  } catch (error) {
-    console.error('Firebase token error:', error);
+    try {
+      const adminAuth = initAdmin();
+      if (!adminAuth) {
+        throw new Error('Failed to initialize Firebase Admin');
+      }
+      
+      const customToken = await adminAuth.createCustomToken(session.user.email);
+      return NextResponse.json({ customToken });
+    } catch (adminError: any) {
+      console.error('Firebase admin error:', adminError);
+      return NextResponse.json(
+        { error: 'Firebase authentication failed', details: adminError.message },
+        { status: 500 }
+      );
+    }
+  } catch (error: any) {
+    console.error('Session error:', error);
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: 'Session validation failed', details: error.message },
       { status: 500 }
     );
   }

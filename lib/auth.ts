@@ -1,7 +1,6 @@
-
 import { AuthOptions } from "next-auth"
 import CredentialsProvider from "next-auth/providers/credentials"
-import { auth as firebaseAuth } from "@/lib/firebase"
+import { getFirebaseAuth } from "@/lib/firebase"
 import { signInWithEmailAndPassword } from "firebase/auth"
 
 export const authOptions: AuthOptions = {
@@ -13,28 +12,31 @@ export const authOptions: AuthOptions = {
         password: { label: "Password", type: "password" }
       },
       async authorize(credentials) {
-        if (!credentials?.email || !credentials?.password) return null
-        
         try {
-          const userCredential = await signInWithEmailAndPassword(
-            firebaseAuth,
+          if (!credentials?.email || !credentials?.password) return null
+          
+          const auth = getFirebaseAuth();
+          if (!auth) throw new Error('Firebase auth not initialized');
+
+          const { user } = await signInWithEmailAndPassword(
+            auth,
             credentials.email,
             credentials.password
           )
-          
-          const user = userCredential.user
-          
-          if (user) {
-            return {
-              id: user.uid,
-              email: user.email || '',
-              name: user.displayName || user.email?.split('@')[0] || '',
-              image: user.photoURL || '',
-            }
+
+          if (!user.email) {
+            throw new Error('No email associated with user');
           }
-          return null
+
+          return {
+            id: user.uid,
+            email: user.email, // This is now guaranteed to be string
+            name: user.displayName || user.email, // Fallback to email if no display name
+            image: user.photoURL || null,
+          }
+
         } catch (error) {
-          console.error("Auth error:", error)
+          console.error('Auth error:', error)
           return null
         }
       }
