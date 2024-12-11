@@ -137,9 +137,6 @@ export default function DashboardPage() {
           if (!storage) {
             throw new Error('Firebase storage is not initialized');
           }
-          if (!storage) {
-            throw new Error('Firebase storage is not initialized');
-          }
           const imageRef = ref(storage, fileName);
 
           try {
@@ -183,6 +180,9 @@ export default function DashboardPage() {
           /[.@]/g,
           "_"
         )}.jpg`;
+        if (!storage) {
+          throw new Error('Firebase storage is not initialized');
+        }
         const imageRef = ref(storage, fileName);
 
         const metadata = {
