@@ -1,6 +1,7 @@
 'use client'
 
-import { storage, database } from '@/lib/firebase'
+import { auth, storage, database } from '@/lib/firebase'
+import { signInWithCustomToken } from 'firebase/auth'
 import type { FirebaseStorage } from 'firebase/storage'
 import type { Database } from 'firebase/database'
 import { ref as storageRef, getDownloadURL } from 'firebase/storage'
@@ -234,6 +235,7 @@ const TruckDetails: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true) // Add loading state
   const [lastUploadedImage, setLastUploadedImage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null);
+  const [authInitialized, setAuthInitialized] = useState(false);
 
   // Add mounted state
   useEffect(() => {
@@ -247,9 +249,31 @@ const TruckDetails: React.FC = () => {
     }
   }, [status, router])
 
+  // Add Firebase authentication effect
+  useEffect(() => {
+    const initializeAuth = async () => {
+      if (!session?.user?.email) return;
+      
+      try {
+        // Get custom token from your backend
+        const response = await fetch('/api/auth/firebase-token');
+        if (!response.ok) throw new Error('Failed to get Firebase token');
+        
+        const { customToken } = await response.json();
+        await signInWithCustomToken(auth, customToken);
+        setAuthInitialized(true);
+      } catch (error) {
+        console.error('Firebase auth error:', error);
+        setError('Authentication failed');
+      }
+    };
+
+    initializeAuth();
+  }, [session?.user?.email]);
+
   // Update the data fetching effect with better error handling
   useEffect(() => {
-    if (!database) {
+    if (!database || !authInitialized) {
       setError('Database not initialized');
       setIsLoading(false);
       return;
@@ -291,7 +315,7 @@ const TruckDetails: React.FC = () => {
       setError('Error setting up database connection');
       setIsLoading(false);
     }
-  }, []);
+  }, [authInitialized]);
 
   // Add this single effect for profile picture handling
   useEffect(() => {

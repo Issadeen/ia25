@@ -1,5 +1,5 @@
 import { initializeApp, getApps, FirebaseApp } from 'firebase/app';
-import { getAuth, Auth } from 'firebase/auth';
+import { getAuth, Auth, setPersistence, browserLocalPersistence } from 'firebase/auth';
 import { getStorage, FirebaseStorage } from 'firebase/storage';
 import { getDatabase, Database } from 'firebase/database';
 
@@ -52,6 +52,7 @@ try {
   }
 
   auth = getAuth(app);
+  setPersistence(auth, browserLocalPersistence);
   storage = getStorage(app);
   database = getDatabase(app);
 } catch (error) {
