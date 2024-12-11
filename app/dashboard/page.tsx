@@ -2,6 +2,7 @@
 
 // Update imports to use getters
 import { getFirebaseAuth, getFirebaseStorage } from "@/lib/firebase";
+import { ref, getDownloadURL, uploadBytes } from "firebase/storage";
 import { useSession, signOut } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, useCallback } from "react";
@@ -83,7 +84,7 @@ export default function DashboardPage() {
 
   useEffect(() => {
     const initFirebase = async () => {
-      if (status !== "authenticated" || getFirebaseAuth().currentUser) {
+      if (status !== "authenticated" || getFirebaseAuth()?.currentUser) {
         return;
       }
 
@@ -94,7 +95,11 @@ export default function DashboardPage() {
         }
         
         const { customToken } = await response.json();
-        await signInWithCustomToken(getFirebaseAuth(), customToken);
+        const auth = getFirebaseAuth();
+        if (!auth) {
+          throw new Error('Firebase auth is not initialized');
+        }
+        await signInWithCustomToken(auth, customToken);
       } catch (error) {
         console.error("Firebase Auth Error:", error);
         toast({
@@ -111,10 +116,14 @@ export default function DashboardPage() {
   useEffect(() => {
     const fetchProfilePic = async () => {
       const storage = getFirebaseStorage();
-      if (!storage || !session?.user?.email) return;
+      const userEmail = session?.user?.email;
+
+      if (!storage || !userEmail) return;
 
       try {
-        const currentUser = getFirebaseAuth().currentUser as FirebaseUser | null;
+        const fileRef = ref(storage, `profile-pics/${userEmail}.jpg`);
+        const auth = getFirebaseAuth();
+        const currentUser = auth ? (auth.currentUser as FirebaseUser | null) : null;
 
         if (!currentUser) return;
 
@@ -125,6 +134,12 @@ export default function DashboardPage() {
             /[.@]/g,
             "_"
           )}.jpg`;
+          if (!storage) {
+            throw new Error('Firebase storage is not initialized');
+          }
+          if (!storage) {
+            throw new Error('Firebase storage is not initialized');
+          }
           const imageRef = ref(storage, fileName);
 
           try {
@@ -143,17 +158,18 @@ export default function DashboardPage() {
       }
     };
 
-    if (getFirebaseAuth().currentUser || profileUpdated) {
+    const auth = getFirebaseAuth();
+    if (auth?.currentUser || profileUpdated) {
       fetchProfilePic();
     }
-  }, [getFirebaseAuth().currentUser, profileUpdated]);
+  }, [getFirebaseAuth()?.currentUser, profileUpdated]);
 
   const handleUploadImage = useCallback(
     async (imageBlob: Blob) => {
       const auth = getFirebaseAuth();
       const storage = getFirebaseStorage();
 
-      if (!auth.currentUser) {
+      if (!auth || !auth.currentUser) {
         toast({
           title: "Error",
           description: "You must be logged in to upload images",
@@ -206,6 +222,63 @@ export default function DashboardPage() {
     },
     [toast, update]
   );
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files?.[0]) return;
+
+    try {
+      const storage = getFirebaseStorage();
+      if (!storage) {
+        throw new Error('Storage is not initialized');
+      }
+
+      // Create an array of supported image types
+      const supportedTypes = ['image/jpeg', 'image/png', 'image/gif'];
+      const file = e.target.files[0];
+
+      if (!supportedTypes.includes(file.type)) {
+        toast({
+          title: "Error",
+          description: "Please upload a valid image file (JPEG, PNG, or GIF)",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const email = session?.user?.email;
+      if (!email) {
+        throw new Error('User email not found');
+      }
+
+      const fileRef = ref(storage, `profile-pics/${email}.jpg`);
+      // ...rest of the upload logic...
+    } catch (error) {
+      console.error('File upload error:', error);
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to upload image",
+        variant: "destructive",
+      });
+    }
+  };
+
+  useEffect(() => {
+    const fetchUserImage = async () => {
+      const storage = getFirebaseStorage();
+      if (!storage || !session?.user?.email) return;
+
+      try {
+        const path = `profile-pics/${session.user.email}.jpg`;
+        const imageRef = ref(storage, path);
+        const url = await getDownloadURL(imageRef);
+        // ...rest of image fetching logic...
+      } catch (error) {
+        console.error('Error fetching user image:', error);
+      }
+    };
+
+    fetchUserImage();
+  }, [session?.user?.email]);
 
   if (status === "loading") return null;
 
