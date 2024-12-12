@@ -853,6 +853,37 @@ export default function WorkManagementPage() {
     return () => unsubscribe();
   }, []);
 
+  // Inside the component, add this new useEffect
+  useEffect(() => {
+    // Monitor payments and update work details
+    const paymentsRef = ref(database, 'truckPayments');
+    const unsubscribe = onValue(paymentsRef, async (snapshot) => {
+      if (snapshot.exists()) {
+        const payments = snapshot.val();
+        // Update work details that have payments
+        const updates: { [key: string]: any } = {};
+        
+        Object.keys(payments).forEach((truckId) => {
+          const truckPayments = Object.values(payments[truckId]) as TruckPayment[];
+          const totalPaid = truckPayments.reduce((sum, payment) => sum + payment.amount, 0);
+          const workDetail = workDetails.find(w => w.id === truckId);
+          
+          if (workDetail && workDetail.at20) {
+            const totalDue = parseFloat(workDetail.price) * parseFloat(workDetail.at20);
+            updates[`work_details/${truckId}/paid`] = totalPaid >= totalDue;
+            updates[`work_details/${truckId}/paymentPending`] = totalPaid < totalDue;
+          }
+        });
+
+        if (Object.keys(updates).length > 0) {
+          await update(ref(database), updates);
+        }
+      }
+    });
+
+    return () => unsubscribe();
+  }, [workDetails]);
+
   // 4. Early return after hooks
   if (!mounted) {
     return null
