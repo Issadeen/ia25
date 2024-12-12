@@ -1,9 +1,9 @@
 'use client'
 
 import React from 'react'
-import { GatePassForm } from "components/ui/molecules/GatePassForm"
+import { GatePassForm } from "@/components/ui/molecules/GatePassForm"
 import { ThemeProvider } from '@/components/theme-provider'
-import { Toaster } from "components/ui/toaster"
+import { Toaster } from "@/components/ui/toaster"
 
 export default function GatePassPage() {
   return (
