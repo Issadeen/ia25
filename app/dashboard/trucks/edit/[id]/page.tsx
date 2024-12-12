@@ -40,6 +40,12 @@ const truckFormSchema = z.object({
 
 type TruckFormData = z.infer<typeof truckFormSchema>;
 
+const calculateTotal = (values: string[]): number => {
+  return values
+    .filter(val => val && !isNaN(parseFloat(val)))
+    .reduce((sum, val) => sum + parseFloat(val), 0);
+};
+
 export default function EditTruckPage({ params }: any) { // Change type to any temporarily
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -254,8 +260,15 @@ export default function EditTruckPage({ params }: any) { // Change type to any t
           <div className="grid grid-cols-1 gap-4 sm:gap-6">
             <Card className="shadow-sm">
               <CardHeader className="p-4 sm:p-6">
-                <CardTitle className="text-lg sm:text-xl">AGO Compartments</CardTitle>
-                <CardDescription className="text-sm">Edit AGO compartment values</CardDescription>
+                <div className="flex justify-between items-center">
+                  <div>
+                    <CardTitle className="text-lg sm:text-xl">AGO Compartments</CardTitle>
+                    <CardDescription className="text-sm">Edit AGO compartment values</CardDescription>
+                  </div>
+                  <div className="text-emerald-600 dark:text-emerald-400 font-semibold">
+                    Total: {calculateTotal(form.watch("ago_comps")).toFixed(1)}
+                  </div>
+                </div>
               </CardHeader>
               <CardContent className="p-4 sm:p-6">
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
@@ -287,8 +300,15 @@ export default function EditTruckPage({ params }: any) { // Change type to any t
 
             <Card className="shadow-sm">
               <CardHeader className="p-4 sm:p-6">
-                <CardTitle className="text-lg sm:text-xl">PMS Compartments</CardTitle>
-                <CardDescription className="text-sm">Edit PMS compartment values</CardDescription>
+                <div className="flex justify-between items-center">
+                  <div>
+                    <CardTitle className="text-lg sm:text-xl">PMS Compartments</CardTitle>
+                    <CardDescription className="text-sm">Edit PMS compartment values</CardDescription>
+                  </div>
+                  <div className="text-emerald-600 dark:text-emerald-400 font-semibold">
+                    Total: {calculateTotal(form.watch("pms_comps")).toFixed(1)}
+                  </div>
+                </div>
               </CardHeader>
               <CardContent className="p-4 sm:p-6">
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
