@@ -70,6 +70,18 @@ interface PendingOrderSummary {
   }[];
 }
 
+// Add this interface with your other interfaces
+interface AllocationReport {
+  truckNumber: string;
+  volume: string;
+  at20: string;
+  owner: string;
+  product: string;
+  entryUsed: string;
+  allocationDate: string;
+  entryDestination: string;
+}
+
 export default function EntriesPage() {
   // Add to existing state declarations
   const searchParams = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '');
@@ -706,6 +718,20 @@ export default function EntriesPage() {
           return
         }
       }
+
+      // Get truck details from work_details to find the owner
+      const workDetailsRef = dbRef(db, 'work_details')
+      const workDetailsSnapshot = await get(query(
+        workDetailsRef,
+        orderByChild('truck_number'),
+        equalTo(truckNumber)
+      ))
+
+      let owner = 'Unknown'
+      if (workDetailsSnapshot.exists()) {
+        const workDetail = Object.values(workDetailsSnapshot.val())[0] as any
+        owner = workDetail.owner
+      }
   
       // Now proceed with allocation
       let required = parseFloat(at20Quantity)
@@ -752,6 +778,37 @@ export default function EntriesPage() {
           timestamp: Date.now()
         }
         await push(truckEntryRef, truckEntryData)
+
+        // Create allocation report
+        const reportData: AllocationReport = {
+          truckNumber,
+          volume: required.toString(),
+          at20: at20Quantity,
+          owner,
+          product,
+          entryUsed: permitEntry.number,
+          allocationDate: new Date().toISOString(),
+          entryDestination: destination
+        }
+
+        // Add report to updates
+        const reportRef = push(dbRef(db, 'allocation_reports'))
+        updates[`allocation_reports/${reportRef.key}`] = reportData
+  
+        // Apply all updates in one transaction
+        await update(dbRef(db), updates)
+  
+        setOriginalData(tempOriginalData)
+        setEntriesData(allocations)
+  
+        toast({
+          title: "Allocation Successful",
+          description: `Allocated ${required.toFixed(2)} liters to truck ${truckNumber}`
+        })
+  
+        // Clear form after successful allocation
+        clearForm()
+  
       } else {
         toast({
           title: "Insufficient Quantity",
@@ -761,20 +818,6 @@ export default function EntriesPage() {
         setIsLoading(false)
         return
       }
-  
-      // Apply all updates in one transaction
-      await update(dbRef(db), updates)
-  
-      setOriginalData(tempOriginalData)
-      setEntriesData(allocations)
-  
-      toast({
-        title: "Allocation Successful",
-        description: `Allocated ${required.toFixed(2)} liters to truck ${truckNumber}`
-      })
-  
-      // Clear form after successful allocation
-      clearForm()
   
     } catch (error) {
       toast({
