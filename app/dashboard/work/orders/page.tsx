@@ -140,8 +140,6 @@ export default function WorkManagementPage() {
   })
 
   // Add new state
-  const [isActionLoading, setIsActionLoading] = useState<string | null>(null)
-  const [selectedTrucks, setSelectedTrucks] = useState<string[]>([])
   const [showTruckHistory, setShowTruckHistory] = useState(false)
   const [selectedTruckHistory, setSelectedTruckHistory] = useState<WorkDetail | null>(null)
 
@@ -730,37 +728,6 @@ export default function WorkManagementPage() {
     XLSX.writeFile(wb, `Work_Orders_${new Date().toISOString().split('T')[0]}.xlsx`)
   }
 
-  // Add new function to handle batch actions
-  const handleBatchAction = async (action: 'release' | 'force-release') => {
-    if (!selectedTrucks.length) return
-    
-    setIsActionLoading(action)
-    try {
-      const updates: { [key: string]: any } = {}
-      selectedTrucks.forEach(truckId => {
-        updates[`work_details/${truckId}`] = {
-          released: true,
-          paid: action === 'release',
-          paymentPending: action === 'force-release'
-        }
-      })
-      
-      await update(ref(database), updates)
-      setSelectedTrucks([])
-      toast({
-        title: "Success",
-        description: `${selectedTrucks.length} trucks ${action === 'release' ? 'released' : 'force-released'}`
-      })
-    } catch (error) {
-      toast({
-        title: "Error",
-        description: "Failed to process batch action"
-      })
-    } finally {
-      setIsActionLoading(null)
-    }
-  }
-
   // Add new function to generate payment receipt
   const generatePaymentReceipt = (owner: string) => {
     const doc = new jsPDF()
@@ -1112,29 +1079,7 @@ export default function WorkManagementPage() {
         )}
 
         {/* Download PDF Button */} 
-        <div className="flex justify-between items-center mb-4">
-          <div className="flex gap-2">
-            {selectedTrucks.length > 0 && (
-              <>
-                <Button
-                  variant="outline"
-                  onClick={() => handleBatchAction('release')}
-                  disabled={!!isActionLoading}
-                >
-                  {isActionLoading === 'release' && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                  Release Selected ({selectedTrucks.length})
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={() => handleBatchAction('force-release')}
-                  disabled={!!isActionLoading}
-                >
-                  {isActionLoading === 'force-release' && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                  Force Release Selected
-                </Button>
-              </>
-            )}
-          </div>
+        <div className="flex justify-end mb-4">
           <div className="flex gap-2">
             <Button variant="outline" onClick={handleDownloadPDF}>
               <Download className="mr-2 h-4 w-4" />
@@ -1156,16 +1101,6 @@ export default function WorkManagementPage() {
             <table className="w-full border-collapse bg-card text-card-foreground">
               <thead>
                 <tr className="border-b">
-                  <th className="p-3 w-8">
-                    <input
-                      type="checkbox"
-                      onChange={(e) => {
-                        const filtered = getFilteredWorkDetails()
-                        setSelectedTrucks(e.target.checked ? filtered.map(d => d.id) : [])
-                      }}
-                      checked={selectedTrucks.length === getFilteredWorkDetails().length}
-                    />
-                  </th>
                   <th className="p-3 text-left font-medium">Owner</th>
                   <th className="p-3 text-left font-medium">Product</th>
                   <th className="p-3 text-left font-medium">Truck Number</th>
@@ -1185,19 +1120,6 @@ export default function WorkManagementPage() {
                       detail.id === lastAddedId ? 'highlight-new-record' : ''
                     }`}
                   >
-                    <td className="p-3">
-                      <input
-                        type="checkbox"
-                        checked={selectedTrucks.includes(detail.id)}
-                        onChange={(e) => {
-                          setSelectedTrucks(prev => 
-                            e.target.checked 
-                              ? [...prev, detail.id]
-                              : prev.filter(id => id !== detail.id)
-                          )
-                        }}
-                      />
-                    </td>
                     <td className="p-3">{detail.owner}</td>
                     <td className="p-3">{detail.product}</td>
                     <td className="p-3">
