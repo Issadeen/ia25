@@ -208,7 +208,7 @@ export default function LoginPage() {
                   ~ Issadeen ~
                 </div>
                 <div className="text-xs mt-1 text-center opacity-50">
-                  Founding Father
+                  Founding Titan
                 </div>
               </div>
             </motion.div>
