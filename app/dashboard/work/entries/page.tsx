@@ -765,7 +765,8 @@ export default function EntriesPage() {
         
         snapshot.forEach((childSnapshot) => {
           const data = childSnapshot.val()
-          const key = `${data.product} - ${data.destination}`
+          // Format key as "product - destination" (both lowercase)
+          const key = `${data.product.toLowerCase()} - ${data.destination.toLowerCase()}`
           
           if (!summary[key]) {
             summary[key] = {
@@ -784,7 +785,7 @@ export default function EntriesPage() {
           }
         })
 
-        // Filter out entries with zero remaining quantity
+        // Filter and format summary array
         const summaryArray = Object.entries(summary)
           .filter(([_, value]) => value.remainingQuantity > 0)
           .map(([key, value]) => ({
@@ -792,7 +793,15 @@ export default function EntriesPage() {
             ...value,
             estimatedTrucks: value.remainingQuantity / (key.includes('ago') ? 36000 : 40000)
           }))
-          .sort((a, b) => b.remainingQuantity - a.remainingQuantity)
+          // Sort first by product (ago before pms) then by destination
+          .sort((a, b) => {
+            const [aProduct] = a.productDestination.split(' - ')
+            const [bProduct] = b.productDestination.split(' - ')
+            if (aProduct !== bProduct) {
+              return aProduct.localeCompare(bProduct)
+            }
+            return a.productDestination.localeCompare(b.productDestination)
+          })
 
         setSummaryData(summaryArray)
         setShowSummary(true)
@@ -1031,24 +1040,25 @@ export default function EntriesPage() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.3 }}
         >
-          <div className="flex justify-between items-center mb-4">
+          {/* Update header controls for mobile */}
+          <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-6">
             <h2 className="text-2xl font-semibold bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">
               Quantity Summary
             </h2>
-            <div className="flex gap-2">
+            <div className="flex flex-col sm:flex-row gap-2">
               <Button 
                 variant="outline" 
                 onClick={() => setShowPendingOrders(!showPendingOrders)}
-                className="flex items-center gap-2 border-emerald-500/30 hover:border-emerald-500/50"
+                className="w-full sm:w-auto border-emerald-500/30 hover:border-emerald-500/50"
               >
                 {showPendingOrders ? 'Hide' : 'Show'} Pending Orders
               </Button>
               <Button 
                 variant="outline" 
                 onClick={resetViews}
-                className="flex items-center gap-2 border-emerald-500/30 hover:border-emerald-500/50"
+                className="w-full sm:w-auto border-emerald-500/30 hover:border-emerald-500/50"
               >
-                <ArrowLeft className="h-4 w-4" /> Back to Allocation
+                <ArrowLeft className="h-4 w-4 mr-2" /> Back to Allocation
               </Button>
             </div>
           </div>
@@ -1071,21 +1081,27 @@ export default function EntriesPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {summaryData.map((item, index) => (
-                      <TableRow 
-                        key={index}
-                        className="border-b border-emerald-500/10 hover:bg-emerald-50/50 dark:hover:bg-emerald-900/20"
-                      >
-                        <TableCell className="font-medium">{item.productDestination}</TableCell>
-                        <TableCell>{item.remainingQuantity.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</TableCell>
-                        <TableCell>{item.estimatedTrucks.toFixed(2)}</TableCell>
-                        <TableCell>
-                          {item.motherEntries.map(entry => 
-                            `${entry.number} (${entry.remainingQuantity.toLocaleString()})`
-                          ).join(', ')}
-                        </TableCell>
-                      </TableRow>
-                    ))}
+                    {summaryData.map((item, index) => {
+                      // Split and format product-destination
+                      const [product, destination] = item.productDestination.split(' - ')
+                      return (
+                        <TableRow 
+                          key={index}
+                          className="border-b border-emerald-500/10 hover:bg-emerald-50/50 dark:hover:bg-emerald-900/20"
+                        >
+                          <TableCell className="font-medium">
+                            {`${product.toUpperCase()} - ${destination.toUpperCase()}`}
+                          </TableCell>
+                          <TableCell>{item.remainingQuantity.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</TableCell>
+                          <TableCell>{item.estimatedTrucks.toFixed(2)}</TableCell>
+                          <TableCell>
+                            {item.motherEntries.map(entry => 
+                              `${entry.number} (${entry.remainingQuantity.toLocaleString()})`
+                            ).join(', ')}
+                          </TableCell>
+                        </TableRow>
+                      )
+                    })}
                   </TableBody>
                 </Table>
               </CardContent>
@@ -1098,32 +1114,38 @@ export default function EntriesPage() {
             </Card>
           )}
 
-          {/* Pending Orders Section */}
-          {showPendingOrders && renderPendingOrders()}
+          {/* Add spacing between cards */}
+          {showPendingOrders && (
+            <div className="mt-8">
+              {renderPendingOrders()}
+            </div>
+          )}
         </motion.div>
       )
     }
 
-    if (showUsage && usageData.length > 0) {
+    if (showUsage) {
       return (
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.3 }}
         >
-          <div className="flex justify-between items-center mb-4">
-            <h2 className="text-2xl font-semibold">Entry Usage</h2>
+          <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-6">
+            <h2 className="text-2xl font-semibold bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">
+              Entry Usage
+            </h2>
             <Button 
               variant="outline" 
               onClick={resetViews}
-              className="flex items-center gap-2"
+              className="w-full sm:w-auto border-emerald-500/30 hover:border-emerald-500/50"
             >
-              <ArrowLeft className="h-4 w-4" /> Back to Allocation
+              <ArrowLeft className="h-4 w-4 mr-2" /> Back to Allocation
             </Button>
           </div>
 
           {/* Add filters */}
-          <Card className="mb-6">
+          <Card className="mb-6 border-emerald-500/20">
             <CardContent className="p-4">
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                 <div>
@@ -1162,17 +1184,17 @@ export default function EntriesPage() {
             </CardContent>
           </Card>
 
-          <Card className={`${theme === 'dark' ? 'bg-gray-800/50' : 'bg-white'} backdrop-blur-md border-0 shadow-lg`}>
+          <Card className="border-0 shadow-lg bg-white/50 dark:bg-gray-900/50 backdrop-blur-sm">
             <CardContent className="p-6">
               <Table>
                 <TableHeader>
-                  <TableRow>
-                    <TableHead>Entry Number</TableHead>
-                    <TableHead>Initial Quantity</TableHead>
-                    <TableHead>Remaining</TableHead>
-                    <TableHead>Product</TableHead>
-                    <TableHead>Destination</TableHead>
-                    <TableHead>Used By (Truck - Quantity)</TableHead>
+                  <TableRow className="border-b border-emerald-500/20">
+                    <TableHead className="text-emerald-700 dark:text-emerald-400">Entry Number</TableHead>
+                    <TableHead className="text-emerald-700 dark:text-emerald-400">Initial Quantity</TableHead>
+                    <TableHead className="text-emerald-700 dark:text-emerald-400">Remaining</TableHead>
+                    <TableHead className="text-emerald-700 dark:text-emerald-400">Product</TableHead>
+                    <TableHead className="text-emerald-700 dark:text-emerald-400">Destination</TableHead>
+                    <TableHead className="text-emerald-700 dark:text-emerald-400">Used By (Truck - Quantity)</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -1246,7 +1268,6 @@ export default function EntriesPage() {
       )
     }
 
-    // Update showManualAllocation return in renderMainContent
     if (showManualAllocation) {
       return (
         <motion.div
@@ -1254,9 +1275,11 @@ export default function EntriesPage() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.3 }}
         >
-          <Card className="border-0 shadow-lg">
+          <Card className="border-0 shadow-lg bg-white/50 dark:bg-gray-900/50 backdrop-blur-sm">
             <CardHeader>
-              <CardTitle className="text-2xl">Manual Allocation</CardTitle>
+              <CardTitle className="text-2xl font-semibold bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">
+                Manual Allocation
+              </CardTitle>
             </CardHeader>
             <CardContent className="p-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1328,7 +1351,7 @@ export default function EntriesPage() {
                 </div>
               )}
 
-              <div className="mt-6 flex gap-4">
+              <div className="mt-6 flex flex-col sm:flex-row gap-3">
                 <Button 
                   type="button" // Add this to prevent form submission
                   onClick={async () => {
@@ -1433,7 +1456,7 @@ export default function EntriesPage() {
                     }
                   }}
                   disabled={isLoading}
-                  className="flex items-center gap-2"
+                  className="w-full sm:w-auto bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-600 hover:from-emerald-500 hover:via-teal-400 hover:to-blue-500 text-white"
                 >
                   {isLoading ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
@@ -1448,6 +1471,7 @@ export default function EntriesPage() {
                     clearForm()
                     setSelectedEntries([])
                   }}
+                  className="w-full sm:w-auto border-emerald-500/30 hover:border-emerald-500/50"
                 >
                   Clear Form
                 </Button>
@@ -1458,6 +1482,7 @@ export default function EntriesPage() {
                     clearForm()
                     setSelectedEntries([])
                   }}
+                  className="w-full sm:w-auto"
                 >
                   Cancel
                 </Button>
@@ -1781,7 +1806,9 @@ export default function EntriesPage() {
               >
                 <ArrowLeft className="h-4 w-4 sm:h-5 sm:w-5" />
               </Button>
-              <h1 className="text-lg sm:text-xl font-semibold">Allocate Entries</h1>
+              <h1 className="text-lg sm:text-xl font-semibold bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">
+                Allocate Entries
+              </h1>
             </div>
             <div className="flex items-center gap-2 sm:gap-4">
               <Button
