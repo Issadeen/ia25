@@ -8,7 +8,8 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { useEffect, useState } from "react"
 import { useSession } from "next-auth/react"
 import { useRouter } from "next/navigation"
-import { ArrowLeft, Plus, Trash2, FileText, Loader2, Edit, Check, X, Copy } from 'lucide-react'
+// Add Triangle to imports
+import { ArrowLeft, Plus, Trash2, FileText, Loader2, Edit, Check, X, Copy, Triangle, Download, FileSpreadsheet, History, Receipt } from 'lucide-react'
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card } from "@/components/ui/card"
@@ -22,6 +23,7 @@ import { ThemeToggle } from "@/components/ui/molecules/theme-toggle"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
+import * as XLSX from 'xlsx' // Add this import for Excel export
 import { Label } from "@/components/ui/label"
 
 // Add new interfaces
@@ -56,6 +58,8 @@ interface WorkDetail {
   previous_trucks?: string[]
   price: string;
   createdAt?: string;
+  released?: boolean;    // New field to track release status
+  paymentPending?: boolean;  // New field to track pending payments
 }
 
 interface SummaryStats {
@@ -134,6 +138,12 @@ export default function WorkManagementPage() {
     note: '',
     allocatedTrucks: []
   })
+
+  // Add new state
+  const [isActionLoading, setIsActionLoading] = useState<string | null>(null)
+  const [selectedTrucks, setSelectedTrucks] = useState<string[]>([])
+  const [showTruckHistory, setShowTruckHistory] = useState(false)
+  const [selectedTruckHistory, setSelectedTruckHistory] = useState<WorkDetail | null>(null)
 
   // 2. Define functions before useEffect hooks
   const updateSummaryData = (data: WorkDetail[]) => {
@@ -584,7 +594,7 @@ export default function WorkManagementPage() {
     };
   };
 
-  // Add new function to handle payment submission
+  // Modify handlePaymentSubmit to properly store truck allocations
   const handlePaymentSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedOwner) return;
@@ -596,7 +606,10 @@ export default function WorkManagementPage() {
       const paymentData = {
         amountPaid: paymentFormData.amount,
         timestamp: new Date().toISOString(),
-        allocatedTo: paymentFormData.allocatedTrucks.map(t => t.truckId),
+        allocatedTrucks: paymentFormData.allocatedTrucks.map(t => ({
+          truckId: t.truckId,
+          amount: t.amount
+        })), // Store the full allocation data
         note: paymentFormData.note
       };
 
@@ -615,10 +628,9 @@ export default function WorkManagementPage() {
         };
       });
 
-      // Execute all updates in one transaction
       await update(ref(database), updates);
 
-      // Refresh truck payments data
+      // Refresh data
       const truckPaymentsRef = ref(database, 'truckPayments');
       const snapshot = await get(truckPaymentsRef);
       if (snapshot.exists()) {
@@ -652,10 +664,202 @@ export default function WorkManagementPage() {
     const trucks = ownerSummary[owner]?.loadedTrucks || [];
     const totalToBePaid = trucks.reduce((sum, truck) => sum + (parseFloat(truck.price) * (parseFloat(truck.at20 || '0'))), 0);
     const totalPaid = ownerPayments.reduce((sum, payment) => sum + payment.amountPaid, 0);
-    const balance = totalPaid - totalToBePaid;
+    const balance = totalToBePaid - totalPaid; // Corrected balance calculation
     
     return { totalToBePaid, totalPaid, balance };
   };
+
+  // Add new helper function to check payment allocation
+  const isTruckPaymentAllocated = (truckId: string) => {
+    if (!truckPayments[truckId]) return false;
+    const payments = Object.values(truckPayments[truckId]);
+    const totalAllocated = payments.reduce((sum, p) => sum + p.amount, 0);
+    const truck = workDetails.find(t => t.id === truckId);
+    if (!truck || !truck.at20) return false;
+    const totalDue = parseFloat(truck.price) * parseFloat(truck.at20);
+    return totalAllocated >= totalDue;
+  };
+
+  // Add new function to handle force release
+  const handleForceRelease = async (detail: WorkDetail) => {
+    if (!detail.loaded) return;
+
+    const shouldForceRelease = confirm(
+      'Are you sure you want to release this truck without payment? Payment will be marked as pending.'
+    );
+
+    if (shouldForceRelease) {
+      try {
+        await update(ref(database, `work_details/${detail.id}`), {
+          released: true,
+          paymentPending: true,
+          paid: false
+        });
+
+        toast({
+          title: "Truck Released",
+          description: "Truck has been released with payment pending",
+        });
+      } catch (error) {
+        toast({
+          title: "Error",
+          description: "Failed to release truck",
+        });
+      }
+    }
+  };
+
+  // Add new function to handle export to Excel
+  const handleExportToExcel = () => {
+    const data = getFilteredWorkDetails().map(detail => ({
+      Owner: detail.owner,
+      Product: detail.product,
+      'Truck Number': detail.truck_number,
+      Quantity: detail.quantity,
+      Status: detail.status,
+      'Order No': detail.orderno,
+      Depot: detail.depot,
+      Destination: detail.destination,
+      Loaded: detail.loaded ? 'Yes' : 'No',
+      'Payment Status': detail.paymentPending ? 'Pending' : detail.paid ? 'Paid' : 'Not Paid'
+    }))
+  
+    const ws = XLSX.utils.json_to_sheet(data)
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Work Orders')
+    XLSX.writeFile(wb, `Work_Orders_${new Date().toISOString().split('T')[0]}.xlsx`)
+  }
+
+  // Add new function to handle batch actions
+  const handleBatchAction = async (action: 'release' | 'force-release') => {
+    if (!selectedTrucks.length) return
+    
+    setIsActionLoading(action)
+    try {
+      const updates: { [key: string]: any } = {}
+      selectedTrucks.forEach(truckId => {
+        updates[`work_details/${truckId}`] = {
+          released: true,
+          paid: action === 'release',
+          paymentPending: action === 'force-release'
+        }
+      })
+      
+      await update(ref(database), updates)
+      setSelectedTrucks([])
+      toast({
+        title: "Success",
+        description: `${selectedTrucks.length} trucks ${action === 'release' ? 'released' : 'force-released'}`
+      })
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to process batch action"
+      })
+    } finally {
+      setIsActionLoading(null)
+    }
+  }
+
+  // Add new function to generate payment receipt
+  const generatePaymentReceipt = (owner: string) => {
+    const doc = new jsPDF()
+    const ownerData = ownerSummary[owner]
+    const { totalToBePaid, totalPaid, balance } = calculateOwnerTotals(owner)
+    
+    // Add company header
+    doc.setFontSize(20)
+    doc.text('Owner Payment Summary', 105, 20, { align: 'center' })
+    
+    // Add owner details
+    doc.setFontSize(12)
+    doc.text([
+      `Owner: ${owner}`,
+      `Date: ${new Date().toLocaleDateString()}`,
+      `Total Orders: ${ownerData.totalOrders}`,
+      '\nPayment Summary:',
+      `Total Amount Due: $${formatNumber(totalToBePaid)}`,
+      `Total Amount Paid: $${formatNumber(totalPaid)}`,
+      `Balance: $${formatNumber(Math.abs(balance))} ${balance < 0 ? '(Credit)' : '(Due)'}`,
+    ], 20, 40)
+  
+    let yPos = 100
+  
+    // Add loaded trucks table
+    if (ownerData.loadedTrucks.length > 0) {
+      autoTable(doc, {
+        startY: yPos,
+        head: [['Truck', 'Product', 'Quantity', 'At20', 'Price', 'Total Due', 'Status']],
+        body: ownerData.loadedTrucks.map(truck => {
+          const { totalDue, totalAllocated, balance } = getTruckAllocations(truck)
+          return [
+            truck.truck_number,
+            truck.product,
+            truck.quantity,
+            truck.at20 || '-',
+            `$${formatNumber(parseFloat(truck.price))}`,
+            `$${formatNumber(totalDue)}`,
+            balance <= 0 ? 'Paid' : 
+            truck.paymentPending ? 'Payment Pending' :
+            `Due: $${formatNumber(balance)}`
+          ]
+        }),
+        theme: 'grid',
+        headStyles: { fillColor: [40, 167, 69] },
+        styles: { fontSize: 8 },
+        margin: { left: 20, right: 20 }
+      })
+      yPos = (doc as any).autoTable.previous.finalY + 20
+    }
+  
+    // Add payment history table
+    if (ownerPayments.length > 0) {
+      doc.text('Payment History:', 20, yPos)
+      yPos += 10
+  
+      autoTable(doc, {
+        startY: yPos,
+        head: [['Date', 'Amount', 'Allocated Trucks', 'Note']],
+        body: ownerPayments.map(payment => {
+          const allocatedTrucks = payment.allocatedTrucks?.map((allocation: any) => {
+            const truck = workDetails.find(t => t.id === allocation.truckId)
+            return truck ? `${truck.truck_number} ($${formatNumber(allocation.amount)})` : ''
+          }).filter(Boolean).join(', ') || 'Unallocated'
+  
+          return [
+            new Date(payment.timestamp).toLocaleDateString(),
+            `$${formatNumber(payment.amountPaid)}`,
+            allocatedTrucks,
+            payment.note || '-'
+          ]
+        }),
+        theme: 'grid',
+        headStyles: { fillColor: [40, 167, 69] },
+        styles: { fontSize: 8 },
+        margin: { left: 20, right: 20 }
+      })
+    }
+  
+    // Add summary statistics
+    doc.text([
+      '\nOrder Statistics:',
+      `AGO Orders: ${ownerData.agoOrders}`,
+      `PMS Orders: ${ownerData.pmsOrders}`,
+      `Queued Orders: ${ownerData.queuedOrders}`,
+      `Loaded Orders: ${ownerData.loadedOrders}`,
+      `Pending Orders: ${ownerData.pendingOrders}`,
+    ], 20, (doc as any).autoTable.previous.finalY + 20)
+  
+    // Add footer
+    doc.setFontSize(8)
+    doc.text([
+      'This is a computer-generated document.',
+      `Generated on: ${new Date().toLocaleString()}`
+    ], 20, doc.internal.pageSize.height - 20)
+  
+    // Save the PDF
+    doc.save(`${owner}_Payment_Summary_${new Date().toISOString().split('T')[0]}.pdf`)
+  }
 
   // 3. Group all useEffect hooks together
   useEffect(() => {
@@ -702,6 +906,18 @@ export default function WorkManagementPage() {
   
     fetchImageUrl()
   }, [session?.user])
+
+  // Add useEffect to fetch truck payments
+  useEffect(() => {
+    const truckPaymentsRef = ref(database, 'truckPayments');
+    const unsubscribe = onValue(truckPaymentsRef, (snapshot) => {
+      if (snapshot.exists()) {
+        setTruckPayments(snapshot.val());
+      }
+    });
+
+    return () => unsubscribe();
+  }, []);
 
   // 4. Early return after hooks
   if (!mounted) {
@@ -806,7 +1022,7 @@ export default function WorkManagementPage() {
       `}</style>
 
       <main className="max-w-7xl mx-auto px-4 pt-24 pb-8">
-        {/* Search and Toggle Filters on the same line */}
+        {/* Search and Toggle Filters on the same line */} 
         <div className="flex flex-col items-center sm:flex-row sm:justify-center sm:space-x-4 mb-4">
           <Input
             placeholder="Search by owner, truck number, or order number..."
@@ -823,17 +1039,17 @@ export default function WorkManagementPage() {
           </Button>
         </div>
 
-        {/* Conditionally Rendered Filter Controls with reduced sizes */}
+        {/* Conditionally Rendered Filter Controls with reduced sizes */} 
         {showFilters && (
           <div className="flex flex-wrap justify-center mb-8 gap-2">
-            {/* Owner Filter */}
+            {/* Owner Filter */} 
             <Input
               placeholder="Filter by Owner"
               value={ownerFilter}
               onChange={(e) => setOwnerFilter(e.target.value)}
               className="max-w-xs w-full sm:w-auto"
             />
-            {/* Product Filter */}
+            {/* Product Filter */} 
             <div className="max-w-xs w-full sm:w-auto">
               <Select
                 value={productFilter}
@@ -845,11 +1061,11 @@ export default function WorkManagementPage() {
               <SelectContent>
                 <SelectItem value="ALL">All</SelectItem>
                 <SelectItem value="AGO">AGO</SelectItem>
-                <SelectItem value="PMS">PMS</SelectItem> {/* Fixed missing closing tag */}
+                <SelectItem value="PMS">PMS</SelectItem> {/* Fixed missing closing tag */} 
               </SelectContent>
               </Select>
             </div>
-            {/* Status Filter */}
+            {/* Status Filter */} 
             <Select
               value={statusFilter}
               onValueChange={(value) => setStatusFilter(value)}
@@ -863,21 +1079,21 @@ export default function WorkManagementPage() {
                 <SelectItem value="not queued">Not Queued</SelectItem>
               </SelectContent>
             </Select>
-            {/* Depot Filter */}
+            {/* Depot Filter */} 
             <Input
               placeholder="Filter by Depot"
               value={depotFilter}
               onChange={(e) => setDepotFilter(e.target.value)}
               className="max-w-xs w-full sm:w-auto"
             />
-            {/* Destination Filter */}
+            {/* Destination Filter */} 
             <Input
               placeholder="Filter by Destination"
               value={destinationFilter}
               onChange={(e) => setDestinationFilter(e.target.value)}
               className="max-w-xs w-full sm:w-auto"
             />
-            {/* Clear Filters Button */}
+            {/* Clear Filters Button */} 
             <Button
               variant="outline"
               onClick={() => {
@@ -895,11 +1111,40 @@ export default function WorkManagementPage() {
           </div>
         )}
 
-        {/* Download PDF Button */}
-        <div className="flex justify-end mb-4">
-          <Button onClick={handleDownloadPDF}>
-            Download PDF
-          </Button>
+        {/* Download PDF Button */} 
+        <div className="flex justify-between items-center mb-4">
+          <div className="flex gap-2">
+            {selectedTrucks.length > 0 && (
+              <>
+                <Button
+                  variant="outline"
+                  onClick={() => handleBatchAction('release')}
+                  disabled={!!isActionLoading}
+                >
+                  {isActionLoading === 'release' && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  Release Selected ({selectedTrucks.length})
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => handleBatchAction('force-release')}
+                  disabled={!!isActionLoading}
+                >
+                  {isActionLoading === 'force-release' && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  Force Release Selected
+                </Button>
+              </>
+            )}
+          </div>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={handleDownloadPDF}>
+              <Download className="mr-2 h-4 w-4" />
+              PDF
+            </Button>
+            <Button variant="outline" onClick={handleExportToExcel}>
+              <FileSpreadsheet className="mr-2 h-4 w-4" />
+              Excel
+            </Button>
+          </div>
         </div>
 
         {isLoading ? (
@@ -911,6 +1156,16 @@ export default function WorkManagementPage() {
             <table className="w-full border-collapse bg-card text-card-foreground">
               <thead>
                 <tr className="border-b">
+                  <th className="p-3 w-8">
+                    <input
+                      type="checkbox"
+                      onChange={(e) => {
+                        const filtered = getFilteredWorkDetails()
+                        setSelectedTrucks(e.target.checked ? filtered.map(d => d.id) : [])
+                      }}
+                      checked={selectedTrucks.length === getFilteredWorkDetails().length}
+                    />
+                  </th>
                   <th className="p-3 text-left font-medium">Owner</th>
                   <th className="p-3 text-left font-medium">Product</th>
                   <th className="p-3 text-left font-medium">Truck Number</th>
@@ -930,6 +1185,19 @@ export default function WorkManagementPage() {
                       detail.id === lastAddedId ? 'highlight-new-record' : ''
                     }`}
                   >
+                    <td className="p-3">
+                      <input
+                        type="checkbox"
+                        checked={selectedTrucks.includes(detail.id)}
+                        onChange={(e) => {
+                          setSelectedTrucks(prev => 
+                            e.target.checked 
+                              ? [...prev, detail.id]
+                              : prev.filter(id => id !== detail.id)
+                          )
+                        }}
+                      />
+                    </td>
                     <td className="p-3">{detail.owner}</td>
                     <td className="p-3">{detail.product}</td>
                     <td className="p-3">
@@ -971,6 +1239,16 @@ export default function WorkManagementPage() {
                             </Button>
                           )
                         )}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            setSelectedTruckHistory(detail)
+                            setShowTruckHistory(true)
+                          }}
+                        >
+                          <History className="h-4 w-4" />
+                        </Button>
                       </div>
                       {detail.previous_trucks && detail.previous_trucks.length > 0 && (
                         <small className="text-muted-foreground">
@@ -1003,23 +1281,74 @@ export default function WorkManagementPage() {
                           >
                             Loaded?
                           </Button>
-                        ) : !detail.paid ? (
-                          <Button
-                            variant="default"
-                            size="sm"
-                            onClick={() => handlePaidStatus(detail.id)}
-                          >
-                            Paid?
-                          </Button>
+                        ) : !detail.released ? (
+                          <div className="flex gap-2">
+                            {isTruckPaymentAllocated(detail.id) ? (
+                              <Button
+                                variant="default"
+                                size="sm"
+                                onClick={async () => {
+                                  if (confirm('Confirm release of truck?')) {
+                                    await update(ref(database, `work_details/${detail.id}`), {
+                                      released: true,
+                                      paid: true,
+                                      paymentPending: false
+                                    });
+                                    toast({
+                                      title: "Released",
+                                      description: "Truck has been released",
+                                    });
+                                  }
+                                }}
+                              >
+                                Release
+                              </Button>
+                            ) : (
+                              <div className="flex items-center gap-1">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => {
+                                    toast({
+                                      title: "Payment Required",
+                                      description: "Please allocate payment from owner details",
+                                    });
+                                  }}
+                                >
+                                  Payment Required
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8 text-red-500 hover:text-red-700"
+                                  onClick={() => handleForceRelease(detail)}
+                                >
+                                  <Triangle className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            )}
+                          </div>
                         ) : (
-                          <Button
-                            variant="default"
-                            size="sm"
-                            onClick={() => handleGenerateGatePass(detail)}
-                            disabled={!detail.loaded || !detail.at20}
-                          >
-                            GP
-                          </Button>
+                          <div className="flex gap-2">
+                            <Button
+                              variant="default"
+                              size="sm"
+                              onClick={() => handleGenerateGatePass(detail)}
+                              disabled={!detail.loaded}
+                            >
+                              GP
+                            </Button>
+                            {detail.paymentPending && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleOwnerInfo(detail.owner)}
+                                className="text-red-500"
+                              >
+                                Payment Pending
+                              </Button>
+                            )}
+                          </div>
                         )}
                         <Button
                           variant="destructive"
@@ -1038,7 +1367,7 @@ export default function WorkManagementPage() {
         )}
 
         <div className="mt-8 space-y-8">
-          {/* Summary Stats */}
+          {/* Summary Stats */} 
           <Card className="p-6">
             <div className="flex justify-between items-center">
               <h2 className="text-xl font-semibold mb-4">Summary</h2>
@@ -1063,7 +1392,7 @@ export default function WorkManagementPage() {
             </div>
           </Card>
 
-          {/* Owner Summary */}
+          {/* Owner Summary */} 
           <Card className="p-6">
             <div className="flex justify-between items-center">
               <h2 className="text-xl font-semibold mb-4">Owner Summary</h2>
@@ -1099,7 +1428,7 @@ export default function WorkManagementPage() {
         </div>
       </main>
 
-      {/* Add Work Dialog */}
+      {/* Add Work Dialog */} 
       <Dialog open={isAddModalOpen} onOpenChange={setIsAddModalOpen}>
         <DialogContent className="sm:max-w-[800px] w-[90vw] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
@@ -1118,7 +1447,7 @@ export default function WorkManagementPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Add Owner Info Modal */}
+      {/* Add Owner Info Modal */} 
       <Dialog open={ownerModalOpen} onOpenChange={setOwnerModalOpen}>
         <DialogContent className="sm:max-w-[800px] w-[90vw] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
@@ -1127,7 +1456,7 @@ export default function WorkManagementPage() {
           
           {selectedOwner && ownerSummary[selectedOwner] && (
             <div className="space-y-6">
-              {/* Owner Payment Summary */}
+              {/* Owner Payment Summary */} 
               {(() => {
                 const { totalToBePaid, totalPaid, balance } = calculateOwnerTotals(selectedOwner);
                 return (
@@ -1143,10 +1472,10 @@ export default function WorkManagementPage() {
                       </div>
                       <div>
                         <div className={`text-lg ${
-                          balance > 0 ? 'text-emerald-500' : balance < 0 ? 'text-red-500' : ''
+                          balance < 0 ? 'text-emerald-500' : balance > 0 ? 'text-red-500' : ''
                         }`}>
                           ${formatNumber(Math.abs(balance))}
-                          {balance !== 0 && (balance > 0 ? ' (Credit)' : ' (Due)')}
+                          {balance !== 0 && (balance < 0 ? ' (Credit)' : ' (Due)')}
                         </div>
                       </div>
                     </div>
@@ -1154,7 +1483,7 @@ export default function WorkManagementPage() {
                 );
               })()}
 
-              {/* Loaded Trucks Section with Updated Payment Status */}
+              {/* Loaded Trucks Section with Updated Payment Status */} 
               <div>
                 <h4 className="text-lg font-semibold mb-2">Loaded Trucks</h4>
                 <table className="w-full">
@@ -1177,7 +1506,8 @@ export default function WorkManagementPage() {
                       
                       return (
                         <tr key={truck.id} className={`border-t ${
-                          isPaid ? 'line-through text-gray-500' :
+                          isPaid ? 'text-gray-500' :
+                          truck.paymentPending ? 'text-orange-500' :
                           balance < 0 ? 'text-emerald-500' :
                           'text-red-500'
                         }`}>
@@ -1190,6 +1520,7 @@ export default function WorkManagementPage() {
                           <td className="p-2">${formatNumber(Math.abs(balance))}</td>
                           <td className="p-2">
                             {isPaid ? 'Paid' : 
+                             truck.paymentPending ? 'Payment Pending' :
                              balance < 0 ? `Overpaid: $${formatNumber(Math.abs(balance))}` :
                              `Due: $${formatNumber(balance)}`}
                           </td>
@@ -1200,7 +1531,7 @@ export default function WorkManagementPage() {
                 </table>
               </div>
 
-              {/* Payment History with Enhanced Details */}
+              {/* Payment History section */}
               <div>
                 <div className="flex justify-between items-center mb-2">
                   <h4 className="text-lg font-semibold">Payment History</h4>
@@ -1213,6 +1544,7 @@ export default function WorkManagementPage() {
                       <th className="text-left p-2">Amount</th>
                       <th className="text-left p-2">Allocated To</th>
                       <th className="text-left p-2">Note</th>
+                      <th className="text-left p-2">Receipt</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1223,25 +1555,32 @@ export default function WorkManagementPage() {
                         </td>
                         <td className="p-2">${formatNumber(payment.amountPaid)}</td>
                         <td className="p-2">
-                          {payment.allocatedTrucks?.map((truck: { truckId: string; amount: number }) => {
-                            const truckDetail = workDetails.find(t => t.id === truck.truckId);
-                            if (!truckDetail) return null;
-                            return (
-                              <div key={truck.truckId} className="text-sm">
-                                {truckDetail.truck_number} (${formatNumber(truck.amount)})
-                              </div>
-                            );
-                          }).filter(Boolean).length > 0 ? payment.allocatedTrucks.map((truck: { truckId: string; amount: number }) => {
-                            const truckDetail = workDetails.find(t => t.id === truck.truckId);
-                            if (!truckDetail) return null;
-                            return (
-                              <span key={truck.truckId} className="inline-block mr-2">
-                                {truckDetail.truck_number} (${formatNumber(truck.amount)})
-                              </span>
-                            );
-                          }).filter(Boolean) : 'Unallocated'}
+                          {payment.allocatedTrucks && payment.allocatedTrucks.length > 0 ? (
+                            <div className="space-y-1">
+                              {payment.allocatedTrucks.map((allocation: { truckId: string; amount: number }) => {
+                                const truckDetail = workDetails.find(t => t.id === allocation.truckId);
+                                return truckDetail ? (
+                                  <div key={allocation.truckId} className="text-sm">
+                                    {truckDetail.truck_number} (${formatNumber(allocation.amount)})
+                                  </div>
+                                ) : null;
+                              })}
+                            </div>
+                          ) : (
+                            <span className="text-muted-foreground">Unallocated</span>
+                          )}
                         </td>
                         <td className="p-2">{payment.note || '-'}</td>
+                        <td className="p-2">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => generatePaymentReceipt(selectedOwner)}
+                          >
+                            <Download className="h-4 w-4 mr-2" />
+                            Download Summary
+                          </Button>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -1252,7 +1591,7 @@ export default function WorkManagementPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Add Payment Modal */}
+      {/* Add Payment Modal */} 
       <Dialog open={isPaymentModalOpen} onOpenChange={setIsPaymentModalOpen}>
         <DialogContent className="sm:max-w-[800px] w-[90vw] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
@@ -1340,6 +1679,27 @@ export default function WorkManagementPage() {
               <Button type="submit">Save Payment</Button>
             </div>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add truck history dialog */}
+      <Dialog open={showTruckHistory} onOpenChange={setShowTruckHistory}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              Truck History - {selectedTruckHistory?.truck_number}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            {selectedTruckHistory?.previous_trucks?.map((truck, index) => (
+              <div key={index} className="flex justify-between items-center p-2 border rounded">
+                <span>{truck}</span>
+                <span className="text-sm text-muted-foreground">
+                  Previous {selectedTruckHistory.previous_trucks!.length - index}
+                </span>
+              </div>
+            ))}
+          </div>
         </DialogContent>
       </Dialog>
     </div>

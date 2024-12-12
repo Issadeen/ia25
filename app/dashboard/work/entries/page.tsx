@@ -550,12 +550,18 @@ export default function EntriesPage() {
 
   useEffect(() => {
     const handleActivity = () => {
+      // Clear any existing timeouts
       if (inactivityTimeoutRef.current) {
         clearTimeout(inactivityTimeoutRef.current)
       }
       if (warningTimeout) {
         clearTimeout(warningTimeout)
+        setWarningTimeout(null) // Add this line
       }
+
+      // Hide warning modal if it's showing
+      setShowWarningModal(false)
+      setWarningMessage("")
 
       // Set warning at 9 minutes
       const warning = setTimeout(() => {
@@ -572,11 +578,15 @@ export default function EntriesPage() {
       }, 10 * 60 * 1000)
     }
 
+    // Add event listeners
     window.addEventListener('mousemove', handleActivity)
     window.addEventListener('keydown', handleActivity)
     window.addEventListener('click', handleActivity)
+    
+    // Initial call
     handleActivity()
 
+    // Cleanup
     return () => {
       window.removeEventListener('mousemove', handleActivity)
       window.removeEventListener('keydown', handleActivity)
@@ -643,6 +653,29 @@ export default function EntriesPage() {
         variant: "destructive"
       })
       return
+    }
+  
+    // Add validation for permit entry quantity
+    if (destination.toLowerCase() === 'ssd') {
+      const permitEntry = availablePermitEntries.find(entry => entry.key === entryUsedInPermit);
+      if (!permitEntry) {
+        toast({
+          title: "Invalid Permit Entry",
+          description: "Please select a valid permit entry",
+          variant: "destructive"
+        });
+        return;
+      }
+  
+      const requiredQuantity = parseFloat(at20Quantity);
+      if (permitEntry.remainingQuantity < requiredQuantity) {
+        toast({
+          title: "Insufficient Quantity",
+          description: `Selected permit entry only has ${permitEntry.remainingQuantity.toLocaleString()} liters remaining. Required: ${requiredQuantity.toLocaleString()} liters.`,
+          variant: "destructive"
+        });
+        return;
+      }
     }
   
     setIsLoading(true)
@@ -1531,29 +1564,42 @@ export default function EntriesPage() {
                 <Label htmlFor="entryUsedInPermit">Select Entry Used in Permit</Label>
                 {availablePermitEntries.length > 0 ? (
                   <div className="space-y-2 mt-2 max-h-40 overflow-y-auto border rounded-md p-2">
-                    {availablePermitEntries.map((entry) => (
-                      <div 
-                        key={entry.key} 
-                        className={`flex items-center justify-between p-2 rounded hover:bg-accent cursor-pointer ${
-                          entryUsedInPermit === entry.key ? 'bg-primary/10' : ''
-                        }`}
-                        onClick={() => setEntryUsedInPermit(entry.key)}
-                      >
-                        <div className="flex flex-col">
-                          <span className="font-medium">{entry.number}</span>
-                          <span className="text-sm text-muted-foreground">
-                            Product: {entry.product.toUpperCase()} | 
-                            Remaining: {entry.remainingQuantity.toLocaleString()} liters
-                          </span>
+                    {availablePermitEntries.map((entry) => {
+                      const requiredQuantity = parseFloat(at20Quantity) || 0;
+                      const hasEnoughQuantity = entry.remainingQuantity >= requiredQuantity;
+                      
+                      return (
+                        <div 
+                          key={entry.key} 
+                          className={`flex items-center justify-between p-2 rounded hover:bg-accent cursor-pointer ${
+                            entryUsedInPermit === entry.key ? 'bg-primary/10' : ''
+                          } ${!hasEnoughQuantity ? 'opacity-50' : ''}`}
+                          onClick={() => setEntryUsedInPermit(entry.key)}
+                        >
+                          <div className="flex flex-col">
+                            <span className="font-medium">{entry.number}</span>
+                            <span className={`text-sm ${
+                              hasEnoughQuantity ? 'text-muted-foreground' : 'text-destructive'
+                            }`}>
+                              Product: {entry.product.toUpperCase()} | 
+                              Remaining: {entry.remainingQuantity.toLocaleString()} liters
+                              {!hasEnoughQuantity && requiredQuantity > 0 && (
+                                <span className="block text-destructive">
+                                  Insufficient quantity (Need: {requiredQuantity.toLocaleString()})
+                                </span>
+                              )}
+                            </span>
+                          </div>
+                          <input 
+                            type="radio"
+                            checked={entryUsedInPermit === entry.key}
+                            onChange={() => setEntryUsedInPermit(entry.key)}
+                            className="h-4 w-4"
+                            disabled={!hasEnoughQuantity}
+                          />
                         </div>
-                        <input 
-                          type="radio"
-                          checked={entryUsedInPermit === entry.key}
-                          onChange={() => setEntryUsedInPermit(entry.key)}
-                          className="h-4 w-4"
-                        />
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 ) : (
                   <div className="mt-2 text-muted-foreground text-sm">
@@ -1774,7 +1820,28 @@ export default function EntriesPage() {
               <Button 
                 size="sm"
                 variant="outline"
-                onClick={() => setShowWarningModal(false)}
+                onClick={() => {
+                  setShowWarningModal(false)
+                  setWarningMessage("")
+                  // Reset the inactivity timer when dismissed
+                  if (warningTimeout) {
+                    clearTimeout(warningTimeout)
+                    setWarningTimeout(null)
+                  }
+                  if (inactivityTimeoutRef.current) {
+                    clearTimeout(inactivityTimeoutRef.current)
+                  }
+                  // Restart the timers
+                  const warning = setTimeout(() => {
+                    setWarningMessage("Your session will expire in 1 minute due to inactivity.")
+                    setShowWarningModal(true)
+                  }, 9 * 60 * 1000)
+                  setWarningTimeout(warning)
+                  inactivityTimeoutRef.current = setTimeout(async () => {
+                    await signOut()
+                    router.push('/login')
+                  }, 10 * 60 * 1000)
+                }}
                 className="mt-2 text-white border-white/50 hover:bg-yellow-600/50"
               >
                 Dismiss
