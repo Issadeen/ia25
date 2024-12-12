@@ -1,0 +1,24 @@
+
+:root {
+  --background: #f9fafb;
+  --text: #111827;
+  --header-bg: rgba(255, 255, 255, 0.7);
+  --border: #e5e7eb;
+}
+
+[data-theme='dark'] {
+  --background: #111827;
+  --text: #f9fafb;
+  --header-bg: rgba(17, 24, 39, 0.7);
+  --border: #374151;
+}
+
+.min-h-screen {
+  background-color: var(--background);
+  color: var(--text);
+}
+
+.header-container {
+  background-color: var(--header-bg);
+  border-color: var(--border);
+}
