@@ -4,13 +4,13 @@ import { useState, useRef, useEffect } from 'react'
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { GatePassTemplate } from 'components/ui/molecules/GatePassTemplate'
+import { GatePassTemplate } from '@/components/ui/molecules/GatePassTemplate'
 import jsPDF from 'jspdf'
 import html2canvas from 'html2canvas'
-import { database } from "lib/firebase"
+import { database } from "@/lib/firebase"
 import { ref, get, set } from "firebase/database"
 import { useTheme } from 'next-themes' // Add this import
-import { toast } from "components/ui/use-toast" // Update this import
+import { toast } from "@/components/ui/use-toast" // Update this import
 
 export function GatePassForm() {
   const { theme } = useTheme() // Add theme hook
