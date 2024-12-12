@@ -1,9 +1,19 @@
-import { AuthOptions } from "next-auth"
+import { NextAuthOptions } from "next-auth"
 import CredentialsProvider from "next-auth/providers/credentials"
-import { getFirebaseAuth } from "@/lib/firebase"
-import { signInWithEmailAndPassword } from "firebase/auth"
+import { getDatabase, ref, get } from "firebase/database"
+import { app } from "./firebase"
 
-export const authOptions: AuthOptions = {
+interface FirebaseUser {
+  email: string;
+  password: string;
+  workId: string;
+  name?: string;
+  image?: string;
+}
+
+export const authOptions: NextAuthOptions = {
+  secret: process.env.NEXTAUTH_SECRET,
+  debug: true,
   providers: [
     CredentialsProvider({
       name: "Credentials",
@@ -12,59 +22,88 @@ export const authOptions: AuthOptions = {
         password: { label: "Password", type: "password" }
       },
       async authorize(credentials) {
+        if (!credentials?.email || !credentials?.password) {
+          console.log("Missing credentials");
+          return null;
+        }
+
         try {
-          if (!credentials?.email || !credentials?.password) return null
+          const database = getDatabase(app);
+          const usersRef = ref(database, 'users');
           
-          const auth = getFirebaseAuth();
-          if (!auth) throw new Error('Firebase auth not initialized');
+          console.log("Attempting to authenticate:", credentials.email);
+          
+          const snapshot = await get(usersRef);
+          
+          if (!snapshot.exists()) {
+            console.log("No users found in database");
+            return null;
+          }
 
-          const { user } = await signInWithEmailAndPassword(
-            auth,
-            credentials.email,
-            credentials.password
-          )
+          const users = snapshot.val() as Record<string, FirebaseUser>;
+          console.log("Database users:", users); // Debug log
 
-          if (!user.email) {
-            throw new Error('No email associated with user');
+          const user = Object.values(users).find(
+            (u) => u.email.toLowerCase() === credentials.email.toLowerCase()
+          );
+
+          if (!user) {
+            console.log("User not found:", credentials.email);
+            return null;
+          }
+
+          // Debug log the actual values
+          console.log("Found user:", {
+            email: user.email,
+            workId: user.workId,
+            storedPassword: user.password,
+            providedPassword: credentials.password
+          });
+
+          if (user.password !== credentials.password) {
+            console.log("Invalid password");
+            return null;
           }
 
           return {
-            id: user.uid,
-            email: user.email, // This is now guaranteed to be string
-            name: user.displayName || user.email, // Fallback to email if no display name
-            image: user.photoURL || null,
-          }
-
+            id: user.workId,
+            email: user.email,
+            name: user.name || null,
+            image: user.image || null
+          };
         } catch (error) {
-          console.error('Auth error:', error)
-          return null
+          console.error('Auth error:', error);
+          return null;
         }
       }
     })
   ],
-  pages: {
-    signIn: '/login',
-  },
   session: {
     strategy: "jwt",
-    maxAge: 24 * 60 * 60,
+    maxAge: 30 * 60, // 30 minutes
   },
-  secret: process.env.NEXTAUTH_SECRET,
+  pages: {
+    signIn: '/login',
+    error: '/login',
+  },
   callbacks: {
-    async jwt({ token, user, account }) {
+    async jwt({ token, user }) {
       if (user) {
-        token.id = user.id
-        token.email = user.email
+        token.id = user.id;
+        token.email = user.email;
+        // Debug: Log token creation
+        console.log("Creating JWT token for user:", user.email);
       }
-      return token
+      return token;
     },
     async session({ session, token }) {
-      if (session?.user) {
-        session.user.id = token.id as string
-        session.user.email = token.email as string
+      if (session.user) {
+        session.user.id = token.id as string;
+        session.user.email = token.email as string;
+        // Debug: Log session creation
+        console.log("Creating session for user:", session.user.email);
       }
-      return session
+      return session;
     }
-  },
-  debug: process.env.NODE_ENV === 'development',
+  }
 }

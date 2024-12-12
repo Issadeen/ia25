@@ -6,30 +6,37 @@ import { authOptions } from '@/lib/auth';
 export async function GET(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
-
-    if (!session?.user?.email) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    try {
-      const adminAuth = initAdmin();
-      if (!adminAuth) {
-        throw new Error('Failed to initialize Firebase Admin');
-      }
-      
-      const customToken = await adminAuth.createCustomToken(session.user.email);
-      return NextResponse.json({ customToken });
-    } catch (adminError: any) {
-      console.error('Firebase admin error:', adminError);
+    
+    if (!session?.user?.id) {
+      console.error('No user ID in session');
       return NextResponse.json(
-        { error: 'Firebase authentication failed', details: adminError.message },
-        { status: 500 }
+        { error: 'Unauthorized', details: 'No valid session' },
+        { status: 401 }
       );
     }
-  } catch (error: any) {
-    console.error('Session error:', error);
+
+    let adminAuth;
+    try {
+      adminAuth = initAdmin();
+    } catch (error) {
+      console.error('Admin initialization error:', error);
+      throw new Error(
+        error instanceof Error ? error.message : 'Failed to initialize Firebase Admin'
+      );
+    }
+
+    const customToken = await adminAuth.createCustomToken(session.user.id);
+    console.log('Custom token created for user:', session.user.id);
+
+    return NextResponse.json({ customToken });
+    
+  } catch (error) {
+    console.error('Token generation failed:', error);
     return NextResponse.json(
-      { error: 'Session validation failed', details: error.message },
+      { 
+        error: 'Authentication failed',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      },
       { status: 500 }
     );
   }

@@ -34,18 +34,23 @@ export default function LoginPage() {
         email,
         password,
         redirect: false,
+        callbackUrl: "/dashboard"
       })
 
       if (result?.ok) {
         router.push('/dashboard')
       } else {
-        throw new Error(result?.error || 'Login failed')
+        toast({
+          title: "Error",
+          description: result?.error || "Invalid credentials. Please try again.",
+          variant: "destructive",
+        })
       }
     } catch (error) {
       console.error("Login error:", error)
       toast({
         title: "Error",
-        description: "Invalid credentials",
+        description: "An unexpected error occurred. Please try again.",
         variant: "destructive",
       })
     } finally {
@@ -54,7 +59,11 @@ export default function LoginPage() {
   }
 
   if (status === "loading") {
-    return <div>Loading...</div>
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-gray-900" />
+      </div>
+    )
   }
 
   // Only show login form if not authenticated

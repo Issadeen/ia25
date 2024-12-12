@@ -1,0 +1,16 @@
+@layer base {
+  @media (forced-colors: active) {
+    :root {
+      forced-color-adjust: auto;
+    }
+  }
+}
+
+/* Replace any existing -ms-high-contrast usage with these modern alternatives */
+@media (forced-colors: active) {
+  .your-component {
+    forced-color-adjust: auto;
+  }
+}
+
+// ...existing styles...
