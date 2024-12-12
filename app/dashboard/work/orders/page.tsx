@@ -740,15 +740,7 @@ export default function WorkManagementPage() {
     
     // Add owner details
     doc.setFontSize(12)
-    doc.text([
-      `Owner: ${owner}`,
-      `Date: ${new Date().toLocaleDateString()}`,
-      `Total Orders: ${ownerData.totalOrders}`,
-      '\nPayment Summary:',
-      `Total Amount Due: $${formatNumber(totalToBePaid)}`,
-      `Total Amount Paid: $${formatNumber(totalPaid)}`,
-      `Balance: $${formatNumber(Math.abs(balance))} ${balance < 0 ? '(Credit)' : '(Due)'}`,
-    ], 20, 40)
+    doc.text([`Owner: ${owner}`, `Date: ${new Date().toLocaleDateString()}`, `Total Orders: ${ownerData.totalOrders}`, '\nPayment Summary:', `Total Amount Due: $${formatNumber(totalToBePaid)}`, `Total Amount Paid: $${formatNumber(totalPaid)}`, `Balance: $${formatNumber(Math.abs(balance))} ${balance < 0 ? '(Credit)' : '(Due)'}`, ], 20, 40)
   
     let yPos = 100
   
@@ -759,17 +751,7 @@ export default function WorkManagementPage() {
         head: [['Truck', 'Product', 'Quantity', 'At20', 'Price', 'Total Due', 'Status']],
         body: ownerData.loadedTrucks.map(truck => {
           const { totalDue, totalAllocated, balance } = getTruckAllocations(truck)
-          return [
-            truck.truck_number,
-            truck.product,
-            truck.quantity,
-            truck.at20 || '-',
-            `$${formatNumber(parseFloat(truck.price))}`,
-            `$${formatNumber(totalDue)}`,
-            balance <= 0 ? 'Paid' : 
-            truck.paymentPending ? 'Payment Pending' :
-            `Due: $${formatNumber(balance)}`
-          ]
+          return [truck.truck_number, truck.product, truck.quantity, truck.at20 || '-', `$${formatNumber(parseFloat(truck.price))}`, `$${formatNumber(totalDue)}`, balance <= 0 ? 'Paid' : truck.paymentPending ? 'Payment Pending' : `Due: $${formatNumber(balance)}`]
         }),
         theme: 'grid',
         headStyles: { fillColor: [40, 167, 69] },
@@ -793,12 +775,7 @@ export default function WorkManagementPage() {
             return truck ? `${truck.truck_number} ($${formatNumber(allocation.amount)})` : ''
           }).filter(Boolean).join(', ') || 'Unallocated'
   
-          return [
-            new Date(payment.timestamp).toLocaleDateString(),
-            `$${formatNumber(payment.amountPaid)}`,
-            allocatedTrucks,
-            payment.note || '-'
-          ]
+          return [new Date(payment.timestamp).toLocaleDateString(), `$${formatNumber(payment.amountPaid)}`, allocatedTrucks, payment.note || '-']
         }),
         theme: 'grid',
         headStyles: { fillColor: [40, 167, 69] },
@@ -808,21 +785,11 @@ export default function WorkManagementPage() {
     }
   
     // Add summary statistics
-    doc.text([
-      '\nOrder Statistics:',
-      `AGO Orders: ${ownerData.agoOrders}`,
-      `PMS Orders: ${ownerData.pmsOrders}`,
-      `Queued Orders: ${ownerData.queuedOrders}`,
-      `Loaded Orders: ${ownerData.loadedOrders}`,
-      `Pending Orders: ${ownerData.pendingOrders}`,
-    ], 20, (doc as any).autoTable.previous.finalY + 20)
+    doc.text(['\nOrder Statistics:', `AGO Orders: ${ownerData.agoOrders}`, `PMS Orders: ${ownerData.pmsOrders}`, `Queued Orders: ${ownerData.queuedOrders}`, `Loaded Orders: ${ownerData.loadedOrders}`, `Pending Orders: ${ownerData.pendingOrders}`, ], 20, (doc as any).autoTable.previous.finalY + 20)
   
     // Add footer
     doc.setFontSize(8)
-    doc.text([
-      'This is a computer-generated document.',
-      `Generated on: ${new Date().toLocaleString()}`
-    ], 20, doc.internal.pageSize.height - 20)
+    doc.text(['This is a computer-generated document.', `Generated on: ${new Date().toLocaleString()}`], 20, doc.internal.pageSize.height - 20)
   
     // Save the PDF
     doc.save(`${owner}_Payment_Summary_${new Date().toISOString().split('T')[0]}.pdf`)
@@ -931,7 +898,7 @@ export default function WorkManagementPage() {
 
   return (
     <div className="min-h-screen">
-      <header className="fixed top-0 left-0 w-full border-b z-50 bg-emerald-900/10 backdrop-blur-xl">
+      <header className="fixed top-0 left-0 w-full border-b z-50 bg-gradient-to-r from-emerald-900/10 via-blue-900/10 to-blue-900/10 backdrop-blur-xl">
         <div className="w-full">
           <div className="max-w-7xl mx-auto px-4 py-3 flex justify-between items-center">
             {/* Left side */} 
@@ -944,7 +911,9 @@ export default function WorkManagementPage() {
               >
                 <ArrowLeft className="h-5 w-5" />
               </Button>
-              <h1 className="text-xl font-semibold text-emerald-900">Work Management</h1>
+              <h1 className="text-xl font-semibold bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">
+                Work Management
+              </h1>
             </div>
             {/* Right side */} 
             <div className="flex items-center gap-4">
@@ -1101,15 +1070,15 @@ export default function WorkManagementPage() {
             <table className="w-full border-collapse bg-card text-card-foreground">
               <thead>
                 <tr className="border-b">
-                  <th className="p-3 text-left font-medium">Owner</th>
-                  <th className="p-3 text-left font-medium">Product</th>
-                  <th className="p-3 text-left font-medium">Truck Number</th>
-                  <th className="p-3 text-left font-medium">Quantity</th>
-                  <th className="p-3 text-left font-medium">Status</th>
-                  <th className="p-3 text-left font-medium">Order No</th>
-                  <th className="p-3 text-left font-medium">Depot</th>
-                  <th className="p-3 text-left font-medium">Destination</th>
-                  <th className="p-3 text-left font-medium">Actions</th>
+                  <th className="p-3 text-left font-medium bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">Owner</th>
+                  <th className="p-3 text-left font-medium bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">Product</th>
+                  <th className="p-3 text-left font-medium bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">Truck Number</th>
+                  <th className="p-3 text-left font-medium bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">Quantity</th>
+                  <th className="p-3 text-left font-medium bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">Status</th>
+                  <th className="p-3 text-left font-medium bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">Order No</th>
+                  <th className="p-3 text-left font-medium bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">Depot</th>
+                  <th className="p-3 text-left font-medium bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">Destination</th>
+                  <th className="p-3 text-left font-medium bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -1292,7 +1261,7 @@ export default function WorkManagementPage() {
           {/* Summary Stats */} 
           <Card className="p-6">
             <div className="flex justify-between items-center">
-              <h2 className="text-xl font-semibold mb-4">Summary</h2>
+              <h2 className="text-xl font-semibold mb-4 bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">Summary</h2>
               <Button variant="ghost" onClick={handleCopySummary}>
                 <Copy className="h-5 w-5" />
               </Button>
@@ -1317,7 +1286,7 @@ export default function WorkManagementPage() {
           {/* Owner Summary */} 
           <Card className="p-6">
             <div className="flex justify-between items-center">
-              <h2 className="text-xl font-semibold mb-4">Owner Summary</h2>
+              <h2 className="text-xl font-semibold mb-4 bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">Owner Summary</h2>
               <Button variant="ghost" onClick={handleCopySummary}>
                 <Copy className="h-5 w-5" />
               </Button>
@@ -1326,7 +1295,7 @@ export default function WorkManagementPage() {
               {Object.entries(ownerSummary).map(([owner, data]) => (
                 <Card key={owner} className="p-4">
                   <div className="flex justify-between items-start">
-                    <h3 className="text-lg font-semibold mb-2">{owner}</h3>
+                    <h3 className="text-lg font-semibold mb-2 bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">{owner}</h3>
                     <Button 
                       variant="ghost" 
                       size="sm"
@@ -1354,7 +1323,7 @@ export default function WorkManagementPage() {
       <Dialog open={isAddModalOpen} onOpenChange={setIsAddModalOpen}>
         <DialogContent className="sm:max-w-[800px] w-[90vw] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Add New Work Detail</DialogTitle>
+            <DialogTitle className="bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">Add New Work Detail</DialogTitle>
           </DialogHeader>
           <AddWorkDialog 
             onClose={() => setIsAddModalOpen(false)} 
@@ -1373,7 +1342,7 @@ export default function WorkManagementPage() {
       <Dialog open={ownerModalOpen} onOpenChange={setOwnerModalOpen}>
         <DialogContent className="sm:max-w-[800px] w-[90vw] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{selectedOwner} Details</DialogTitle>
+            <DialogTitle className="bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">{selectedOwner} Details</DialogTitle>
           </DialogHeader>
           
           {selectedOwner && ownerSummary[selectedOwner] && (
@@ -1517,7 +1486,7 @@ export default function WorkManagementPage() {
       <Dialog open={isPaymentModalOpen} onOpenChange={setIsPaymentModalOpen}>
         <DialogContent className="sm:max-w-[800px] w-[90vw] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Add Payment for {selectedOwner}</DialogTitle>
+            <DialogTitle className="bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">Add Payment for {selectedOwner}</DialogTitle>
           </DialogHeader>
           <form onSubmit={handlePaymentSubmit} className="space-y-4">
             <div className="space-y-4">
@@ -1608,7 +1577,7 @@ export default function WorkManagementPage() {
       <Dialog open={showTruckHistory} onOpenChange={setShowTruckHistory}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>
+            <DialogTitle className="bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">
               Truck History - {selectedTruckHistory?.truck_number}
             </DialogTitle>
           </DialogHeader>
