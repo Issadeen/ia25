@@ -657,7 +657,6 @@ export default function EntriesPage() {
       return
     }
   
-    // Save current form state
     setLastFormState({
       truckNumber,
       destination,
@@ -665,7 +664,6 @@ export default function EntriesPage() {
       at20Quantity
     })
   
-    // For SSD destination, check permit entry
     if (destination.toLowerCase() === 'ssd' && !entryUsedInPermit) {
       toast({
         title: "Permit Entry Required",
@@ -679,92 +677,114 @@ export default function EntriesPage() {
     const db = getDatabase()
   
     try {
-      // First verify permit entry
-      const permitEntrySnapshot = await get(dbRef(db, `tr800/${entryUsedInPermit}`))
-      if (!permitEntrySnapshot.exists()) {
-        toast({
-          title: "Invalid Permit Entry",
-          description: "The selected permit entry does not exist",
-          variant: "destructive"
-        })
-        setIsLoading(false)
-        return
-      }
-  
-      const permitEntryData = permitEntrySnapshot.val()
       const requiredQuantity = parseFloat(at20Quantity)
-  
-      // Verify product match
-      if (permitEntryData.product.toLowerCase() !== product.toLowerCase()) {
-        toast({
-          title: "Product Mismatch",
-          description: "The permit entry product does not match the selected product",
-          variant: "destructive"
-        })
-        setIsLoading(false)
-        return
-      }
-  
-      // Verify sufficient quantity
-      if (permitEntryData.remainingQuantity < requiredQuantity) {
-        toast({
-          title: "Insufficient Quantity",
-          description: `Selected permit entry only has ${permitEntryData.remainingQuantity.toLocaleString()} liters remaining`,
-          variant: "destructive"
-        })
-        setIsLoading(false)
-        return
-      }
-  
-      // Create the truck entry key by combining truck numbers
-      const truckEntryKey = `${truckNumber}-${destination}${product}`.replace(/\//g, '-')
-  
-      // Prepare updates
+      let remainingToAllocate = requiredQuantity
       const updates: { [key: string]: any } = {}
+      const tempOriginalData: { [key: string]: Entry } = {}
+      const allocations: Entry[] = []
   
-      // Update TR800 entry
-      const updatedPermitEntry = {
-        ...permitEntryData,
-        remainingQuantity: permitEntryData.remainingQuantity - requiredQuantity
+      // Get all available entries sorted by timestamp (FIFO)
+      const tr800Snapshot = await get(dbRef(db, 'tr800'))
+      if (!tr800Snapshot.exists()) {
+        throw new Error("No entries found")
       }
-      updates[`tr800/${entryUsedInPermit}`] = updatedPermitEntry
   
-      // Save truck entry directly with correct format
-      const truckEntryData = {
-        entryNumber: permitEntryData.number,
-        subtractedQuantity: requiredQuantity
+      const availableEntries = Object.entries(tr800Snapshot.val())
+        .map(([key, value]: [string, any]) => ({
+          key,
+          ...value
+        }))
+        .filter(entry => 
+          entry.product.toLowerCase() === product.toLowerCase() &&
+          entry.destination.toLowerCase() === destination.toLowerCase() &&
+          entry.remainingQuantity > 0
+        )
+        .sort((a, b) => a.timestamp - b.timestamp) // FIFO ordering
+  
+      if (availableEntries.length === 0) {
+        throw new Error("No available entries found for this product and destination")
       }
-      
-      // Generate a unique key for the truck entry
-      const newTruckEntryRef = push(dbRef(db, `truckEntries/${truckEntryKey}`))
-      updates[`truckEntries/${truckEntryKey}/${newTruckEntryRef.key}`] = truckEntryData
   
-      // Get owner information from work_details
-      const workDetailsRef = dbRef(db, 'work_details')
-      const workDetailsSnapshot = await get(query(
-        workDetailsRef,
-        orderByChild('truck_number'),
-        equalTo(truckNumber)
-      ))
+      // Iterate through available entries until we fulfill the required quantity
+      for (const entry of availableEntries) {
+        if (remainingToAllocate <= 0) break
   
+        const toAllocate = Math.min(entry.remainingQuantity, remainingToAllocate)
+        
+        tempOriginalData[entry.key] = { ...entry }
+        
+        const updatedEntry = {
+          ...entry,
+          remainingQuantity: entry.remainingQuantity - toAllocate
+        }
+        
+        updates[`tr800/${entry.key}`] = updatedEntry
+        
+        allocations.push({
+          key: entry.key,
+          motherEntry: entry.number,
+          initialQuantity: entry.initialQuantity,
+          remainingQuantity: updatedEntry.remainingQuantity,
+          truckNumber,
+          destination,
+          subtractedQuantity: toAllocate,
+          number: entry.number,
+          product,
+          product_destination: `${product}-${destination}`,
+          timestamp: Date.now()
+        })
+        
+        remainingToAllocate -= toAllocate
+      }
+  
+      if (remainingToAllocate > 0) {
+        throw new Error(`Insufficient quantity available. Still need ${remainingToAllocate.toFixed(2)} liters`)
+      }
+  
+      // Create the truck entry key correctly - combine only truck number and product
+      const truckEntryKey = `${truckNumber.replace(/\//g, '-')}-${destination}${product}`.toUpperCase()
+  
+      // Save truck entries with correct structure
+      for (const allocation of allocations) {
+        const truckEntryData = {
+          entryNumber: allocation.motherEntry,
+          subtractedQuantity: allocation.subtractedQuantity,
+          timestamp: Date.now()
+        }
+        
+        // Generate a unique key for each entry under the truck
+        const newTruckEntryRef = push(dbRef(db, `truckEntries/${truckEntryKey}`))
+        updates[`truckEntries/${truckEntryKey}/${newTruckEntryRef.key}`] = truckEntryData
+      }
+  
+      // Get owner information using once() instead of get() with query
       let owner = 'Unknown'
+      const workDetailsRef = dbRef(db, 'work_details')
+      const workDetailsSnapshot = await get(workDetailsRef)
+      
       if (workDetailsSnapshot.exists()) {
-        const workDetail = Object.values(workDetailsSnapshot.val())[0] as any
-        owner = workDetail.owner || 'Unknown'
+        // Find matching truck number manually
+        Object.values(workDetailsSnapshot.val()).forEach((detail: any) => {
+          if (detail.truck_number === truckNumber) {
+            owner = detail.owner || 'Unknown'
+          }
+        })
       }
   
-      // Update the allocation report data
-      const currentDate = new Date().toISOString().split('T')[0] // Get current date in YYYY-MM-DD format
+      // Create allocation report
+      const currentDate = new Date().toISOString().split('T')[0]
       const reportRef = push(dbRef(db, 'allocation_reports'))
       updates[`allocation_reports/${reportRef.key}`] = {
         truckNumber,
-        owner, // Add owner from work_details
-        volume: at20Quantity, // Use AT20 quantity directly
-        totalVolume: at20Quantity, // For single entry, use AT20
+        owner,
+        entries: allocations.map(a => ({
+          entryUsed: a.motherEntry,
+          volume: a.subtractedQuantity.toString()
+        })),
+        totalVolume: at20Quantity,
         at20: at20Quantity,
         product,
-        entryUsed: permitEntryData.number,
-        loadedDate: currentDate, // Use current date
+        loadedDate: currentDate,
         allocationDate: new Date().toISOString(),
         entryDestination: destination
       }
@@ -773,34 +793,21 @@ export default function EntriesPage() {
       await update(dbRef(db), updates)
   
       // Update local state
-      setOriginalData({ [entryUsedInPermit]: permitEntryData })
-      setEntriesData([{
-        key: entryUsedInPermit,
-        motherEntry: permitEntryData.number,
-        initialQuantity: permitEntryData.initialQuantity,
-        remainingQuantity: updatedPermitEntry.remainingQuantity,
-        truckNumber,
-        destination,
-        subtractedQuantity: requiredQuantity,
-        number: permitEntryData.number,
-        product,
-        product_destination: `${product}-${destination}`,
-        timestamp: Date.now()
-      }])
+      setOriginalData(tempOriginalData)
+      setEntriesData(allocations)
   
       toast({
         title: "Success",
-        description: `Allocated ${requiredQuantity.toLocaleString()} liters to truck ${truckNumber}`
+        description: `Allocated ${requiredQuantity.toLocaleString()} liters using ${allocations.length} entries`
       })
   
-      // Clear form after successful allocation
       clearForm()
   
     } catch (error) {
       console.error('Allocation error:', error)
       toast({
         title: "Allocation Failed",
-        description: "Failed to process allocation. Please try again.",
+        description: error instanceof Error ? error.message : "Failed to process allocation",
         variant: "destructive"
       })
     } finally {
@@ -1013,12 +1020,36 @@ export default function EntriesPage() {
         })
       }
   
+      // Find and remove corresponding allocation report
+      const reportsRef = dbRef(db, 'allocation_reports')
+      const reportsSnapshot = await get(reportsRef)
+      
+      if (reportsSnapshot.exists()) {
+        const currentTimestamp = Date.now()
+        const fiveMinutesAgo = currentTimestamp - (5 * 60 * 1000) // 5 minutes window
+        
+        // Find the most recent matching report
+        reportsSnapshot.forEach((reportSnapshot) => {
+          const report = reportSnapshot.val()
+          const reportDate = new Date(report.allocationDate).getTime()
+          
+          if (
+            report.truckNumber === truckNumber &&
+            reportDate > fiveMinutesAgo &&
+            reportDate <= currentTimestamp
+          ) {
+            // Add report to be removed in updates
+            updates[`allocation_reports/${reportSnapshot.key}`] = null
+          }
+        })
+      }
+  
       // Apply all updates in a single transaction
       await update(dbRef(db), updates)
   
       toast({
         title: "Success",
-        description: "Successfully undid the last allocation"
+        description: "Successfully undid the allocation and removed the report"
       })
   
       // Reset states
@@ -1031,6 +1062,7 @@ export default function EntriesPage() {
       }
   
     } catch (error) {
+      console.error('Undo error:', error)
       toast({
         title: "Error",
         description: "Failed to undo allocation. Please try again.",
