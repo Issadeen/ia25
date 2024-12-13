@@ -3,12 +3,12 @@
 import { useState, useEffect } from "react"
 import { useSession } from "next-auth/react"
 import { useRouter } from "next/navigation"
-import { ArrowLeft, Download, Search, Plus, Loader2 } from "lucide-react"
+import { ArrowLeft, Download, Search, Plus, Loader2, ChevronLeft, ChevronRight, Edit, Check, X } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { getDatabase, ref, onValue, push } from "firebase/database"
+import { getDatabase, ref, onValue, push, update, get } from "firebase/database"
 import { format } from "date-fns"
 import * as XLSX from 'xlsx'
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -50,6 +50,17 @@ interface ReportFormData {
   }[];
 }
 
+// Update the initial state for formData
+const initialFormData: ReportFormData = {
+  truckNumber: '',
+  owner: '',
+  product: '',
+  entryDestination: '',
+  at20: '',
+  loadedDate: new Date().toISOString().split('T')[0], // Initialize with current date
+  entries: [{ volume: '', entryUsed: '' }]
+}
+
 export default function ReportsPage() {
   const { data: session, status } = useSession()
   const router = useRouter()
@@ -59,17 +70,16 @@ export default function ReportsPage() {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false)
   const [lastUploadedImage, setLastUploadedImage] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [formData, setFormData] = useState<ReportFormData>({
-    truckNumber: '',
-    owner: '',
-    product: '',
-    entryDestination: '',
-    at20: '',
-    loadedDate: '',  // Add this line
-    entries: [{ volume: '', entryUsed: '' }]
-  })
+  const [formData, setFormData] = useState<ReportFormData>(initialFormData)
+  const [currentDate, setCurrentDate] = useState(new Date())
 
   const { toast } = useToast()
+
+  // Add these to existing state declarations
+  const [monthClickCount, setMonthClickCount] = useState(0)
+  const [showEditControls, setShowEditControls] = useState(false)
+  const [editingReport, setEditingReport] = useState<string | null>(null)
+  const [editFormData, setEditFormData] = useState<Partial<AllocationReport>>({})
 
   useEffect(() => {
     setMounted(true)
@@ -87,10 +97,27 @@ export default function ReportsPage() {
     
     const unsubscribe = onValue(reportsRef, (snapshot) => {
       if (snapshot.exists()) {
-        const reportsData: AllocationReport[] = Object.values(snapshot.val())
-        setReports(reportsData.sort((a, b) => 
+        const reportsData = Object.entries(snapshot.val()).map(([key, value]) => ({
+          id: key,
+          ...(value as any)
+        }));
+        
+        // Ensure entries array exists for each report
+        const processedReports = reportsData.map(report => ({
+          ...report,
+          entries: Array.isArray(report.entries) ? report.entries : [
+            {
+              volume: report.volume || '0',
+              entryUsed: report.entryUsed || ''
+            }
+          ]
+        }));
+
+        setReports(processedReports.sort((a, b) => 
           new Date(b.allocationDate).getTime() - new Date(a.allocationDate).getTime()
-        ))
+        ));
+      } else {
+        setReports([]);
       }
     })
 
@@ -114,16 +141,76 @@ export default function ReportsPage() {
     fetchImageUrl()
   }, [session?.user?.email, session?.user?.image])
 
-  const filteredReports = reports.filter(report => 
-    report.truckNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    report.owner.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    report.product.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    report.entries.some(entry => entry.entryUsed.toLowerCase().includes(searchTerm.toLowerCase()))
-  )
+  // Add this after your existing useEffect hooks
+  useEffect(() => {
+    if (monthClickCount >= 3) {
+      setShowEditControls(true)
+      toast({
+        title: "Edit Mode Activated",
+        description: "You can now edit reports",
+      })
+    }
+  }, [monthClickCount])
+
+  const nextMonth = () => {
+    setCurrentDate(prev => {
+      const next = new Date(prev)
+      next.setMonth(next.getMonth() + 1)
+      return next
+    })
+  }
+
+  const previousMonth = () => {
+    setCurrentDate(prev => {
+      const previous = new Date(prev)
+      previous.setMonth(previous.getMonth() - 1)
+      return previous
+    })
+  }
+
+  const filteredReports = reports.filter(report => {
+    if (!report) return false;
+    
+    const reportDate = new Date(report.allocationDate)
+    const isInCurrentMonth = 
+      reportDate.getMonth() === currentDate.getMonth() && 
+      reportDate.getFullYear() === currentDate.getFullYear()
+
+    return isInCurrentMonth && (
+      report.truckNumber?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      report.owner?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      report.product?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      report.entries?.some(entry => entry?.entryUsed?.toLowerCase().includes(searchTerm.toLowerCase()))
+    )
+  })
+
+  // Add this helper function at the top level of your component
+  const formatDate = (dateString: string | undefined) => {
+    if (!dateString) return '-';
+    try {
+      const date = new Date(dateString);
+      if (isNaN(date.getTime())) return '-';
+      return format(date, 'dd/MM/yyyy HH:mm');
+    } catch (error) {
+      return '-';
+    }
+  }
+
+  const formatSimpleDate = (dateString: string | undefined) => {
+    if (!dateString) return '-';
+    try {
+      const date = new Date(dateString);
+      if (isNaN(date.getTime())) return '-';
+      return format(date, 'dd/MM/yyyy');
+    } catch (error) {
+      return '-';
+    }
+  }
 
   const exportToExcel = () => {
     const data = filteredReports.map(report => ({
-      'Date': format(new Date(report.allocationDate), 'dd/MM/yyyy HH:mm'),
+      'Date': formatDate(report.allocationDate),
+      'Loaded Date': formatSimpleDate(report.loadedDate),
       'Truck Number': report.truckNumber,
       'Owner': report.owner,
       'Product': report.product.toUpperCase(),
@@ -199,15 +286,7 @@ export default function ReportsPage() {
       })
 
       setIsAddModalOpen(false)
-      setFormData({
-        truckNumber: '',
-        owner: '',
-        product: '',
-        entryDestination: '',
-        at20: '',
-        loadedDate: '',  // Add this line
-        entries: [{ volume: '', entryUsed: '' }]
-      })
+      setFormData(initialFormData) // Reset with initial data instead of empty values
     } catch (error) {
       toast({
         title: "Error",
@@ -215,6 +294,52 @@ export default function ReportsPage() {
       })
     } finally {
       setIsSubmitting(false)
+    }
+  }
+
+  // Add this helper function
+  const handleMonthClick = () => {
+    setMonthClickCount(prev => prev + 1)
+    // Reset count after 2 seconds of no clicks
+    setTimeout(() => setMonthClickCount(0), 2000)
+  }
+
+  // Add these functions to handle editing
+  const handleEdit = (report: AllocationReport) => {
+    setEditingReport(report.truckNumber)
+    setEditFormData(report)
+  }
+
+  const handleSaveEdit = async (reportId: string) => {
+    try {
+      const db = getDatabase()
+      const reportsRef = ref(db, 'allocation_reports')
+      const snapshot = await get(reportsRef)
+      
+      if (snapshot.exists()) {
+        // Find the report key
+        let reportKey: string | null = null
+        Object.entries(snapshot.val()).forEach(([key, value]: [string, any]) => {
+          if (value.truckNumber === reportId) {
+            reportKey = key
+          }
+        })
+
+        if (reportKey) {
+          await update(ref(db, `allocation_reports/${reportKey}`), editFormData)
+          toast({
+            title: "Success",
+            description: "Report updated successfully"
+          })
+          setEditingReport(null)
+          setEditFormData({})
+        }
+      }
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to update report"
+      })
     }
   }
 
@@ -283,6 +408,32 @@ export default function ReportsPage() {
 
         <Card>
           <CardContent className="p-6">
+            {/* Add this month navigator above the table */}
+            <div className="flex items-center justify-center gap-4 mb-6">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={previousMonth}
+                className="hover:bg-emerald-100 hover:text-emerald-700"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <h2 
+                className="text-lg font-semibold bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent cursor-pointer"
+                onClick={handleMonthClick}
+              >
+                {format(currentDate, 'MMMM yyyy')}
+              </h2>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={nextMonth}
+                className="hover:bg-emerald-100 hover:text-emerald-700"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
+
             <Table>
               <TableHeader>
                 <TableRow><TableHead>Date</TableHead
@@ -293,35 +444,96 @@ export default function ReportsPage() {
                 ><TableHead>Entries</TableHead
                 ><TableHead>Total Volume</TableHead
                 ><TableHead>AT20</TableHead
-                ><TableHead>Destination</TableHead></TableRow>
+                ><TableHead>Destination</TableHead>
+                {showEditControls && <TableHead className="w-[50px]">Edit</TableHead>}
+                </TableRow>
               </TableHeader>
               <TableBody>
                 {filteredReports.map((report, index) => (
                   <TableRow key={index}><TableCell>
-                    {format(new Date(report.allocationDate), 'dd/MM/yyyy HH:mm')}
+                    {formatDate(report?.allocationDate)}
                   </TableCell><TableCell>
-                    {format(new Date(report.loadedDate), 'dd/MM/yyyy')}
+                    {editingReport === report.truckNumber ? (
+                      <Input
+                        type="date"
+                        value={editFormData.loadedDate || report.loadedDate}
+                        onChange={(e) => setEditFormData(prev => ({ ...prev, loadedDate: e.target.value }))}
+                      />
+                    ) : (
+                      formatSimpleDate(report?.loadedDate)
+                    )}
                   </TableCell><TableCell>
-                    {report.truckNumber}
+                    {editingReport === report.truckNumber ? (
+                      <Input
+                        value={editFormData.truckNumber || report.truckNumber}
+                        onChange={(e) => setEditFormData(prev => ({ ...prev, truckNumber: e.target.value }))}
+                      />
+                    ) : (
+                      report?.truckNumber || '-'
+                    )}
                   </TableCell><TableCell>
-                    {report.owner}
+                    {editingReport === report.truckNumber ? (
+                      <Input
+                        value={editFormData.owner || report.owner}
+                        onChange={(e) => setEditFormData(prev => ({ ...prev, owner: e.target.value }))}
+                      />
+                    ) : (
+                      report?.owner || '-'
+                    )}
                   </TableCell><TableCell>
-                    {report.product.toUpperCase()}
+                    {report?.product?.toUpperCase() || '-'}
                   </TableCell><TableCell>
                     <div className="space-y-1">
-                      {report.entries.map((entry, i) => (
+                      {report?.entries?.map((entry, i) => (
                         <div key={i} className="text-sm">
-                          {entry.entryUsed}: {entry.volume}L
+                          {entry?.entryUsed || '-'}: {entry?.volume || '0'}L
                         </div>
                       ))}
                     </div>
                   </TableCell><TableCell>
-                    {report.totalVolume}L
+                    {report?.totalVolume ? `${report.totalVolume}L` : '-'}
                   </TableCell><TableCell>
-                    {report.at20}
+                    {report?.at20 || '-'}
                   </TableCell><TableCell>
-                    {report.entryDestination.toUpperCase()}
-                  </TableCell></TableRow>
+                    {report?.entryDestination?.toUpperCase() || '-'}
+                  </TableCell>
+                  {showEditControls && (
+                    <TableCell>
+                      {editingReport === report.truckNumber ? (
+                        <div className="flex gap-2">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleSaveEdit(report.truckNumber)}
+                            className="h-8 w-8 p-0"
+                          >
+                            <Check className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              setEditingReport(null)
+                              setEditFormData({})
+                            }}
+                            className="h-8 w-8 p-0"
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      ) : (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleEdit(report)}
+                          className="h-8 w-8 p-0"
+                        >
+                          <Edit className="h-4 w-4" />
+                        </Button>
+                      )}
+                    </TableCell>
+                  )}
+                  </TableRow>
                 ))}
               </TableBody>
             </Table>
@@ -358,7 +570,7 @@ export default function ReportsPage() {
               <div>
                 <Label htmlFor="product">Product</Label>
                 <Select
-                  value={formData.product}
+                  value={formData.product || ''} // Add default empty string
                   onValueChange={(value) => setFormData(prev => ({ ...prev, product: value }))}
                 >
                   <SelectTrigger>
@@ -394,7 +606,7 @@ export default function ReportsPage() {
                 <Input
                   id="loadedDate"
                   type="date"
-                  value={formData.loadedDate}
+                  value={formData.loadedDate || new Date().toISOString().split('T')[0]}
                   onChange={(e) => setFormData(prev => ({ ...prev, loadedDate: e.target.value }))}
                   required
                 />
@@ -419,7 +631,7 @@ export default function ReportsPage() {
                   <div>
                     <Label>Entry Number</Label>
                     <Input
-                      value={entry.entryUsed}
+                      value={entry.entryUsed || ''} // Add default empty string
                       onChange={(e) => handleEntryChange(index, 'entryUsed', e.target.value)}
                       required
                     />
@@ -429,7 +641,7 @@ export default function ReportsPage() {
                     <div className="flex gap-2">
                       <Input
                         type="number"
-                        value={entry.volume}
+                        value={entry.volume || ''} // Add default empty string
                         onChange={(e) => handleEntryChange(index, 'volume', e.target.value)}
                         required
                       />

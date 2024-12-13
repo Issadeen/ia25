@@ -657,6 +657,14 @@ export default function EntriesPage() {
       return
     }
   
+    // Save current form state
+    setLastFormState({
+      truckNumber,
+      destination,
+      product,
+      at20Quantity
+    })
+  
     // For SSD destination, check permit entry
     if (destination.toLowerCase() === 'ssd' && !entryUsedInPermit) {
       toast({
@@ -667,159 +675,129 @@ export default function EntriesPage() {
       return
     }
   
-    // Add validation for permit entry quantity
-    if (destination.toLowerCase() === 'ssd') {
-      const permitEntry = availablePermitEntries.find(entry => entry.key === entryUsedInPermit);
-      if (!permitEntry) {
-        toast({
-          title: "Invalid Permit Entry",
-          description: "Please select a valid permit entry",
-          variant: "destructive"
-        });
-        return;
-      }
-  
-      const requiredQuantity = parseFloat(at20Quantity);
-      if (permitEntry.remainingQuantity < requiredQuantity) {
-        toast({
-          title: "Insufficient Quantity",
-          description: `Selected permit entry only has ${permitEntry.remainingQuantity.toLocaleString()} liters remaining. Required: ${requiredQuantity.toLocaleString()} liters.`,
-          variant: "destructive"
-        });
-        return;
-      }
-    }
-  
     setIsLoading(true)
     const db = getDatabase()
   
     try {
-      // First, validate if the permit entry exists and matches product
-      if (destination.toLowerCase() === 'ssd') {
-        const permitEntrySnapshot = await get(dbRef(db, `tr800/${entryUsedInPermit}`))
-        if (!permitEntrySnapshot.exists()) {
-          toast({
-            title: "Invalid Permit Entry",
-            description: "The selected permit entry does not exist",
-            variant: "destructive"
-          })
-          setIsLoading(false)
-          return
-        }
-  
-        const permitEntryData = permitEntrySnapshot.val()
-        if (permitEntryData.product.toLowerCase() !== product.toLowerCase()) {
-          toast({
-            title: "Product Mismatch",
-            description: "The permit entry product does not match the selected product",
-            variant: "destructive"
-          })
-          setIsLoading(false)
-          return
-        }
-      }
-
-      // Get truck details from work_details to find the owner
-      const workDetailsRef = dbRef(db, 'work_details')
-      const workDetailsSnapshot = await get(query(
-        workDetailsRef,
-        orderByChild('truck_number'),
-        equalTo(truckNumber)
-      ))
-
-      let owner = 'Unknown'
-      if (workDetailsSnapshot.exists()) {
-        const workDetail = Object.values(workDetailsSnapshot.val())[0] as any
-        owner = workDetail.owner
-      }
-  
-      // Now proceed with allocation
-      let required = parseFloat(at20Quantity)
-      const allocations: Entry[] = []
-      const updates: { [key: string]: any } = {}
-      const tempOriginalData: { [key: string]: any } = {}
-  
-      // Get or create the permit entry
-      const permitEntry = destination.toLowerCase() === 'ssd' ? {
-        key: entryUsedInPermit,
-        ...await (await get(dbRef(db, `tr800/${entryUsedInPermit}`))).val()
-      } : null
-  
-      // Use permit entry for allocation
-      if (permitEntry && permitEntry.remainingQuantity >= required) {
-        const updatedEntry = {
-          ...permitEntry,
-          remainingQuantity: permitEntry.remainingQuantity - required
-        }
-        
-        updates[`tr800/${permitEntry.key}`] = updatedEntry
-        tempOriginalData[permitEntry.key] = { ...permitEntry }
-        
-        allocations.push({
-          key: permitEntry.key,
-          motherEntry: permitEntry.number,
-          initialQuantity: permitEntry.initialQuantity,
-          remainingQuantity: updatedEntry.remainingQuantity,
-          truckNumber,
-          destination,
-          subtractedQuantity: required,
-          number: permitEntry.number,
-          product,
-          product_destination: `${product}-${destination}`,
-          timestamp: Date.now()
-        })
-  
-        // Save truck entry
-        const sanitizedTruckNumber = truckNumber.replace(/\//g, '-')
-        const truckEntryRef = dbRef(db, `truckEntries/${sanitizedTruckNumber}`)
-        const truckEntryData = {
-          entryNumber: permitEntry.number,
-          subtractedQuantity: required,
-          timestamp: Date.now()
-        }
-        await push(truckEntryRef, truckEntryData)
-
-        // Create allocation report
-        const reportData: AllocationReport = {
-          truckNumber,
-          volume: required.toString(),
-          at20: at20Quantity,
-          owner,
-          product,
-          entryUsed: permitEntry.number,
-          allocationDate: new Date().toISOString(),
-          entryDestination: destination
-        }
-
-        // Add report to updates
-        const reportRef = push(dbRef(db, 'allocation_reports'))
-        updates[`allocation_reports/${reportRef.key}`] = reportData
-  
-        // Apply all updates in one transaction
-        await update(dbRef(db), updates)
-  
-        setOriginalData(tempOriginalData)
-        setEntriesData(allocations)
-  
+      // First verify permit entry
+      const permitEntrySnapshot = await get(dbRef(db, `tr800/${entryUsedInPermit}`))
+      if (!permitEntrySnapshot.exists()) {
         toast({
-          title: "Allocation Successful",
-          description: `Allocated ${required.toFixed(2)} liters to truck ${truckNumber}`
-        })
-  
-        // Clear form after successful allocation
-        clearForm()
-  
-      } else {
-        toast({
-          title: "Insufficient Quantity",
-          description: "The permit entry does not have sufficient quantity",
+          title: "Invalid Permit Entry",
+          description: "The selected permit entry does not exist",
           variant: "destructive"
         })
         setIsLoading(false)
         return
       }
   
+      const permitEntryData = permitEntrySnapshot.val()
+      const requiredQuantity = parseFloat(at20Quantity)
+  
+      // Verify product match
+      if (permitEntryData.product.toLowerCase() !== product.toLowerCase()) {
+        toast({
+          title: "Product Mismatch",
+          description: "The permit entry product does not match the selected product",
+          variant: "destructive"
+        })
+        setIsLoading(false)
+        return
+      }
+  
+      // Verify sufficient quantity
+      if (permitEntryData.remainingQuantity < requiredQuantity) {
+        toast({
+          title: "Insufficient Quantity",
+          description: `Selected permit entry only has ${permitEntryData.remainingQuantity.toLocaleString()} liters remaining`,
+          variant: "destructive"
+        })
+        setIsLoading(false)
+        return
+      }
+  
+      // Create the truck entry key by combining truck numbers
+      const truckEntryKey = `${truckNumber}-${destination}${product}`.replace(/\//g, '-')
+  
+      // Prepare updates
+      const updates: { [key: string]: any } = {}
+  
+      // Update TR800 entry
+      const updatedPermitEntry = {
+        ...permitEntryData,
+        remainingQuantity: permitEntryData.remainingQuantity - requiredQuantity
+      }
+      updates[`tr800/${entryUsedInPermit}`] = updatedPermitEntry
+  
+      // Save truck entry directly with correct format
+      const truckEntryData = {
+        entryNumber: permitEntryData.number,
+        subtractedQuantity: requiredQuantity
+      }
+      
+      // Generate a unique key for the truck entry
+      const newTruckEntryRef = push(dbRef(db, `truckEntries/${truckEntryKey}`))
+      updates[`truckEntries/${truckEntryKey}/${newTruckEntryRef.key}`] = truckEntryData
+  
+      // Get owner information from work_details
+      const workDetailsRef = dbRef(db, 'work_details')
+      const workDetailsSnapshot = await get(query(
+        workDetailsRef,
+        orderByChild('truck_number'),
+        equalTo(truckNumber)
+      ))
+  
+      let owner = 'Unknown'
+      if (workDetailsSnapshot.exists()) {
+        const workDetail = Object.values(workDetailsSnapshot.val())[0] as any
+        owner = workDetail.owner || 'Unknown'
+      }
+  
+      // Update the allocation report data
+      const currentDate = new Date().toISOString().split('T')[0] // Get current date in YYYY-MM-DD format
+      const reportRef = push(dbRef(db, 'allocation_reports'))
+      updates[`allocation_reports/${reportRef.key}`] = {
+        truckNumber,
+        owner, // Add owner from work_details
+        volume: at20Quantity, // Use AT20 quantity directly
+        totalVolume: at20Quantity, // For single entry, use AT20
+        at20: at20Quantity,
+        product,
+        entryUsed: permitEntryData.number,
+        loadedDate: currentDate, // Use current date
+        allocationDate: new Date().toISOString(),
+        entryDestination: destination
+      }
+  
+      // Apply all updates in one transaction
+      await update(dbRef(db), updates)
+  
+      // Update local state
+      setOriginalData({ [entryUsedInPermit]: permitEntryData })
+      setEntriesData([{
+        key: entryUsedInPermit,
+        motherEntry: permitEntryData.number,
+        initialQuantity: permitEntryData.initialQuantity,
+        remainingQuantity: updatedPermitEntry.remainingQuantity,
+        truckNumber,
+        destination,
+        subtractedQuantity: requiredQuantity,
+        number: permitEntryData.number,
+        product,
+        product_destination: `${product}-${destination}`,
+        timestamp: Date.now()
+      }])
+  
+      toast({
+        title: "Success",
+        description: `Allocated ${requiredQuantity.toLocaleString()} liters to truck ${truckNumber}`
+      })
+  
+      // Clear form after successful allocation
+      clearForm()
+  
     } catch (error) {
+      console.error('Allocation error:', error)
       toast({
         title: "Allocation Failed",
         description: "Failed to process allocation. Please try again.",
