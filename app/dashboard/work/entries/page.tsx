@@ -976,6 +976,9 @@ export default function EntriesPage() {
     setShowPendingOrders(false)
     setShowManualAllocation(false)
     setCurrentView('default')
+    // Add these lines to clear selections
+    setSelectedEntries([])
+    clearForm()
   }
 
   // Add to the existing event handlers
@@ -1557,6 +1560,7 @@ export default function EntriesPage() {
                     setShowManualAllocation(false)
                     clearForm()
                     setSelectedEntries([])
+                    setCurrentView('default')
                   }}
                   className="w-full sm:w-auto"
                 >
@@ -1575,9 +1579,11 @@ export default function EntriesPage() {
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3 }}
       >
-        <Card className="border-0 shadow-lg">
+        <Card className="border-0 shadow-lg bg-white/50 dark:bg-gray-900/50 backdrop-blur-sm">
           <CardHeader className="pb-0">
-            <CardTitle className="text-2xl">Allocate Entries</CardTitle>
+            <CardTitle className="text-2xl font-semibold bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">
+              Allocate Entries
+            </CardTitle>
           </CardHeader>
           <CardContent className="p-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1656,22 +1662,23 @@ export default function EntriesPage() {
                 {volumeWarning}
               </div>
             )}
-            <div className="mt-6 flex gap-4">
+            <div className="mt-6 flex flex-col sm:flex-row gap-3">
               <Button 
                 onClick={getEntries} 
                 disabled={isLoading}
-                className="flex items-center gap-2"
+                className="w-full sm:w-auto bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-600 hover:from-emerald-500 hover:via-teal-400 hover:to-blue-500 text-white"
               >
                 {isLoading ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
                 ) : (
-                  <RefreshCw className="h-4 w-4" />
+                  <RefreshCw className="h-4 w-4 mr-2" />
                 )}
                 Allocate
               </Button>
               <Button
                 variant="outline"
                 onClick={clearForm}
+                className="w-full sm:w-auto border-emerald-500/30 hover:border-emerald-500/50"
               >
                 Clear Form
               </Button>
@@ -1679,13 +1686,12 @@ export default function EntriesPage() {
                 <Button
                   variant="secondary"
                   onClick={restoreLastForm}
-                  className="flex items-center gap-2"
+                  className="w-full sm:w-auto"
                 >
-                  <ArrowLeft className="h-4 w-4" /> Restore Last Entry
+                  <ArrowLeft className="h-4 w-4 mr-2" /> Restore Last Entry
                 </Button>
               )}
             </div>
-            {/* {renderEntriesSection()} */}
           </CardContent>
         </Card>
 

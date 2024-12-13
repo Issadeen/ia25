@@ -28,6 +28,7 @@ interface AllocationReport {
     entryUsed: string;
   }[];
   allocationDate: string;
+  loadedDate: string;  // Add this line
   at20: string;
   owner: string;
   product: string;
@@ -42,6 +43,7 @@ interface ReportFormData {
   product: string;
   entryDestination: string;
   at20: string;
+  loadedDate: string;  // Add this line
   entries: {
     volume: string;
     entryUsed: string;
@@ -63,6 +65,7 @@ export default function ReportsPage() {
     product: '',
     entryDestination: '',
     at20: '',
+    loadedDate: '',  // Add this line
     entries: [{ volume: '', entryUsed: '' }]
   })
 
@@ -184,6 +187,7 @@ export default function ReportsPage() {
         at20: formData.at20,
         entries: formData.entries,
         totalVolume,
+        loadedDate: formData.loadedDate,  // Add this line
         allocationDate: new Date().toISOString()
       }
 
@@ -201,6 +205,7 @@ export default function ReportsPage() {
         product: '',
         entryDestination: '',
         at20: '',
+        loadedDate: '',  // Add this line
         entries: [{ volume: '', entryUsed: '' }]
       })
     } catch (error) {
@@ -280,39 +285,43 @@ export default function ReportsPage() {
           <CardContent className="p-6">
             <Table>
               <TableHeader>
-                <TableRow>
-                  <TableHead>Date</TableHead>
-                  <TableHead>Truck Number</TableHead>
-                  <TableHead>Owner</TableHead>
-                  <TableHead>Product</TableHead>
-                  <TableHead>Entries</TableHead>
-                  <TableHead>Total Volume</TableHead>
-                  <TableHead>AT20</TableHead>
-                  <TableHead>Destination</TableHead>
-                </TableRow>
+                <TableRow><TableHead>Date</TableHead
+                ><TableHead>Loaded Date</TableHead
+                ><TableHead>Truck Number</TableHead
+                ><TableHead>Owner</TableHead
+                ><TableHead>Product</TableHead
+                ><TableHead>Entries</TableHead
+                ><TableHead>Total Volume</TableHead
+                ><TableHead>AT20</TableHead
+                ><TableHead>Destination</TableHead></TableRow>
               </TableHeader>
               <TableBody>
                 {filteredReports.map((report, index) => (
-                  <TableRow key={index}>
-                    <TableCell>
-                      {format(new Date(report.allocationDate), 'dd/MM/yyyy HH:mm')}
-                    </TableCell>
-                    <TableCell>{report.truckNumber}</TableCell>
-                    <TableCell>{report.owner}</TableCell>
-                    <TableCell>{report.product.toUpperCase()}</TableCell>
-                    <TableCell>
-                      <div className="space-y-1">
-                        {report.entries.map((entry, i) => (
-                          <div key={i} className="text-sm">
-                            {entry.entryUsed}: {entry.volume}L
-                          </div>
-                        ))}
-                      </div>
-                    </TableCell>
-                    <TableCell>{report.totalVolume}L</TableCell>
-                    <TableCell>{report.at20}</TableCell>
-                    <TableCell>{report.entryDestination.toUpperCase()}</TableCell>
-                  </TableRow>
+                  <TableRow key={index}><TableCell>
+                    {format(new Date(report.allocationDate), 'dd/MM/yyyy HH:mm')}
+                  </TableCell><TableCell>
+                    {format(new Date(report.loadedDate), 'dd/MM/yyyy')}
+                  </TableCell><TableCell>
+                    {report.truckNumber}
+                  </TableCell><TableCell>
+                    {report.owner}
+                  </TableCell><TableCell>
+                    {report.product.toUpperCase()}
+                  </TableCell><TableCell>
+                    <div className="space-y-1">
+                      {report.entries.map((entry, i) => (
+                        <div key={i} className="text-sm">
+                          {entry.entryUsed}: {entry.volume}L
+                        </div>
+                      ))}
+                    </div>
+                  </TableCell><TableCell>
+                    {report.totalVolume}L
+                  </TableCell><TableCell>
+                    {report.at20}
+                  </TableCell><TableCell>
+                    {report.entryDestination.toUpperCase()}
+                  </TableCell></TableRow>
                 ))}
               </TableBody>
             </Table>
@@ -377,6 +386,16 @@ export default function ReportsPage() {
                   type="number"
                   value={formData.at20}
                   onChange={(e) => setFormData(prev => ({ ...prev, at20: e.target.value }))}
+                  required
+                />
+              </div>
+              <div>
+                <Label htmlFor="loadedDate">Loaded Date</Label>
+                <Input
+                  id="loadedDate"
+                  type="date"
+                  value={formData.loadedDate}
+                  onChange={(e) => setFormData(prev => ({ ...prev, loadedDate: e.target.value }))}
                   required
                 />
               </div>
