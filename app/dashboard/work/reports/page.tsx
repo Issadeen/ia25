@@ -34,6 +34,7 @@ interface AllocationReport {
   owner: string;
   product: string;
   entryDestination: string;
+  depot: string;  // Add this line
   totalVolume?: string; // Added to store combined volume
 }
 
@@ -43,6 +44,7 @@ interface ReportFormData {
   owner: string;
   product: string;
   entryDestination: string;
+  depot: string;  // Add this line
   at20: string;
   loadedDate: string;  // Add this line
   entries: {
@@ -57,6 +59,7 @@ const initialFormData: ReportFormData = {
   owner: '',
   product: '',
   entryDestination: '',
+  depot: '',  // Add this line
   at20: '',
   loadedDate: new Date().toISOString().split('T')[0], // Initialize with current date
   entries: [{ volume: '', entryUsed: '' }]
@@ -82,6 +85,7 @@ export default function ReportsPage() {
   const [editingReport, setEditingReport] = useState<string | null>(null)
   const [editFormData, setEditFormData] = useState<Partial<AllocationReport>>({})
   const [newReportId, setNewReportId] = useState<string | null>(null);
+  const [isMigrating, setIsMigrating] = useState(false)
 
   useEffect(() => {
     setMounted(true)
@@ -150,7 +154,7 @@ export default function ReportsPage() {
       setShowEditControls(true)
       toast({
         title: "Edit Mode Activated",
-        description: "You can now edit reports",
+        description: "You can now edit reports and migrate data",
       })
     }
   }, [monthClickCount])
@@ -220,7 +224,8 @@ export default function ReportsPage() {
       'Volume': report.totalVolume,
       'AT20': report.at20,
       'Entries': report.entries.map(entry => `${entry.entryUsed}: ${entry.volume}L`).join(', '),
-      'Destination': report.entryDestination.toUpperCase()
+      'Destination': report.entryDestination.toUpperCase(),
+      'Depot': report.depot.toUpperCase()  // Add this line
     }))
 
     const ws = XLSX.utils.json_to_sheet(data)
@@ -260,6 +265,24 @@ export default function ReportsPage() {
     setIsSubmitting(true)
 
     try {
+      // Set default depot if not provided
+      if (!formData.depot) {
+        const destination = formData.entryDestination.toLowerCase();
+        if (destination.includes('local')) {
+          formData.depot = 'Local';
+        } else if (destination === 'ssd') {
+          formData.depot = 'SSD';
+        } else if (destination.includes('north')) {
+          formData.depot = 'Northern';
+        } else if (destination.includes('west')) {
+          formData.depot = 'Western';
+        } else if (destination.includes('east')) {
+          formData.depot = 'Eastern';
+        } else {
+          formData.depot = 'Unknown';
+        }
+      }
+
       const db = getDatabase()
       const reportRef = ref(db, 'allocation_reports')
       
@@ -274,6 +297,7 @@ export default function ReportsPage() {
         owner: formData.owner,
         product: formData.product,
         entryDestination: formData.entryDestination,
+        depot: formData.depot,  // Add this line
         at20: formData.at20,
         entries: formData.entries,
         totalVolume,
@@ -351,6 +375,67 @@ export default function ReportsPage() {
     }
   }
 
+  // Add this new function to handle data migration
+  const migrateExistingData = async () => {
+    if (!showEditControls) return;
+    
+    if (!confirm('Update all records without depot? This will set depot based on destination.')) {
+      return;
+    }
+
+    setIsMigrating(true);
+    const db = getDatabase();
+    
+    try {
+      const snapshot = await get(ref(db, 'allocation_reports'));
+      if (!snapshot.exists()) return;
+
+      const updates: { [key: string]: any } = {};
+      
+      snapshot.forEach((child) => {
+        const report = child.val();
+        if (!report.depot) {
+          // Logic to determine depot based on destination
+          let depot = '';
+          const destination = report.entryDestination.toLowerCase();
+          
+          if (destination.includes('nakuru')) {
+            depot = 'Nakuru';
+          } else if (destination.includes('eldoret')) {
+            depot = 'Eldoret';
+          } else if (destination.includes('kisumu')) {
+            depot = 'Kisumu';
+          } else {
+            depot = 'Unknown';
+          }
+
+          updates[`allocation_reports/${child.key}/depot`] = depot;
+        }
+      });
+
+      if (Object.keys(updates).length > 0) {
+        await update(ref(db), updates);
+        toast({
+          title: "Migration Complete",
+          description: `Updated ${Object.keys(updates).length} records with depot information`
+        });
+      } else {
+        toast({
+          title: "No Updates Needed",
+          description: "All records already have depot information"
+        });
+      }
+    } catch (error) {
+      toast({
+        title: "Migration Failed",
+        description: "Failed to update records with depot information",
+        variant: "destructive"
+      });
+    } finally {
+      setIsMigrating(false);
+    }
+  };
+
   if (!mounted) return null
 
   return (
@@ -379,9 +464,29 @@ export default function ReportsPage() {
                 onClick={() => setIsAddModalOpen(true)}
                 className="whitespace-nowrap hover:bg-emerald-100 hover:text-emerald-700"
               >
-                <Plus className="h-4 w-4 mr-2" />
-                Add Report
+                <Plus className="h-4 w-4 sm:mr-2" />
+                <span className="hidden sm:inline">Add Report</span>
               </Button>
+              {showEditControls && (
+                <Button
+                  variant="outline"
+                  onClick={migrateExistingData}
+                  disabled={isMigrating}
+                  className="whitespace-nowrap"
+                >
+                  {isMigrating ? (
+                    <>
+                      <Loader2 className="h-4 w-4 sm:mr-2 animate-spin" />
+                      <span className="hidden sm:inline">Migrating...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Plus className="h-4 w-4 sm:mr-2" />
+                      <span className="hidden sm:inline">Update Missing Depots</span>
+                    </>
+                  )}
+                </Button>
+              )}
               <ThemeToggle />
               <Avatar className="h-8 w-8 ring-2 ring-emerald-500/50 ring-offset-2 ring-offset-background transition-shadow hover:ring-emerald-500/75">
                 <AvatarImage 
@@ -443,114 +548,66 @@ export default function ReportsPage() {
             </div>
 
             <Table>
-              <TableHeader>
-                <TableRow><TableHead>Date</TableHead
-                ><TableHead>Loaded Date</TableHead
-                ><TableHead>Truck Number</TableHead
-                ><TableHead>Owner</TableHead
-                ><TableHead>Product</TableHead
-                ><TableHead>Entries</TableHead
-                ><TableHead>Total Volume</TableHead
-                ><TableHead>AT20</TableHead
-                ><TableHead>Destination</TableHead>
-                {showEditControls && <TableHead className="w-[50px]">Edit</TableHead>}
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredReports.map((report, index) => (
-                  <TableRow 
-                    key={index}
-                    className={`
-                      ${report.id === newReportId ? 'animate-highlight bg-emerald-100' : ''}
-                      transition-colors duration-500
-                    `}
-                  ><TableCell>
-                    {formatDate(report?.allocationDate)}
-                  </TableCell><TableCell>
-                    {editingReport === report.truckNumber ? (
-                      <Input
-                        type="date"
-                        value={editFormData.loadedDate || report.loadedDate}
-                        onChange={(e) => setEditFormData(prev => ({ ...prev, loadedDate: e.target.value }))}
-                      />
-                    ) : (
-                      formatSimpleDate(report?.loadedDate)
-                    )}
-                  </TableCell><TableCell>
-                    {editingReport === report.truckNumber ? (
-                      <Input
-                        value={editFormData.truckNumber || report.truckNumber}
-                        onChange={(e) => setEditFormData(prev => ({ ...prev, truckNumber: e.target.value }))}
-                      />
-                    ) : (
-                      report?.truckNumber || '-'
-                    )}
-                  </TableCell><TableCell>
-                    {editingReport === report.truckNumber ? (
-                      <Input
-                        value={editFormData.owner || report.owner}
-                        onChange={(e) => setEditFormData(prev => ({ ...prev, owner: e.target.value }))}
-                      />
-                    ) : (
-                      report?.owner || '-'
-                    )}
-                  </TableCell><TableCell>
-                    {report?.product?.toUpperCase() || '-'}
-                  </TableCell><TableCell>
-                    <div className="space-y-1">
-                      {report?.entries?.map((entry, i) => (
-                        <div key={i} className="text-sm">
-                          {entry?.entryUsed || '-'}: {entry?.volume || '0'}L
-                        </div>
-                      ))}
-                    </div>
-                  </TableCell><TableCell>
-                    {report?.totalVolume ? `${report.totalVolume}L` : '-'}
-                  </TableCell><TableCell>
-                    {report?.at20 || '-'}
-                  </TableCell><TableCell>
-                    {report?.entryDestination?.toUpperCase() || '-'}
-                  </TableCell>
-                  {showEditControls && (
-                    <TableCell>
-                      {editingReport === report.truckNumber ? (
-                        <div className="flex gap-2">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleSaveEdit(report.truckNumber)}
-                            className="h-8 w-8 p-0"
-                          >
-                            <Check className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => {
-                              setEditingReport(null)
-                              setEditFormData({})
-                            }}
-                            className="h-8 w-8 p-0"
-                          >
-                            <X className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      ) : (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleEdit(report)}
-                          className="h-8 w-8 p-0"
-                        >
-                          <Edit className="h-4 w-4" />
-                        </Button>
-                      )}
-                    </TableCell>
-                  )}
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+  <TableHeader>
+    <TableRow>
+      <TableHead>Date</TableHead><TableHead>Loaded Date</TableHead><TableHead>Truck Number</TableHead><TableHead>Owner</TableHead><TableHead>Product</TableHead><TableHead>Entries</TableHead><TableHead>Total Volume</TableHead><TableHead>AT20</TableHead><TableHead>Destination</TableHead><TableHead>Depot</TableHead>{showEditControls && <TableHead className="w-[50px]">Edit</TableHead>}
+    </TableRow>
+  </TableHeader>
+  <TableBody>
+    {filteredReports.map((report, index) => (
+      <TableRow key={index} className={`${report.id === newReportId ? 'animate-highlight bg-emerald-100' : ''} transition-colors duration-500`}>
+        <TableCell>{formatDate(report?.allocationDate)}</TableCell><TableCell>{editingReport === report.truckNumber ? (
+          <Input
+            type="date"
+            value={editFormData.loadedDate || report.loadedDate}
+            onChange={(e) => setEditFormData(prev => ({ ...prev, loadedDate: e.target.value }))}
+          />
+        ) : (
+          formatSimpleDate(report?.loadedDate)
+        )}</TableCell><TableCell>{editingReport === report.truckNumber ? (
+          <Input
+            value={editFormData.truckNumber || report.truckNumber}
+            onChange={(e) => setEditFormData(prev => ({ ...prev, truckNumber: e.target.value }))}
+          />
+        ) : (
+          report?.truckNumber || '-'
+        )}</TableCell><TableCell>{editingReport === report.truckNumber ? (
+          <Input
+            value={editFormData.owner || report.owner}
+            onChange={(e) => setEditFormData(prev => ({ ...prev, owner: e.target.value }))}
+          />
+        ) : (
+          report?.owner || '-'
+        )}</TableCell><TableCell>{report?.product?.toUpperCase() || '-'}</TableCell><TableCell>
+          <div className="space-y-1">{report?.entries?.map((entry, i) => (
+            <div key={i} className="text-sm">{entry?.entryUsed || '-'}: {entry?.volume || '0'}L</div>
+          ))}</div>
+        </TableCell><TableCell>{report?.totalVolume ? `${report.totalVolume}L` : '-'}</TableCell><TableCell>{report?.at20 || '-'}</TableCell><TableCell>{report?.entryDestination?.toUpperCase() || '-'}</TableCell><TableCell>{editingReport === report.truckNumber ? (
+          <Input
+            value={editFormData.depot || report.depot}
+            onChange={(e) => setEditFormData(prev => ({ ...prev, depot: e.target.value }))}
+          />
+        ) : (
+          report?.depot || '-'
+        )}</TableCell>{showEditControls && (
+          <TableCell>
+            {editingReport === report.truckNumber ? (
+              <div className="flex gap-2">
+                <Button variant="ghost" size="sm" onClick={() => handleSaveEdit(report.truckNumber)} className="h-8 w-8 p-0"><Check className="h-4 w-4" /></Button>
+                <Button variant="ghost" size="sm" onClick={() => {
+                  setEditingReport(null)
+                  setEditFormData({})
+                }} className="h-8 w-8 p-0"><X className="h-4 w-4" /></Button>
+              </div>
+            ) : (
+              <Button variant="ghost" size="sm" onClick={() => handleEdit(report)} className="h-8 w-8 p-0"><Edit className="h-4 w-4" /></Button>
+            )}
+          </TableCell>
+        )}
+      </TableRow>
+    ))}
+  </TableBody>
+</Table>
           </CardContent>
         </Card>
       </main>
@@ -624,6 +681,23 @@ export default function ReportsPage() {
                   onChange={(e) => setFormData(prev => ({ ...prev, loadedDate: e.target.value }))}
                   required
                 />
+              </div>
+              <div>
+                <Label htmlFor="depot">Depot</Label>
+                <Select
+                  value={formData.depot}
+                  onValueChange={(value) => setFormData(prev => ({ ...prev, depot: value }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select depot" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Eldoret">Eldoret</SelectItem>
+                    <SelectItem value="Nakuru">Nakuru</SelectItem>
+                    <SelectItem value="Kisumu">Kisumu</SelectItem>
+                    <SelectItem value="Unknown">Unknown</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             </div>
 
