@@ -383,7 +383,7 @@ export default function ReportsPage() {
                 Add Report
               </Button>
               <ThemeToggle />
-              <Avatar className="h-8 w-8 border-2 border-emerald-200">
+              <Avatar className="h-8 w-8 ring-2 ring-emerald-500/50 ring-offset-2 ring-offset-background transition-shadow hover:ring-emerald-500/75">
                 <AvatarImage 
                   src={session?.user?.image || lastUploadedImage || ''} 
                   alt="Profile"

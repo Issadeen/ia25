@@ -1950,12 +1950,12 @@ export default function EntriesPage() {
               </Button>
               {/* Mobile-friendly avatar dropdown */}
               <div className="relative group">
-                <Avatar className="h-8 w-8 sm:h-10 sm:w-10 cursor-pointer hover:opacity-80 transition-opacity">
+                <Avatar className="h-8 w-8 sm:h-10 sm:w-10 cursor-pointer ring-2 ring-pink-500/50 ring-offset-2 ring-offset-background shadow-lg shadow-pink-500/10 transition-shadow hover:ring-pink-500/75">
                   <AvatarImage 
                     src={avatarSrc} 
                     alt="Profile"
                   />
-                  <AvatarFallback className="text-sm sm:text-base">
+                  <AvatarFallback className="bg-pink-100 text-pink-700">
                     {session?.user?.email?.[0]?.toUpperCase() || 'U'}
                   </AvatarFallback>
                 </Avatar>
