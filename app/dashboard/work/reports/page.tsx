@@ -22,6 +22,7 @@ import { ThemeToggle } from "@/components/ui/molecules/theme-toggle"
 
 // Update the interface to handle multiple entries
 interface AllocationReport {
+  id?: string;  // Add this line
   truckNumber: string;
   entries: {
     volume: string;
@@ -80,6 +81,7 @@ export default function ReportsPage() {
   const [showEditControls, setShowEditControls] = useState(false)
   const [editingReport, setEditingReport] = useState<string | null>(null)
   const [editFormData, setEditFormData] = useState<Partial<AllocationReport>>({})
+  const [newReportId, setNewReportId] = useState<string | null>(null);
 
   useEffect(() => {
     setMounted(true)
@@ -113,8 +115,9 @@ export default function ReportsPage() {
           ]
         }));
 
+        // Sort from oldest to newest
         setReports(processedReports.sort((a, b) => 
-          new Date(b.allocationDate).getTime() - new Date(a.allocationDate).getTime()
+          new Date(a.allocationDate).getTime() - new Date(b.allocationDate).getTime()
         ));
       } else {
         setReports([]);
@@ -278,7 +281,12 @@ export default function ReportsPage() {
         allocationDate: new Date().toISOString()
       }
 
-      await push(reportRef, reportData)
+      const newReportRef = await push(reportRef, reportData)
+      
+      // Set the new report ID for highlighting
+      setNewReportId(newReportRef.key)
+      // Clear the highlight after 3 seconds
+      setTimeout(() => setNewReportId(null), 3000)
 
       toast({
         title: "Success",
@@ -450,7 +458,13 @@ export default function ReportsPage() {
               </TableHeader>
               <TableBody>
                 {filteredReports.map((report, index) => (
-                  <TableRow key={index}><TableCell>
+                  <TableRow 
+                    key={index}
+                    className={`
+                      ${report.id === newReportId ? 'animate-highlight bg-emerald-100' : ''}
+                      transition-colors duration-500
+                    `}
+                  ><TableCell>
                     {formatDate(report?.allocationDate)}
                   </TableCell><TableCell>
                     {editingReport === report.truckNumber ? (

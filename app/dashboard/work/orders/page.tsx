@@ -579,18 +579,6 @@ export default function WorkManagementPage() {
     setIsPaymentModalOpen(true);
   };
 
-  // Add new helper function to get truck allocations
-  const getTruckAllocations = (truck: WorkDetail) => {
-    // Ensure payments is an array
-    const payments = truckPayments[truck.id] ? Object.values(truckPayments[truck.id]) : [];
-    const totalAllocated = payments.reduce((sum, p) => sum + p.amount, 0);
-    const totalDue = parseFloat(truck.price) * (parseFloat(truck.at20 || '0'));
-    return {
-      totalAllocated,
-      totalDue,
-      balance: totalDue - totalAllocated
-    };
-  };
 
   // Modify handlePaymentSubmit to properly store truck allocations
   const handlePaymentSubmit = async (e: React.FormEvent) => {
@@ -651,7 +639,7 @@ export default function WorkManagementPage() {
 
   // Add new helper function for number formatting
   const formatNumber = (num: number) => {
-    return num.toLocaleString('en-US', {
+    return Number(num.toFixed(2)).toLocaleString('en-US', {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2
     });
@@ -795,6 +783,7 @@ export default function WorkManagementPage() {
     doc.save(`${owner}_Payment_Summary_${new Date().toISOString().split('T')[0]}.pdf`)
   }
 
+
   // 3. Group all useEffect hooks together
   useEffect(() => {
     setMounted(true)
@@ -926,6 +915,137 @@ export default function WorkManagementPage() {
     
     router.push(`/dashboard/work/orders/gate-pass?${params.toString()}`)
   }
+
+
+  // Modify the helper function for decimal precision
+const toFixed2 = (num: number) => Number(Math.round(num * 100) / 100);
+
+// Update the calculateOptimalAllocation function to handle exact amounts
+const calculateOptimalAllocation = (
+  totalAmount: number,
+  trucks: WorkDetail[],
+  truckPayments: { [truckId: string]: TruckPayment[] }
+) => {
+  // Use toFixed2 for precise calculation
+  let remainingAmount = toFixed2(totalAmount);
+  const allocations: { truckId: string; amount: number }[] = [];
+
+  // Sort trucks by creation date and balance
+  const trucksWithBalances = trucks
+    .map(truck => {
+      const { balance } = getTruckAllocations(truck);
+      return {
+        truck,
+        balance: toFixed2(balance),
+        createdAt: truck.createdAt || ''
+      };
+    })
+    .sort((a, b) => {
+      if (a.createdAt < b.createdAt) return -1;
+      if (a.createdAt > b.createdAt) return 1;
+      return b.balance - a.balance;
+    });
+
+  // First allocation pass - try to fully pay off older trucks
+  for (const { truck, balance } of trucksWithBalances) {
+    if (remainingAmount <= 0) break;
+
+    if (balance > 0) {
+      // Try to pay the exact amount needed
+      const neededAmount = toFixed2(balance);
+      const allocation = Math.min(neededAmount, remainingAmount);
+      
+      if (allocation > 0) {
+        allocations.push({
+          truckId: truck.id,
+          amount: allocation
+        });
+        remainingAmount = toFixed2(remainingAmount - allocation);
+      }
+    }
+  }
+
+  return allocations;
+};
+
+// Update the getTruckAllocations helper to use precise calculations
+const getTruckAllocations = (truck: WorkDetail) => {
+  const payments = truckPayments[truck.id] ? Object.values(truckPayments[truck.id]) : [];
+  const totalAllocated = toFixed2(payments.reduce((sum, p) => sum + p.amount, 0));
+  const totalDue = toFixed2(parseFloat(truck.price) * parseFloat(truck.at20 || '0'));
+  
+  return {
+    totalAllocated,
+    totalDue,
+    balance: toFixed2(totalDue - totalAllocated)
+  };
+};
+
+// Update the payment input handler to use precise calculations
+const handlePaymentInputChange = (e: React.ChangeEvent<HTMLInputElement>, truckId: string) => {
+  const newAmount = toFixed2(parseFloat(e.target.value));
+  const truck = ownerSummary[selectedOwner!].loadedTrucks.find(t => t.id === truckId);
+  
+  if (!truck) return;
+
+  const { balance: outstandingBalance } = getTruckAllocations(truck);
+  const otherAllocations = toFixed2(
+    paymentFormData.allocatedTrucks
+      .filter(t => t.truckId !== truckId)
+      .reduce((sum, t) => sum + t.amount, 0)
+  );
+  
+  const remainingPayment = toFixed2(paymentFormData.amount - otherAllocations);
+  const maxAllowed = Math.min(
+    remainingPayment,
+    toFixed2(outstandingBalance)
+  );
+
+  if (newAmount >= 0 && newAmount <= maxAllowed) {
+    setPaymentFormData(prev => ({
+      ...prev,
+      allocatedTrucks: prev.allocatedTrucks.map(t =>
+        t.truckId === truckId
+          ? { ...t, amount: newAmount }
+          : t
+      )
+    }));
+  }
+};
+
+// Update the truck selection handler
+const handleTruckSelection = (e: React.ChangeEvent<HTMLInputElement>, truck: WorkDetail) => {
+  if (e.target.checked) {
+    const currentAllocated = toFixed2(
+      paymentFormData.allocatedTrucks.reduce((sum, t) => sum + t.amount, 0)
+    );
+    
+    const remainingAmount = toFixed2(paymentFormData.amount - currentAllocated);
+    const { balance: outstandingBalance } = getTruckAllocations(truck);
+    
+    // Calculate optimal amount with precise decimal handling
+    const optimalAmount = toFixed2(Math.min(outstandingBalance, remainingAmount));
+
+    setPaymentFormData(prev => ({
+      ...prev,
+      allocatedTrucks: [
+        ...prev.allocatedTrucks,
+        { truckId: truck.id, amount: optimalAmount }
+      ]
+    }));
+  } else {
+    setPaymentFormData(prev => ({
+      ...prev,
+      allocatedTrucks: prev.allocatedTrucks.filter(t => t.truckId !== truck.id)
+    }));
+  }
+};
+
+// Update the calculateRemainingAmount helper
+const calculateRemainingAmount = (totalAmount: number, allocations: { truckId: string, amount: number }[]) => {
+  const totalAllocated = toFixed2(allocations.reduce((sum, allocation) => sum + allocation.amount, 0));
+  return toFixed2(totalAmount - totalAllocated);
+};
 
   return (
     <div className="min-h-screen">
@@ -1529,7 +1649,11 @@ export default function WorkManagementPage() {
                   value={paymentFormData.amount}
                   onChange={(e) => setPaymentFormData(prev => ({
                     ...prev,
-                    amount: parseFloat(e.target.value)
+                    amount: parseFloat(e.target.value),
+                    // Reset allocations if new amount is less than total allocated
+                    allocatedTrucks: calculateRemainingAmount(parseFloat(e.target.value), prev.allocatedTrucks) < 0 
+                      ? [] 
+                      : prev.allocatedTrucks
                   }))}
                   required
                 />
@@ -1546,59 +1670,106 @@ export default function WorkManagementPage() {
                 />
               </div>
               <div>
-                <Label>Allocate to Trucks</Label>
+                <div className="flex justify-between items-center mb-2">
+                  <Label>Allocate to Trucks</Label>
+                  <div className="flex items-center gap-4">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        const optimalAllocations = calculateOptimalAllocation(
+                          paymentFormData.amount,
+                          ownerSummary[selectedOwner!].loadedTrucks,
+                          truckPayments
+                        );
+                        setPaymentFormData(prev => ({
+                          ...prev,
+                          allocatedTrucks: optimalAllocations
+                        }));
+                      }}
+                    >
+                      Auto Allocate
+                    </Button>
+                    <div className="space-y-1 text-right">
+                      <div className="text-sm">
+                        Total Payment: ${formatNumber(paymentFormData.amount)}
+                      </div>
+                      <div className="text-sm">
+                        Allocated: ${formatNumber(paymentFormData.allocatedTrucks.reduce((sum, t) => sum + t.amount, 0))}
+                      </div>
+                      <div className={`text-sm font-semibold ${
+                        calculateRemainingAmount(paymentFormData.amount, paymentFormData.allocatedTrucks) > 0 
+                          ? 'text-orange-500' 
+                          : 'text-green-500'
+                      }`}>
+                        Owner Balance: ${formatNumber(calculateRemainingAmount(paymentFormData.amount, paymentFormData.allocatedTrucks))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
                 <div className="space-y-2 max-h-[300px] overflow-y-auto">
                   {selectedOwner && ownerSummary[selectedOwner]?.loadedTrucks.map((truck) => {
-                    const totalDue = parseFloat(truck.price) * (parseFloat(truck.at20 ?? '0'));
+                    const { balance: outstandingBalance } = getTruckAllocations(truck);
                     const allocated = paymentFormData.allocatedTrucks.find(t => t.truckId === truck.id);
+                    const maxAllowableAmount = Math.min(outstandingBalance, paymentFormData.amount);
                     
                     return (
                       <div key={truck.id} className="flex items-center gap-4 p-2 border rounded">
-                        <Label>
+                        <Label className="flex-1">
                           <input
                             type="checkbox"
                             checked={!!allocated}
-                            onChange={(e) => {
-                              setPaymentFormData(prev => ({
-                                ...prev,
-                                allocatedTrucks: e.target.checked
-                                  ? [...prev.allocatedTrucks, { truckId: truck.id, amount: 0 }]
-                                  : prev.allocatedTrucks.filter(t => t.truckId !== truck.id)
-                              }));
-                            }}
+                            onChange={(e) => handleTruckSelection(e, truck)}
                             className="mr-2"
                           />
-                          {truck.truck_number} ({truck.product}) - Due: ${totalDue.toFixed(2)}
+                          {truck.truck_number} ({truck.product})
+                          <span className={`ml-2 text-sm ${outstandingBalance <= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                            Due: ${formatNumber(Math.max(0, outstandingBalance))}
+                          </span>
                         </Label>
                         {allocated && (
-                          <Input
-                            type="number"
-                            step="0.01"
-                            value={allocated.amount}
-                            onChange={(e) => {
-                              setPaymentFormData(prev => ({
-                                ...prev,
-                                allocatedTrucks: prev.allocatedTrucks.map(t =>
-                                  t.truckId === truck.id
-                                    ? { ...t, amount: parseFloat(e.target.value) }
-                                    : t
-                                )
-                              }));
-                            }}
-                            className="w-32"
-                          />
+                          <div className="flex items-center gap-2">
+                            <Input
+                              type="number"
+                              step="0.01"
+                              value={allocated.amount}
+                              onChange={(e) => handlePaymentInputChange(e, truck.id)}
+                              className="w-32"
+                              min={0}
+                              max={Math.min(outstandingBalance, maxAllowableAmount)}
+                            />
+                            <span className="text-sm text-muted-foreground">
+                              Max: ${formatNumber(Math.min(outstandingBalance, maxAllowableAmount))}
+                            </span>
+                          </div>
                         )}
                       </div>
                     );
                   })}
                 </div>
+                {calculateRemainingAmount(paymentFormData.amount, paymentFormData.allocatedTrucks) > 0 && (
+                  <div className="mt-4 p-2 bg-orange-100 dark:bg-orange-900/20 rounded">
+                    <p className="text-sm text-orange-600 dark:text-orange-400">
+                      ${formatNumber(calculateRemainingAmount(paymentFormData.amount, paymentFormData.allocatedTrucks))} will be kept as owner's balance
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
             <div className="flex justify-end gap-4">
               <Button type="button" variant="outline" onClick={() => setIsPaymentModalOpen(false)}>
                 Cancel
               </Button>
-              <Button type="submit">Save Payment</Button>
+              <Button 
+                type="submit"
+                disabled={
+                  calculateRemainingAmount(paymentFormData.amount, paymentFormData.allocatedTrucks) < 0 ||
+                  paymentFormData.allocatedTrucks.length === 0
+                }
+              >
+                Save Payment
+              </Button>
             </div>
           </form>
         </DialogContent>
