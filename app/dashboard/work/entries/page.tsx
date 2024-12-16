@@ -10,12 +10,12 @@ import {
   Moon,
   FileText,
   PieChart,
-  AlertTriangle, // Change this line
+  AlertTriangle,
   RefreshCw,
   Loader2,
   ClipboardList,
   ChevronDown, 
-  ChevronUp // Add this import
+  ChevronUp
 } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -43,6 +43,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { validateAllocation } from '@/lib/validation'
+import { smartAllocation } from '@/lib/smartAllocation'
+import { confirmDialog } from "@/components/ui/confirm-dialog" // Add this line
+import { reminderService } from '@/lib/reminders' // Add this line
 
 // Add this helper function for highlighting text
 function highlightText(text: string, filter: string) {
@@ -645,11 +649,75 @@ export default function EntriesPage() {
     }
   }, [product, destination])
 
+  // Add this to your component to check reminders periodically
+  useEffect(() => {
+    const checkReminders = async () => {
+      if (!session?.user?.email) return;
+
+      const userId = session.user.email.replace(/[.@]/g, '_');
+      const nextReminder = await reminderService.getNextReminder(userId);
+      
+      if (nextReminder) {
+        toast({
+          title: "Reminder",
+          description: nextReminder.message,
+          duration: 10000,
+        });
+        await reminderService.markReminderShown(nextReminder.id, userId);
+      }
+    };
+
+    // Check reminders on mount and every 15 minutes
+    checkReminders();
+    const interval = setInterval(checkReminders, 15 * 60 * 1000);
+
+    return () => clearInterval(interval);
+  }, [session?.user?.email, toast]);
+
   // 5. Loading check
   if (!mounted || status === "loading") return null
 
   // 6. Event handlers
   const getEntries = async () => {
+    // Add validation
+    const validationResult = validateAllocation.destinationRules(
+      destination,
+      parseFloat(at20Quantity),
+      product
+    )
+
+    if (!validationResult.valid) {
+      toast({
+        title: "Validation Error",
+        description: validationResult.message,
+        variant: "destructive"
+      })
+      return
+    }
+
+    // Get smart suggestions
+    const suggestions = smartAllocation.suggestEntries(
+      availableEntries,
+      parseFloat(at20Quantity)
+    )
+
+    // Check for potential issues
+    const predictedIssues = smartAllocation.predictIssues(
+      availableEntries,
+      parseFloat(at20Quantity)
+    )
+
+    if (predictedIssues.length > 0) {
+      const confirmed = await confirmDialog({
+        title: "Potential Issues Detected",
+        description: predictedIssues.map(i => i.message).join('\n'),
+        confirmText: "Proceed Anyway",
+        cancelText: "Review Issues"
+      })
+
+      if (!confirmed) return
+    }
+
     if (!truckNumber || !destination || !product || !at20Quantity) {
       toast({
         title: "Validation Error",
@@ -1968,7 +2036,7 @@ export default function EntriesPage() {
     <div className={`min-h-screen ${
       theme === 'dark' ? 'bg-gray-900/50 text-gray-100' : 'bg-gray-50/50 text-gray-900'
     } backdrop-blur-sm`}>
-      <header className={`fixed top-0 left-0 right=0 z-50 w-full border-b ${
+      <header className={`fixed top-0 left-0 right-0 z-50 w-full border-b ${
         theme === 'dark' 
           ? 'bg-gray-900/70 border-gray-800/50' 
           : 'bg-white/70 border-gray-200/50'
@@ -2000,7 +2068,6 @@ export default function EntriesPage() {
                   <Moon className="h-4 w-4 sm:h-5 sm:w-5" />
                 }
               </Button>
-              {/* Mobile-friendly avatar dropdown */}
               <div className="relative group">
                 <Avatar className="h-8 w-8 sm:h-10 sm:w-10 cursor-pointer ring-2 ring-pink-500/50 ring-offset-2 ring-offset-background shadow-lg shadow-pink-500/10 transition-shadow hover:ring-pink-500/75">
                   <AvatarImage 
