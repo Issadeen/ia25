@@ -67,6 +67,7 @@ interface PendingOrderSummary {
     truckNumber: string;
     quantity: number;
     orderno: string;
+    owner: string; // Add this line
   }[];
 }
 
@@ -425,7 +426,8 @@ export default function EntriesPage() {
           destGroup.orders.push({
             truckNumber: order.truck_number,
             quantity: parseFloat(order.quantity),
-            orderno: order.orderno
+            orderno: order.orderno,
+            owner: order.owner || 'Unknown' // Add owner info
           })
           destGroup.totalQuantity += parseFloat(order.quantity)
         })
@@ -683,58 +685,100 @@ export default function EntriesPage() {
       const tempOriginalData: { [key: string]: Entry } = {}
       const allocations: Entry[] = []
   
-      // Get all available entries sorted by timestamp (FIFO)
-      const tr800Snapshot = await get(dbRef(db, 'tr800'))
-      if (!tr800Snapshot.exists()) {
-        throw new Error("No entries found")
-      }
-  
-      const availableEntries = Object.entries(tr800Snapshot.val())
-        .map(([key, value]: [string, any]) => ({
-          key,
-          ...value
-        }))
-        .filter(entry => 
-          entry.product.toLowerCase() === product.toLowerCase() &&
-          entry.destination.toLowerCase() === destination.toLowerCase() &&
-          entry.remainingQuantity > 0
-        )
-        .sort((a, b) => a.timestamp - b.timestamp) // FIFO ordering
-  
-      if (availableEntries.length === 0) {
-        throw new Error("No available entries found for this product and destination")
-      }
-  
-      // Iterate through available entries until we fulfill the required quantity
-      for (const entry of availableEntries) {
-        if (remainingToAllocate <= 0) break
-  
-        const toAllocate = Math.min(entry.remainingQuantity, remainingToAllocate)
-        
-        tempOriginalData[entry.key] = { ...entry }
-        
-        const updatedEntry = {
-          ...entry,
-          remainingQuantity: entry.remainingQuantity - toAllocate
+      // If SSD allocation with permit entry
+      if (destination.toLowerCase() === 'ssd' && entryUsedInPermit) {
+        // First, try to allocate from the permit entry
+        const permitEntrySnapshot = await get(dbRef(db, `tr800/${entryUsedInPermit}`))
+        if (!permitEntrySnapshot.exists()) {
+          throw new Error("Selected permit entry not found")
         }
+  
+        const permitEntry = { key: permitEntrySnapshot.key, ...permitEntrySnapshot.val() }
+        const permitAllocation = Math.min(permitEntry.remainingQuantity, remainingToAllocate)
         
-        updates[`tr800/${entry.key}`] = updatedEntry
-        
-        allocations.push({
-          key: entry.key,
-          motherEntry: entry.number,
-          initialQuantity: entry.initialQuantity,
-          remainingQuantity: updatedEntry.remainingQuantity,
-          truckNumber,
-          destination,
-          subtractedQuantity: toAllocate,
-          number: entry.number,
-          product,
-          product_destination: `${product}-${destination}`,
-          timestamp: Date.now()
-        })
-        
-        remainingToAllocate -= toAllocate
+        if (permitAllocation > 0) {
+          tempOriginalData[permitEntry.key] = { ...permitEntry }
+          
+          const updatedPermitEntry = {
+            ...permitEntry,
+            remainingQuantity: permitEntry.remainingQuantity - permitAllocation
+          }
+          
+          updates[`tr800/${permitEntry.key}`] = updatedPermitEntry
+          
+          allocations.push({
+            key: permitEntry.key,
+            motherEntry: permitEntry.number,
+            initialQuantity: permitEntry.initialQuantity,
+            remainingQuantity: updatedPermitEntry.remainingQuantity,
+            truckNumber,
+            destination,
+            subtractedQuantity: permitAllocation,
+            number: permitEntry.number,
+            product,
+            product_destination: `${product}-${destination}`,
+            timestamp: Date.now()
+          })
+          
+          remainingToAllocate -= permitAllocation
+        }
+      }
+  
+      // If we still need more quantity, get from other entries using FIFO
+      if (remainingToAllocate > 0) {
+        const tr800Snapshot = await get(dbRef(db, 'tr800'))
+        if (!tr800Snapshot.exists()) {
+          throw new Error("No entries found")
+        }
+  
+        const availableEntries = Object.entries(tr800Snapshot.val())
+          .map(([key, value]: [string, any]) => ({
+            key,
+            ...value
+          }))
+          .filter(entry => 
+            entry.product.toLowerCase() === product.toLowerCase() &&
+            entry.destination.toLowerCase() === destination.toLowerCase() &&
+            entry.remainingQuantity > 0 &&
+            (!entryUsedInPermit || entry.key !== entryUsedInPermit) // Exclude already used permit entry
+          )
+          .sort((a, b) => a.timestamp - b.timestamp) // FIFO ordering
+  
+        if (availableEntries.length === 0 && remainingToAllocate > 0) {
+          throw new Error(`Insufficient quantity available. Still need ${remainingToAllocate.toFixed(2)} liters`)
+        }
+  
+        // Allocate remaining quantity from available entries
+        for (const entry of availableEntries) {
+          if (remainingToAllocate <= 0) break
+  
+          const toAllocate = Math.min(entry.remainingQuantity, remainingToAllocate)
+          
+          tempOriginalData[entry.key] = { ...entry }
+          
+          const updatedEntry = {
+            ...entry,
+            remainingQuantity: entry.remainingQuantity - toAllocate
+          }
+          
+          updates[`tr800/${entry.key}`] = updatedEntry
+          
+          allocations.push({
+            key: entry.key,
+            motherEntry: entry.number,
+            initialQuantity: entry.initialQuantity,
+            remainingQuantity: updatedEntry.remainingQuantity,
+            truckNumber,
+            destination,
+            subtractedQuantity: toAllocate,
+            number: entry.number,
+            product,
+            product_destination: `${product}-${destination}`,
+            timestamp: Date.now()
+          })
+          
+          remainingToAllocate -= toAllocate
+        }
       }
   
       if (remainingToAllocate > 0) {
@@ -1838,7 +1882,15 @@ export default function EntriesPage() {
                             key={orderIndex}
                             className="text-sm flex justify-between items-center py-1 border-t first:border-t-0"
                           >
-                            <span className="font-medium">{order.truckNumber}</span>
+                            <div className="flex items-center gap-2">
+                              <span className="text-muted-foreground">
+                                {orderIndex + 1}.
+                              </span>
+                              <span className="font-medium">{order.truckNumber}</span>
+                              <span className="text-muted-foreground">
+                                ({order.owner})
+                              </span>
+                            </div>
                             <span className="text-muted-foreground">
                               {order.quantity.toLocaleString()}L
                             </span>
@@ -1916,7 +1968,7 @@ export default function EntriesPage() {
     <div className={`min-h-screen ${
       theme === 'dark' ? 'bg-gray-900/50 text-gray-100' : 'bg-gray-50/50 text-gray-900'
     } backdrop-blur-sm`}>
-      <header className={`fixed top-0 left-0 right-0 z-50 w-full border-b ${
+      <header className={`fixed top-0 left-0 right=0 z-50 w-full border-b ${
         theme === 'dark' 
           ? 'bg-gray-900/70 border-gray-800/50' 
           : 'bg-white/70 border-gray-200/50'
