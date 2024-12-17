@@ -17,6 +17,11 @@ export const verificationReminders: Reminder[] = [
     id: 'balance-reconciliation',
     message: "📊 Time for Balance Reconciliation: Cross-check your system volumes with physical stock to maintain accuracy.",
     interval: 8 // show every 8 hours
+  },
+  {
+    id: 'stock-verification',
+    message: "⚖️ Stock Verification Required: Please verify your stock levels with KPC system to ensure accuracy.",
+    interval: 6 // show every 6 hours
   }
 ];
 

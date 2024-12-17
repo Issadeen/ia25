@@ -47,12 +47,15 @@ import { validateAllocation } from '@/lib/validation'
 import { smartAllocation } from '@/lib/smartAllocation'
 import { confirmDialog } from "@/components/ui/confirm-dialog" // Add this line
 import { reminderService } from '@/lib/reminders' // Add this line
+import { StockItem } from '@/types/stock';
 
-// Add this helper function for highlighting text
+// Update the highlightText function
 function highlightText(text: string, filter: string) {
   if (!filter) return text;
+  // Convert text to string explicitly if it might not be a string
+  const textStr = String(text);
   const regex = new RegExp(`(${filter})`, 'gi');
-  const parts = text.split(regex);
+  const parts = textStr.split(regex);
   return parts.map((part, i) => 
     regex.test(part) ? (
       <span key={i} className="bg-yellow-200 dark:bg-yellow-900 rounded px-1">
@@ -202,6 +205,23 @@ export default function EntriesPage() {
   const [showWarningModal, setShowWarningModal] = useState(false)
   const [warningMessage, setWarningMessage] = useState("")
   const [warningTimeout, setWarningTimeout] = useState<NodeJS.Timeout | null>(null)
+
+  // Add to existing state declarations
+  const [stocks, setStocks] = useState<{ ago: StockItem; pms: StockItem } | null>(null);
+  const [editingStock, setEditingStock] = useState<'ago' | 'pms' | null>(null);
+  const [tempStockValue, setTempStockValue] = useState('');
+
+  // Add new state for warnings
+  const [quantityWarnings, setQuantityWarnings] = useState<{
+    [key: string]: { 
+      shortage: number;
+      pendingQuantity: number;
+      availableQuantity: number;
+    }
+  }>({});
+
+  // Add new state for showing note
+  const [showNote, setShowNote] = useState(true);
 
   // 2. Other hooks
   const { data: session, status } = useSession()
@@ -504,6 +524,50 @@ export default function EntriesPage() {
     }
   }
 
+  // Add this function to fetch stocks
+  const fetchStocks = async () => {
+    const db = getDatabase();
+    try {
+      const stocksRef = dbRef(db, 'stocks');
+      const snapshot = await get(stocksRef);
+      if (snapshot.exists()) {
+        setStocks(snapshot.val());
+      }
+    } catch (error) {
+      console.error('Error fetching stocks:', error);
+      toast({
+        title: "Error",
+        description: "Failed to fetch stock information",
+        variant: "destructive"
+      });
+    }
+  };
+
+  // Add this function to update stocks
+  const updateStock = async (product: 'ago' | 'pms', quantity: number) => {
+    const db = getDatabase();
+    try {
+      await update(dbRef(db, `stocks/${product}`), {
+        product,
+        quantity
+      });
+      
+      toast({
+        title: "Success",
+        description: `Updated ${product.toUpperCase()} stock to ${quantity.toLocaleString()} liters`,
+      });
+      
+      // Refresh stocks
+      fetchStocks();
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to update stock quantity",
+        variant: "destructive"
+      });
+    }
+  };
+
   // 4. Effects
   useEffect(() => {
     setMounted(true)
@@ -673,6 +737,70 @@ export default function EntriesPage() {
 
     return () => clearInterval(interval);
   }, [session?.user?.email, toast]);
+
+  // Add to your useEffect for initial load
+  useEffect(() => {
+    if (mounted) {
+      fetchStocks();
+    }
+  }, [mounted]);
+
+  // Add effect to check quantities and set warnings
+  useEffect(() => {
+    if (summaryData.length > 0 && pendingOrders.length > 0) {
+      const warnings: { [key: string]: any } = {};
+      
+      pendingOrders.forEach(order => {
+        const key = `${order.product}-${order.destination}`;
+        const matchingSummary = summaryData.find(
+          s => s.productDestination.toLowerCase() === `${order.product.toLowerCase()} - ${order.destination.toLowerCase()}`
+        );
+        
+        if (matchingSummary) {
+          const availableQuantity = matchingSummary.remainingQuantity;
+          const pendingQuantity = order.totalQuantity;
+          
+          if (pendingQuantity > availableQuantity) {
+            const shortage = pendingQuantity - availableQuantity;
+            const truckShortage = order.product.toLowerCase() === 'ago' 
+              ? (shortage / 36000).toFixed(1)
+              : (shortage / 40000).toFixed(1);
+            
+            warnings[key] = {
+              shortage: parseFloat(truckShortage),
+              pendingQuantity,
+              availableQuantity,
+              shortageQuantity: shortage
+            };
+          }
+        } else {
+          // If no matching summary found, all pending quantity is shortage
+          const truckShortage = order.product.toLowerCase() === 'ago' 
+            ? (order.totalQuantity / 36000).toFixed(1)
+            : (order.totalQuantity / 40000).toFixed(1);
+          
+          warnings[key] = {
+            shortage: parseFloat(truckShortage),
+            pendingQuantity: order.totalQuantity,
+            availableQuantity: 0,
+            shortageQuantity: order.totalQuantity
+          };
+        }
+      });
+      
+      setQuantityWarnings(warnings);
+    }
+  }, [summaryData, pendingOrders]);
+
+  // Add effect for note timing
+  useEffect(() => {
+    if (showNote) {
+      const timer = setTimeout(() => {
+        setShowNote(false);
+      }, 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [showNote]);
 
   // 5. Loading check
   if (!mounted || status === "loading") return null
@@ -1232,6 +1360,122 @@ export default function EntriesPage() {
     }
   }
 
+  // Add this function before renderMainContent
+const renderStockInfo = () => {
+  if (!stocks) return null;
+
+  return (
+    <Card className="mb-6 border-emerald-500/20">
+      <CardHeader>
+        <CardTitle className="text-xl">Current Stock Levels</CardTitle>
+      </CardHeader>
+      <CardContent className="p-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {/* AGO Stock */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-medium">AGO Stock</h3>
+              {editingStock === 'ago' ? (
+                <div className="flex items-center gap-2">
+                  <Input
+                    type="number"
+                    value={tempStockValue}
+                    onChange={(e) => setTempStockValue(e.target.value)}
+                    className="w-32"
+                  />
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      updateStock('ago', parseInt(tempStockValue));
+                      setEditingStock(null);
+                    }}
+                  >
+                    Save
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setEditingStock(null)}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              ) : (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setEditingStock('ago');
+                    setTempStockValue(stocks.ago.quantity.toString());
+                  }}
+                >
+                  Edit
+                </Button>
+              )}
+            </div>
+            <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">
+              {stocks.ago.quantity.toLocaleString()} m³
+            </div>
+            <div className="text-sm text-muted-foreground">
+              Estimated Trucks: {(stocks.ago.quantity / 36).toFixed(2)}
+            </div>
+          </div>
+
+          {/* PMS Stock */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-medium">PMS Stock</h3>
+              {editingStock === 'pms' ? (
+                <div className="flex items-center gap-2">
+                  <Input
+                    type="number"
+                    value={tempStockValue}
+                    onChange={(e) => setTempStockValue(e.target.value)}
+                    className="w-32"
+                  />
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      updateStock('pms', parseInt(tempStockValue));
+                      setEditingStock(null);
+                    }}
+                  >
+                    Save
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setEditingStock(null)}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              ) : (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setEditingStock('pms');
+                    setTempStockValue(stocks.pms.quantity.toString());
+                  }}
+                >
+                  Edit
+                </Button>
+              )}
+            </div>
+            <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">
+              {stocks.pms.quantity.toLocaleString()} m³
+            </div>
+            <div className="text-sm text-muted-foreground">
+              Estimated Trucks: {(stocks.pms.quantity / 40).toFixed(2)}
+            </div>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+};
+
   // Update renderMainContent to include back button and better styling
   const renderMainContent = () => {
     if (showSummary) {
@@ -1265,9 +1509,32 @@ export default function EntriesPage() {
           </div>
 
           {/* Summary info note */}
-          <div className="mb-4 text-sm text-muted-foreground">
-            Note: Only showing entries with available quantities. Entries and destinations not shown have zero balance.
-          </div>
+          <AnimatePresence>
+            {showNote && (
+              <motion.div 
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0 }}
+                className="mb-4 text-sm text-muted-foreground"
+              >
+                Note: Only showing entries with available quantities. Entries and destinations not shown have zero balance.
+              </motion.div>
+            )}
+          </AnimatePresence>
+          {Object.keys(quantityWarnings).length > 0 && !showNote && (
+            <motion.div 
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mb-4 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md"
+            >
+              <div className="font-medium text-red-600 dark:text-red-400">
+                ⚠️ Warning: Insufficient quantities for pending orders
+              </div>
+              <div className="text-sm text-red-500 dark:text-red-400 mt-1">
+                Some destinations have more pending orders than available stock. Highlighted rows need attention.
+              </div>
+            </motion.div>
+          )}
 
           {summaryData.length > 0 ? (
             <Card className="border-0 shadow-lg bg-white/50 dark:bg-gray-900/50 backdrop-blur-sm">
@@ -1285,13 +1552,27 @@ export default function EntriesPage() {
                     {summaryData.map((item, index) => {
                       // Split and format product-destination
                       const [product, destination] = item.productDestination.split(' - ')
+                      const warningKey = `${product}-${destination}`.toUpperCase();
+                      const warning = quantityWarnings[warningKey];
+                      
                       return (
                         <TableRow 
                           key={index}
-                          className="border-b border-emerald-500/10 hover:bg-emerald-50/50 dark:hover:bg-emerald-900/20"
+                          className={`
+                            border-b border-emerald-500/10 
+                            hover:bg-emerald-50/50 dark:hover:bg-emerald-900/20
+                            ${warning ? 'bg-red-50/50 dark:bg-red-900/20' : ''}
+                            transition-colors duration-200
+                          `}
                         >
                           <TableCell className="font-medium">
                             {`${product.toUpperCase()} - ${destination.toUpperCase()}`}
+                            {warning && (
+                              <div className="mt-1 text-sm text-red-600 dark:text-red-400">
+                                ⚠️ Shortage of {warning.shortage.toFixed(2)} trucks
+                                ({((warning.pendingQuantity - warning.availableQuantity) / 1000).toFixed(2)}k liters)
+                              </div>
+                            )}
                           </TableCell>
                           <TableCell>{item.remainingQuantity.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</TableCell>
                           <TableCell>{item.estimatedTrucks.toFixed(2)}</TableCell>
@@ -1318,6 +1599,7 @@ export default function EntriesPage() {
           {/* Add spacing between cards */}
           {showPendingOrders && (
             <div className="mt-8">
+              {renderStockInfo()}
               {renderPendingOrders()}
             </div>
           )}
@@ -1676,18 +1958,6 @@ export default function EntriesPage() {
                 >
                   Clear Form
                 </Button>
-                <Button
-                  variant="secondary"
-                  onClick={() => {
-                    setShowManualAllocation(false)
-                    clearForm()
-                    setSelectedEntries([])
-                    setCurrentView('default')
-                  }}
-                  className="w-full sm:w-auto"
-                >
-                  Cancel
-                </Button>
               </div>
             </CardContent>
           </Card>
@@ -1702,9 +1972,9 @@ export default function EntriesPage() {
         transition={{ duration: 0.3 }}
       >
         <Card className="border-0 shadow-lg bg-white/50 dark:bg-gray-900/50 backdrop-blur-sm">
-          <CardHeader className="pb-0">
+          <CardHeader>
             <CardTitle className="text-2xl font-semibold bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">
-              Allocate Entries
+              Allocation Form
             </CardTitle>
           </CardHeader>
           <CardContent className="p-6">
@@ -1717,12 +1987,24 @@ export default function EntriesPage() {
               <Input
                 placeholder="Product"
                 value={product}
-                onChange={(e) => setProduct(e.target.value.toLowerCase())}
+                onChange={(e) => {
+                  const value = e.target.value.toLowerCase()
+                  setProduct(value)
+                  if (value && destination) {
+                    fetchAvailableEntries(value, destination)
+                  }
+                }}
               />
               <Input
                 placeholder="Destination"
                 value={destination}
-                onChange={(e) => setDestination(e.target.value.toLowerCase())}
+                onChange={(e) => {
+                  const value = e.target.value.toLowerCase()
+                  setDestination(value)
+                  if (product && value) {
+                    fetchAvailableEntries(product, value)
+                  }
+                }}
               />
               <Input
                 placeholder="AT20 Quantity"
@@ -1730,70 +2012,51 @@ export default function EntriesPage() {
                 onChange={(e) => setAt20Quantity(e.target.value)}
               />
             </div>
-            {destination.trim().toLowerCase() === 'ssd' && (
-              <div className="mt-4">
-                <Label htmlFor="entryUsedInPermit">Select Entry Used in Permit</Label>
-                {availablePermitEntries.length > 0 ? (
-                  <div className="space-y-2 mt-2 max-h-40 overflow-y-auto border rounded-md p-2">
-                    {availablePermitEntries.map((entry) => {
-                      const requiredQuantity = parseFloat(at20Quantity) || 0;
-                      const hasEnoughQuantity = entry.remainingQuantity >= requiredQuantity;
-                      
-                      return (
-                        <div 
-                          key={entry.key} 
-                          className={`flex items-center justify-between p-2 rounded hover:bg-accent cursor-pointer ${
-                            entryUsedInPermit === entry.key ? 'bg-primary/10' : ''
-                          } ${!hasEnoughQuantity ? 'opacity-50' : ''}`}
-                          onClick={() => setEntryUsedInPermit(entry.key)}
-                        >
-                          <div className="flex flex-col">
-                            <span className="font-medium">{entry.number}</span>
-                            <span className={`text-sm ${
-                              hasEnoughQuantity ? 'text-muted-foreground' : 'text-destructive'
-                            }`}>
-                              Product: {entry.product.toUpperCase()} | 
-                              Remaining: {entry.remainingQuantity.toLocaleString()} liters
-                              {!hasEnoughQuantity && requiredQuantity > 0 && (
-                                <span className="block text-destructive">
-                                  Insufficient quantity (Need: {requiredQuantity.toLocaleString()})
-                                </span>
-                              )}
-                            </span>
-                          </div>
-                          <input 
-                            type="radio"
-                            checked={entryUsedInPermit === entry.key}
-                            onChange={() => setEntryUsedInPermit(entry.key)}
-                            className="h-4 w-4"
-                            disabled={!hasEnoughQuantity}
-                          />
-                        </div>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <div className="mt-2 text-muted-foreground text-sm">
-                    No available entries found for {product.toUpperCase()} to SSD
-                  </div>
-                )}
-              </div>
-            )}
+
             {volumeWarning && (
               <div className="mt-4 text-yellow-600 dark:text-yellow-400">
                 {volumeWarning}
               </div>
             )}
+
+            {availableEntries.length > 0 && (
+              <div className="mt-6">
+                <Label className="text-lg font-semibold mb-4">Available Entries:</Label>
+                <div className="space-y-2 mt-2">
+                  {availableEntries.map((entry) => (
+                    <div key={entry.key} className="flex items-center gap-4 p-3 border rounded hover:bg-accent">
+                      <input
+                        type="checkbox"
+                        id={`entry-${entry.key}`}
+                        checked={selectedEntries.includes(entry.key)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSelectedEntries([...selectedEntries, entry.key])
+                          } else {
+                            setSelectedEntries(selectedEntries.filter(id => id !== entry.key))
+                          }
+                        }}
+                        className="w-4 h-4"
+                      />
+                      <Label htmlFor={`entry-${entry.key}`} className="flex-1 cursor-pointer">
+                        {entry.number} - Remaining: {entry.remainingQuantity}
+                      </Label>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="mt-6 flex flex-col sm:flex-row gap-3">
               <Button 
-                onClick={getEntries} 
+                onClick={getEntries}
                 disabled={isLoading}
                 className="w-full sm:w-auto bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-600 hover:from-emerald-500 hover:via-teal-400 hover:to-blue-500 text-white"
               >
                 {isLoading ? (
-                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
-                  <RefreshCw className="h-4 w-4 mr-2" />
+                  <RefreshCw className="h-4 w-4" />
                 )}
                 Allocate
               </Button>
@@ -1804,239 +2067,172 @@ export default function EntriesPage() {
               >
                 Clear Form
               </Button>
-              {lastFormState.truckNumber && (
-                <Button
-                  variant="secondary"
-                  onClick={restoreLastForm}
-                  className="w-full sm:w-auto"
-                >
-                  <ArrowLeft className="h-4 w-4 mr-2" /> Restore Last Entry
-                </Button>
-              )}
+              <Button
+                variant="outline"
+                onClick={restoreLastForm}
+                className="w-full sm:w-auto border-emerald-500/30 hover:border-emerald-500/50"
+              >
+                Restore Last Entry
+              </Button>
             </div>
           </CardContent>
         </Card>
 
-        {error && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.2, duration: 0.3 }}
-          >
-            <Card className="mt-6 border-red-500 bg-red-50 dark:bg-red-900/10">
-              <CardContent className="p-6">
-                <div className="flex items-center gap-2 text-red-600 dark:text-red-400">
-                  <AlertTriangle className="h-5 w-5" /> {/* Change this line */}
-                  <p>{error}</p>
-                </div>
-              </CardContent>
-            </Card>
-          </motion.div>
-        )}
-
         {entriesData.length > 0 && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.2, duration: 0.3 }}
-          >
-            <Card className={`mt-6 ${theme === 'dark' ? 'bg-gray-800/50' : 'bg-white'} backdrop-blur-md border-0 shadow-lg`}>
-              <CardHeader className="pb-0">
-                <div className="flex justify-between items-center">
-                  <CardTitle className="text-2xl">Allocated Entries</CardTitle>
-                  <Button 
-                    variant="destructive" 
-                    onClick={undoAllocation}
-                    className="flex items-center gap-2"
-                  >
-                    <ArrowLeft className="h-4 w-4" /> Undo Allocation
-                  </Button>
-                </div>
-              </CardHeader>
-              <CardContent className="p-6">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Mother Entry</TableHead>
-                      <TableHead>Initial Quantity</TableHead>
-                      <TableHead>Remaining Quantity</TableHead>
-                      <TableHead>Truck Number</TableHead>
-                      <TableHead>Destination</TableHead>
-                      <TableHead>Subtracted Quantity</TableHead>
+          <Card className="mt-6 border-0 shadow-lg bg-white/50 dark:bg-gray-900/50 backdrop-blur-sm">
+            <CardHeader>
+              <CardTitle className="text-2xl font-semibold bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">
+                Allocation Results
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-6">
+              <Table>
+                <TableHeader>
+                  <TableRow className="border-b border-emerald-500/20">
+                    <TableHead className="text-emerald-700 dark:text-emerald-400">Entry Number</TableHead>
+                    <TableHead className="text-emerald-700 dark:text-emerald-400">Initial Quantity</TableHead>
+                    <TableHead className="text-emerald-700 dark:text-emerald-400">Remaining</TableHead>
+                    <TableHead className="text-emerald-700 dark:text-emerald-400">Subtracted Quantity</TableHead>
+                    <TableHead className="text-emerald-700 dark:text-emerald-400">Destination</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {entriesData.map((entry, index) => (
+                    <TableRow key={index}>
+                      <TableCell>{entry.number}</TableCell>
+                      <TableCell>{entry.initialQuantity}</TableCell>
+                      <TableCell>{entry.remainingQuantity}</TableCell>
+                      <TableCell>{entry.subtractedQuantity}</TableCell>
+                      <TableCell>{entry.destination}</TableCell>
                     </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {entriesData.map((entry, index) => (
-                      <TableRow key={index}>
-                        <TableCell>{entry.motherEntry}</TableCell>
-                        <TableCell>{entry.initialQuantity}</TableCell>
-                        <TableCell>{entry.remainingQuantity}</TableCell>
-                        <TableCell>{entry.truckNumber}</TableCell>
-                        <TableCell>{entry.destination}</TableCell>
-                        <TableCell>{entry.subtractedQuantity}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </CardContent>
-            </Card>
-          </motion.div>
+                  ))}
+                </TableBody>
+              </Table>
+              <div className="mt-6 flex flex-col sm:flex-row gap-3">
+                <Button 
+                  variant="outline" 
+                  onClick={undoAllocation}
+                  className="w-full sm:w-auto border-emerald-500/30 hover:border-emerald-500/50"
+                >
+                  Undo Allocation
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
         )}
       </motion.div>
     )
   }
 
-  // Update renderPendingOrders to show grouped data
   const renderPendingOrders = () => {
     if (isPendingLoading) {
       return (
-        <Card className="mb-6">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-center">
-              <Loader2 className="h-6 w-6 animate-spin" />
-            </div>
+        <Card className="border-0 shadow-lg bg-white/50 dark:bg-gray-900/50 backdrop-blur-sm">
+          <CardContent className="p-6 text-center">
+            <Loader2 className="h-6 w-6 animate-spin mx-auto" />
+            <p className="mt-2">Loading pending orders...</p>
           </CardContent>
         </Card>
       )
     }
-  
+
     if (pendingOrders.length === 0) {
-      return null
+      return (
+        <Card className="border-0 shadow-lg bg-white/50 dark:bg-gray-900/50 backdrop-blur-sm">
+          <CardContent className="p-6 text-center text-muted-foreground">
+            No pending orders found.
+          </CardContent>
+        </Card>
+      )
     }
-  
-    // Group orders by product for better organization
-    const productGroups = pendingOrders.reduce((groups: { [key: string]: PendingOrderSummary[] }, order) => {
-      if (!groups[order.product]) {
-        groups[order.product] = []
-      }
-      groups[order.product].push(order)
-      return groups
-    }, {})
-  
+
     return (
-      <Card className="mb-6">
+      <Card className="border-0 shadow-lg bg-white/50 dark:bg-gray-900/50 backdrop-blur-sm">
         <CardHeader>
-          <div className="flex items-center justify-between">
-            <CardTitle className="text-xl">Pending Orders</CardTitle>
-            <Button 
-              variant="outline" 
-              size="sm"
-              onClick={fetchPendingOrders}
-              className="flex items-center gap-2"
-            >
-              <RefreshCw className="h-4 w-4" />
-              Refresh
-            </Button>
-          </div>
+          <CardTitle className="text-2xl font-semibold bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">
+            Pending Orders
+          </CardTitle>
         </CardHeader>
         <CardContent className="p-6">
-          <div className="space-y-6">
-            {Object.entries(productGroups).map(([product, groups]) => (
-              <div key={product} className="space-y-4">
-                {groups.map((group, index) => (
-                  <Card key={`${product}-${group.destination}-${index}`} className="border bg-muted/50">
-                    <CardHeader className="pb-2">
-                      <CardTitle className="text-lg">
-                        {group.product} - {group.destination}
-                      </CardTitle>
-                      <p className="text-base font-medium">
-                        Total: {group.totalQuantity.toLocaleString()} liters
-                      </p>
-                    </CardHeader>
-                    <CardContent className="pt-0">
-                      <div className="mt-2 space-y-2">
-                        {group.orders.map((order, orderIndex) => (
-                          <div 
-                            key={orderIndex}
-                            className="text-sm flex justify-between items-center py-1 border-t first:border-t-0"
-                          >
-                            <div className="flex items-center gap-2">
-                              <span className="text-muted-foreground">
-                                {orderIndex + 1}.
-                              </span>
-                              <span className="font-medium">{order.truckNumber}</span>
-                              <span className="text-muted-foreground">
-                                ({order.owner})
-                              </span>
-                            </div>
-                            <span className="text-muted-foreground">
-                              {order.quantity.toLocaleString()}L
-                            </span>
-                          </div>
-                        ))}
+          <Table>
+            <TableHeader>
+              <TableRow className="border-b border-emerald-500/20">
+                <TableHead className="text-emerald-700 dark:text-emerald-400">Product</TableHead>
+                <TableHead className="text-emerald-700 dark:text-emerald-400">Destination</TableHead>
+                <TableHead className="text-emerald-700 dark:text-emerald-400">Total Quantity</TableHead>
+                <TableHead className="text-emerald-700 dark:text-emerald-400">Available Quantity</TableHead>
+                <TableHead className="text-emerald-700 dark:text-emerald-400">Status</TableHead>
+                <TableHead className="text-emerald-700 dark:text-emerald-400">Orders</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {pendingOrders.map((order, index) => {
+                const warningKey = `${order.product}-${order.destination}`;
+                const warning = quantityWarnings[warningKey];
+                
+                return (
+                  <TableRow 
+                    key={index}
+                    className={warning ? 'bg-red-50/50 dark:bg-red-900/20' : ''}
+                  >
+                    <TableCell>{order.product}</TableCell>
+                    <TableCell>{order.destination}</TableCell>
+                    <TableCell>
+                      {order.totalQuantity.toLocaleString()}
+                      <div className="text-sm text-muted-foreground">
+                        ({order.product.toLowerCase() === 'ago' 
+                          ? (order.totalQuantity / 36000).toFixed(1) 
+                          : (order.totalQuantity / 40000).toFixed(1)} trucks)
                       </div>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-            ))}
-          </div>
+                    </TableCell>
+                    <TableCell>
+                      {warning ? (
+                        <>
+                          {warning.availableQuantity.toLocaleString()}
+                          <div className="text-sm text-muted-foreground">
+                            ({(warning.availableQuantity / (order.product.toLowerCase() === 'ago' ? 36000 : 40000)).toFixed(1)} trucks)
+                          </div>
+                        </>
+                      ) : (
+                        "Checking..."
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {warning && (
+                        <div className="text-red-600 dark:text-red-400 font-medium">
+                          ⚠️ Shortage: {(warning.pendingQuantity - warning.availableQuantity).toLocaleString()} liters
+                          <div className="text-sm">
+                            ({warning.shortage} trucks will lack entries)
+                          </div>
+                        </div>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {order.orders.map((o, idx) => (
+                        <div key={idx} className="mb-1">
+                          {`${idx + 1}. Truck: ${o.truckNumber}`}
+                          <br />
+                          <span className="text-sm text-muted-foreground">
+                            {`Quantity: ${o.quantity.toLocaleString()}, Order: ${o.orderno}, Owner: ${o.owner}`}
+                          </span>
+                        </div>
+                      ))}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
         </CardContent>
       </Card>
-    )
-  }
-
-  // Update avatar sourcing
-  const avatarSrc = session?.user?.image || lastUploadedImage || ''
-
-  // Add warning modal component
-  const WarningModal = () => {
-    if (!showWarningModal) return null
-
-    return (
-      <motion.div
-        initial={{ opacity: 0, y: -50 }}
-        animate={{ opacity: 1, y: 0 }}
-        exit={{ opacity: 0, y: -50 }}
-        className="fixed top-20 right-4 z-50"
-      >
-        <div className="bg-yellow-500/90 dark:bg-yellow-600/90 backdrop-blur-sm text-white px-6 py-4 rounded-lg shadow-lg border border-yellow-400/50">
-          <div className="flex items-start gap-3">
-            <AlertTriangle className="h-5 w-5 mt-0.5 flex-shrink-0" />
-            <div className="flex-1">
-              <h3 className="font-semibold mb-1">Session Warning</h3>
-              <p className="text-sm">{warningMessage}</p>
-              <Button 
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  setShowWarningModal(false)
-                  setWarningMessage("")
-                  // Reset the inactivity timer when dismissed
-                  if (warningTimeout) {
-                    clearTimeout(warningTimeout)
-                    setWarningTimeout(null)
-                  }
-                  if (inactivityTimeoutRef.current) {
-                    clearTimeout(inactivityTimeoutRef.current)
-                  }
-                  // Restart the timers
-                  const warning = setTimeout(() => {
-                    setWarningMessage("Your session will expire in 1 minute due to inactivity.")
-                    setShowWarningModal(true)
-                  }, 9 * 60 * 1000)
-                  setWarningTimeout(warning)
-                  inactivityTimeoutRef.current = setTimeout(async () => {
-                    await signOut()
-                    router.push('/login')
-                  }, 10 * 60 * 1000)
-                }}
-                className="mt-2 text-white border-white/50 hover:bg-yellow-600/50"
-              >
-                Dismiss
-              </Button>
-            </div>
-          </div>
-        </div>
-      </motion.div>
-    )
-  }
+    );
+  };
 
   return (
     <div className={`min-h-screen ${
       theme === 'dark' ? 'bg-gray-900/50 text-gray-100' : 'bg-gray-50/50 text-gray-900'
     } backdrop-blur-sm`}>
-      <header className={`fixed top-0 left-0 right-0 z-50 w-full border-b ${
+      <header className={`fixed top=0 left-0 right=0 z-50 w-full border-b ${
         theme === 'dark' 
           ? 'bg-gray-900/70 border-gray-800/50' 
           : 'bg-white/70 border-gray-200/50'
@@ -2071,7 +2267,7 @@ export default function EntriesPage() {
               <div className="relative group">
                 <Avatar className="h-8 w-8 sm:h-10 sm:w-10 cursor-pointer ring-2 ring-pink-500/50 ring-offset-2 ring-offset-background shadow-lg shadow-pink-500/10 transition-shadow hover:ring-pink-500/75">
                   <AvatarImage 
-                    src={avatarSrc} 
+                    src={session?.user?.image || lastUploadedImage || ''} 
                     alt="Profile"
                   />
                   <AvatarFallback className="bg-pink-100 text-pink-700">
@@ -2092,10 +2288,26 @@ export default function EntriesPage() {
       <main className="container mx-auto px-4 pt-20 sm:pt-24 pb-8">
         {/* Add the warning modal */}
         <AnimatePresence>
-          <WarningModal />
+          {showWarningModal && (
+            <Dialog open={showWarningModal} onOpenChange={setShowWarningModal}>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Session Expiring Soon</DialogTitle>
+                  <DialogDescription>
+                    {warningMessage}
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="mt-6 flex justify-end gap-2">
+                  <Button variant="outline" onClick={() => setShowWarningModal(false)}>
+                    Dismiss
+                  </Button>
+                </div>
+              </DialogContent>
+            </Dialog>
+          )}
         </AnimatePresence>
 
-        {/* Replace the existing buttons section with this */}
+        {/* Navigation Buttons */}
         <motion.div 
           className="mb-4 sm:mb-6"
           initial={{ opacity: 0, y: -20 }}
@@ -2168,32 +2380,50 @@ export default function EntriesPage() {
 
         {renderMainContent()}
       </main>
+
       <Dialog open={workIdDialogOpen} onOpenChange={setWorkIdDialogOpen}>
         <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Verify Work ID</DialogTitle>
+            <DialogDescription>
+              Please enter your Work ID to confirm the changes.
+            </DialogDescription>
+          </DialogHeader>
           <form onSubmit={verifyWorkId}>
-            <DialogHeader>
-              <DialogTitle>Enter Work ID</DialogTitle>
-              <DialogDescription>
-                Please enter your Work ID to confirm this change
-              </DialogDescription>
-            </DialogHeader>
-            <div className="grid gap-4 py-4">
+            <div className="mt-4">
+              <Label htmlFor="workId">Work ID</Label>
               <Input
-                placeholder="Enter Work ID"
-                type="password"
+                id="workId"
                 value={workId}
                 onChange={(e) => setWorkId(e.target.value)}
-                disabled={isVerifying}
-                autoFocus
+                required
               />
-              <Button 
-                type="submit" 
-                disabled={isVerifying || !workId}
-              >
-                {isVerifying ? "Verifying..." : "Verify"}
+            </div>
+            <div className="mt-6 flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setWorkIdDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={isVerifying}>
+                {isVerifying ? <Loader2 className="h-4 w-4 animate-spin" /> : "Verify"}
               </Button>
             </div>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showWarningModal} onOpenChange={setShowWarningModal}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Session Expiring Soon</DialogTitle>
+            <DialogDescription>
+              {warningMessage}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="mt-6 flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setShowWarningModal(false)}>
+              Dismiss
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
     </div>
