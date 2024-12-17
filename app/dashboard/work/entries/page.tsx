@@ -568,7 +568,50 @@ export default function EntriesPage() {
     }
   };
 
-  // 4. Effects
+  // 4. Function to fetch available entries
+  const fetchAvailableEntries = async (product: string, destination: string) => {
+    const db = getDatabase()
+    try {
+      const snapshot = await get(dbRef(db, 'tr800'))
+      if (snapshot.exists()) {
+        const entries = Object.entries(snapshot.val())
+          .map(([key, value]: [string, any]) => ({
+            key,
+            ...value
+          }))
+          .filter(entry => 
+            entry.product.toLowerCase() === product.toLowerCase() &&
+            entry.destination.toLowerCase() === destination.toLowerCase() &&
+            entry.remainingQuantity > 0
+          )
+          .sort((a, b) => a.timestamp - b.timestamp) // Sort by timestamp
+  
+        setAvailableEntries(entries)
+        
+        // Show toast if entries are found
+        if (entries.length > 0) {
+          toast({
+            title: "Entries Found",
+            description: `Found ${entries.length} available entries for ${product.toUpperCase()} to ${destination.toUpperCase()}`
+          })
+        } else {
+          toast({
+            title: "No Entries Available",
+            description: `No entries found for ${product.toUpperCase()} to ${destination.toUpperCase()}`,
+            variant: "destructive"
+          })
+        }
+      }
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to fetch available entries",
+        variant: "destructive"
+      })
+    }
+  }
+
+  // 5. Effects
   useEffect(() => {
     setMounted(true)
     
@@ -1317,48 +1360,7 @@ export default function EntriesPage() {
     // This can include form submission logic
   }
 
-  // Add this function after your existing event handlers
-  const fetchAvailableEntries = async (product: string, destination: string) => {
-    const db = getDatabase()
-    try {
-      const snapshot = await get(dbRef(db, 'tr800'))
-      if (snapshot.exists()) {
-        const entries = Object.entries(snapshot.val())
-          .map(([key, value]: [string, any]) => ({
-            key,
-            ...value
-          }))
-          .filter(entry => 
-            entry.product.toLowerCase() === product.toLowerCase() &&
-            entry.destination.toLowerCase() === destination.toLowerCase() &&
-            entry.remainingQuantity > 0
-          )
-          .sort((a, b) => a.timestamp - b.timestamp) // Sort by timestamp
-  
-        setAvailableEntries(entries)
-        
-        // Show toast if entries are found
-        if (entries.length > 0) {
-          toast({
-            title: "Entries Found",
-            description: `Found ${entries.length} available entries for ${product.toUpperCase()} to ${destination.toUpperCase()}`
-          })
-        } else {
-          toast({
-            title: "No Entries Available",
-            description: `No entries found for ${product.toUpperCase()} to ${destination.toUpperCase()}`,
-            variant: "destructive"
-          })
-        }
-      }
-    } catch (error) {
-      toast({
-        title: "Error",
-        description: "Failed to fetch available entries",
-        variant: "destructive"
-      })
-    }
-  }
+  // Function already defined above - removed duplicate declaration
 
   // Add this function before renderMainContent
 const renderStockInfo = () => {
@@ -2013,37 +2015,38 @@ const renderStockInfo = () => {
               />
             </div>
 
-            {volumeWarning && (
-              <div className="mt-4 text-yellow-600 dark:text-yellow-400">
-                {volumeWarning}
+            {/* Add Permit Entry Selection */}
+            {destination.toLowerCase() === 'ssd' && (
+              <div className="mt-4">
+                <Label htmlFor="permitEntry" className="block text-sm font-medium mb-2">
+                  Select Permit Entry (Required for SSD)
+                </Label>
+                <Select
+                  value={entryUsedInPermit}
+                  onValueChange={(value) => setEntryUsedInPermit(value)}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Select permit entry..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {availablePermitEntries.map((entry) => (
+                      <SelectItem key={entry.key} value={entry.key}>
+                        {entry.number} - Remaining: {entry.remainingQuantity.toLocaleString()}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {!entryUsedInPermit && (
+                  <p className="mt-2 text-sm text-red-500">
+                    Please select a permit entry for SSD allocation
+                  </p>
+                )}
               </div>
             )}
 
-            {availableEntries.length > 0 && (
-              <div className="mt-6">
-                <Label className="text-lg font-semibold mb-4">Available Entries:</Label>
-                <div className="space-y-2 mt-2">
-                  {availableEntries.map((entry) => (
-                    <div key={entry.key} className="flex items-center gap-4 p-3 border rounded hover:bg-accent">
-                      <input
-                        type="checkbox"
-                        id={`entry-${entry.key}`}
-                        checked={selectedEntries.includes(entry.key)}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setSelectedEntries([...selectedEntries, entry.key])
-                          } else {
-                            setSelectedEntries(selectedEntries.filter(id => id !== entry.key))
-                          }
-                        }}
-                        className="w-4 h-4"
-                      />
-                      <Label htmlFor={`entry-${entry.key}`} className="flex-1 cursor-pointer">
-                        {entry.number} - Remaining: {entry.remainingQuantity}
-                      </Label>
-                    </div>
-                  ))}
-                </div>
+            {volumeWarning && (
+              <div className="mt-4 text-yellow-600 dark:text-yellow-400">
+                {volumeWarning}
               </div>
             )}
 
@@ -2274,7 +2277,7 @@ const renderStockInfo = () => {
                     {session?.user?.email?.[0]?.toUpperCase() || 'U'}
                   </AvatarFallback>
                 </Avatar>
-                <div className="absolute right-0 mt-2 w-48 py-2 bg-white dark:bg-gray-800 rounded-md shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200">
+                <div className="absolute right=0 mt-2 w-48 py-2 bg-white dark:bg-gray-800 rounded-md shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200">
                   <div className="px-4 py-2 text-xs sm:text-sm text-gray-700 dark:text-gray-200 truncate">
                     {session?.user?.email}
                   </div>
