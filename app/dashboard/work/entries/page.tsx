@@ -217,6 +217,7 @@ export default function EntriesPage() {
       shortage: number;
       pendingQuantity: number;
       availableQuantity: number;
+      shortageQuantity: number;
     }
   }>({});
 
@@ -447,13 +448,16 @@ export default function EntriesPage() {
             productGroups[product].push(destGroup)
           }
           
+          // Convert quantity from m³ to m³ (since input is already in m³)
+          const quantityInCubicMeters = parseFloat(order.quantity)
+          
           destGroup.orders.push({
             truckNumber: order.truck_number,
-            quantity: parseFloat(order.quantity),
+            quantity: quantityInCubicMeters, // Store as m³
             orderno: order.orderno,
             owner: order.owner || 'Unknown' // Add owner info
           })
-          destGroup.totalQuantity += parseFloat(order.quantity)
+          destGroup.totalQuantity += quantityInCubicMeters // Sum in m³
         })
   
       // Convert to array and sort
@@ -800,27 +804,29 @@ export default function EntriesPage() {
         );
         
         if (matchingSummary) {
-          const availableQuantity = matchingSummary.remainingQuantity;
-          const pendingQuantity = order.totalQuantity;
+          // Convert liters to m³ for comparison (1 m³ = 1000 liters)
+          const availableQuantityInCubicMeters = matchingSummary.remainingQuantity / 1000; // Convert liters to m³
+          const pendingQuantityInCubicMeters = order.totalQuantity; // Already in m³
           
-          if (pendingQuantity > availableQuantity) {
-            const shortage = pendingQuantity - availableQuantity;
+          if (pendingQuantityInCubicMeters > availableQuantityInCubicMeters) {
+            const shortageInCubicMeters = pendingQuantityInCubicMeters - availableQuantityInCubicMeters;
+            // Calculate truck shortage based on product capacity
             const truckShortage = order.product.toLowerCase() === 'ago' 
-              ? (shortage / 36000).toFixed(1)
-              : (shortage / 40000).toFixed(1);
+              ? (shortageInCubicMeters / 36).toFixed(1) // 36m³ per AGO truck
+              : (shortageInCubicMeters / 40).toFixed(1); // 40m³ per PMS truck
             
             warnings[key] = {
               shortage: parseFloat(truckShortage),
-              pendingQuantity,
-              availableQuantity,
-              shortageQuantity: shortage
+              pendingQuantity: pendingQuantityInCubicMeters,
+              availableQuantity: availableQuantityInCubicMeters,
+              shortageQuantity: shortageInCubicMeters
             };
           }
         } else {
           // If no matching summary found, all pending quantity is shortage
           const truckShortage = order.product.toLowerCase() === 'ago' 
-            ? (order.totalQuantity / 36000).toFixed(1)
-            : (order.totalQuantity / 40000).toFixed(1);
+            ? (order.totalQuantity / 36).toFixed(1) // 36m³ per AGO truck
+            : (order.totalQuantity / 40).toFixed(1) // 40m³ per PMS truck
           
           warnings[key] = {
             shortage: parseFloat(truckShortage),
@@ -1150,7 +1156,9 @@ export default function EntriesPage() {
         setSummaryData(summaryArray)
         setShowSummary(true)
         setShowUsage(false)
-        fetchPendingOrders()
+        
+        // After setting summary data, fetch pending orders
+        await fetchPendingOrders()
       }
     } catch (error) {
       toast({
@@ -2171,7 +2179,29 @@ const renderStockInfo = () => {
             <TableBody>
               {pendingOrders.map((order, index) => {
                 const warningKey = `${order.product}-${order.destination}`;
-                const warning = quantityWarnings[warningKey];
+                
+                // Find matching summary entry
+                const matchingSummary = summaryData.find(
+                  s => s.productDestination.toLowerCase() === `${order.product.toLowerCase()} - ${order.destination.toLowerCase()}`
+                );
+                
+                // Calculate available quantity
+                const availableQuantity = matchingSummary ? matchingSummary.remainingQuantity / 1000 : 0; // Convert liters to m³
+                
+                // Calculate shortage if any
+                const pendingQuantity = order.totalQuantity; // Already in m³
+                const shortage = pendingQuantity > availableQuantity ? 
+                  pendingQuantity - availableQuantity : 
+                  0;
+                
+                const warning = shortage > 0 ? {
+                  shortage: order.product.toLowerCase() === 'ago' ? 
+                    (shortage / 36).toFixed(1) : // 36m³ per AGO truck
+                    (shortage / 40).toFixed(1), // 40m³ per PMS truck
+                  shortageQuantity: shortage,
+                  pendingQuantity,
+                  availableQuantity
+                } : null;
                 
                 return (
                   <TableRow 
@@ -2181,32 +2211,30 @@ const renderStockInfo = () => {
                     <TableCell>{order.product}</TableCell>
                     <TableCell>{order.destination}</TableCell>
                     <TableCell>
-                      {order.totalQuantity.toLocaleString()}
+                      {order.totalQuantity.toLocaleString()} m³
                       <div className="text-sm text-muted-foreground">
-                        ({order.product.toLowerCase() === 'ago' 
-                          ? (order.totalQuantity / 36000).toFixed(1) 
-                          : (order.totalQuantity / 40000).toFixed(1)} trucks)
+                        ({(order.totalQuantity * 1000).toLocaleString()} liters)
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      {availableQuantity.toLocaleString()} m³
+                      <div className="text-sm text-muted-foreground">
+                        ({(availableQuantity * 1000).toLocaleString()} liters)
                       </div>
                     </TableCell>
                     <TableCell>
                       {warning ? (
-                        <>
-                          {warning.availableQuantity.toLocaleString()}
-                          <div className="text-sm text-muted-foreground">
-                            ({(warning.availableQuantity / (order.product.toLowerCase() === 'ago' ? 36000 : 40000)).toFixed(1)} trucks)
-                          </div>
-                        </>
-                      ) : (
-                        "Checking..."
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      {warning && (
                         <div className="text-red-600 dark:text-red-400 font-medium">
-                          ⚠️ Shortage: {(warning.pendingQuantity - warning.availableQuantity).toLocaleString()} liters
+                          ⚠️ Shortage: {warning.shortageQuantity.toLocaleString()} m³
                           <div className="text-sm">
+                            ({(warning.shortageQuantity * 1000).toLocaleString()} liters)
+                            <br />
                             ({warning.shortage} trucks will lack entries)
                           </div>
+                        </div>
+                      ) : (
+                        <div className="text-green-600 dark:text-green-400">
+                          ✓ Sufficient entries available
                         </div>
                       )}
                     </TableCell>
@@ -2216,7 +2244,7 @@ const renderStockInfo = () => {
                           {`${idx + 1}. Truck: ${o.truckNumber}`}
                           <br />
                           <span className="text-sm text-muted-foreground">
-                            {`Quantity: ${o.quantity.toLocaleString()}, Order: ${o.orderno}, Owner: ${o.owner}`}
+                            {`Quantity: ${o.quantity} m³, Order: ${o.orderno}, Owner: ${o.owner}`}
                           </span>
                         </div>
                       ))}
