@@ -224,6 +224,10 @@ export default function EntriesPage() {
   // Add new state for showing note
   const [showNote, setShowNote] = useState(true);
 
+  // Add new state for auto-refresh
+  const [autoRefresh, setAutoRefresh] = useState(false);
+  const autoRefreshIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
   // 2. Other hooks
   const { data: session, status } = useSession()
   const router = useRouter()
@@ -597,6 +601,7 @@ export default function EntriesPage() {
           toast({
             title: "Entries Found",
             description: `Found ${entries.length} available entries for ${product.toUpperCase()} to ${destination.toUpperCase()}`
+
           })
         } else {
           toast({
@@ -850,6 +855,23 @@ export default function EntriesPage() {
       return () => clearTimeout(timer);
     }
   }, [showNote]);
+
+  // Add to your useEffect cleanup
+  useEffect(() => {
+    if (autoRefresh && showSummary) {
+      // Refresh every 30 seconds
+      autoRefreshIntervalRef.current = setInterval(() => {
+        getSummary();
+        fetchPendingOrders();
+      }, 30000);
+    }
+
+    return () => {
+      if (autoRefreshIntervalRef.current) {
+        clearInterval(autoRefreshIntervalRef.current);
+      }
+    };
+  }, [autoRefresh, showSummary]);
 
   // 5. Loading check
   if (!mounted || status === "loading") return null
@@ -1515,6 +1537,17 @@ const renderStockInfo = () => {
               >
                 <ArrowLeft className="h-4 w-4 mr-2" /> Back to Allocation
               </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setAutoRefresh(!autoRefresh)}
+                className={`${
+                  autoRefresh ? 'bg-emerald-100 dark:bg-emerald-900' : ''
+                } text-muted-foreground hover:text-foreground`}
+              >
+                <RefreshCw className={`h-4 w-4 ${autoRefresh ? 'animate-spin' : ''}`} />
+                {autoRefresh ? 'Stop Auto-refresh' : 'Auto-refresh'}
+              </Button>
             </div>
           </div>
 
@@ -2164,96 +2197,100 @@ const renderStockInfo = () => {
             Pending Orders
           </CardTitle>
         </CardHeader>
-        <CardContent className="p-6">
-          <Table>
-            <TableHeader>
-              <TableRow className="border-b border-emerald-500/20">
-                <TableHead className="text-emerald-700 dark:text-emerald-400">Product</TableHead>
-                <TableHead className="text-emerald-700 dark:text-emerald-400">Destination</TableHead>
-                <TableHead className="text-emerald-700 dark:text-emerald-400">Total Quantity</TableHead>
-                <TableHead className="text-emerald-700 dark:text-emerald-400">Available Quantity</TableHead>
-                <TableHead className="text-emerald-700 dark:text-emerald-400">Status</TableHead>
-                <TableHead className="text-emerald-700 dark:text-emerald-400">Orders</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {pendingOrders.map((order, index) => {
-                const warningKey = `${order.product}-${order.destination}`;
-                
-                // Find matching summary entry
-                const matchingSummary = summaryData.find(
-                  s => s.productDestination.toLowerCase() === `${order.product.toLowerCase()} - ${order.destination.toLowerCase()}`
-                );
-                
-                // Calculate available quantity
-                const availableQuantity = matchingSummary ? matchingSummary.remainingQuantity / 1000 : 0; // Convert liters to m³
-                
-                // Calculate shortage if any
-                const pendingQuantity = order.totalQuantity; // Already in m³
-                const shortage = pendingQuantity > availableQuantity ? 
-                  pendingQuantity - availableQuantity : 
-                  0;
-                
-                const warning = shortage > 0 ? {
-                  shortage: order.product.toLowerCase() === 'ago' ? 
-                    (shortage / 36).toFixed(1) : // 36m³ per AGO truck
-                    (shortage / 40).toFixed(1), // 40m³ per PMS truck
-                  shortageQuantity: shortage,
-                  pendingQuantity,
-                  availableQuantity
-                } : null;
-                
-                return (
-                  <TableRow 
-                    key={index}
-                    className={warning ? 'bg-red-50/50 dark:bg-red-900/20' : ''}
-                  >
-                    <TableCell>{order.product}</TableCell>
-                    <TableCell>{order.destination}</TableCell>
-                    <TableCell>
-                      {order.totalQuantity.toLocaleString()} m³
-                      <div className="text-sm text-muted-foreground">
-                        ({(order.totalQuantity * 1000).toLocaleString()} liters)
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      {availableQuantity.toLocaleString()} m³
-                      <div className="text-sm text-muted-foreground">
-                        ({(availableQuantity * 1000).toLocaleString()} liters)
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      {warning ? (
-                        <div className="text-red-600 dark:text-red-400 font-medium">
-                          ⚠️ Shortage: {warning.shortageQuantity.toLocaleString()} m³
-                          <div className="text-sm">
-                            ({(warning.shortageQuantity * 1000).toLocaleString()} liters)
-                            <br />
-                            ({warning.shortage} trucks will lack entries)
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="text-green-600 dark:text-green-400">
-                          ✓ Sufficient entries available
-                        </div>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      {order.orders.map((o, idx) => (
-                        <div key={idx} className="mb-1">
-                          {`${idx + 1}. Truck: ${o.truckNumber}`}
-                          <br />
-                          <span className="text-sm text-muted-foreground">
-                            {`Quantity: ${o.quantity} m³, Order: ${o.orderno}, Owner: ${o.owner}`}
-                          </span>
-                        </div>
-                      ))}
-                    </TableCell>
+        <CardContent className="p-2 sm:p-6">
+          <div className="overflow-auto -mx-2 sm:mx-0">
+            <div className="min-w-[900px] p-2">
+              <Table>
+                <TableHeader>
+                  <TableRow className="border-b border-emerald-500/20">
+                    <TableHead className="text-emerald-700 dark:text-emerald-400">Product</TableHead>
+                    <TableHead className="text-emerald-700 dark:text-emerald-400">Destination</TableHead>
+                    <TableHead className="text-emerald-700 dark:text-emerald-400">Total Quantity</TableHead>
+                    <TableHead className="text-emerald-700 dark:text-emerald-400">Available Quantity</TableHead>
+                    <TableHead className="text-emerald-700 dark:text-emerald-400">Status</TableHead>
+                    <TableHead className="text-emerald-700 dark:text-emerald-400">Orders</TableHead>
                   </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
+                </TableHeader>
+                <TableBody>
+                  {pendingOrders.map((order, index) => {
+                    const warningKey = `${order.product}-${order.destination}`;
+                    
+                    // Find matching summary entry
+                    const matchingSummary = summaryData.find(
+                      s => s.productDestination.toLowerCase() === `${order.product.toLowerCase()} - ${order.destination.toLowerCase()}`
+                    );
+                    
+                    // Calculate available quantity
+                    const availableQuantity = matchingSummary ? matchingSummary.remainingQuantity / 1000 : 0; // Convert liters to m³
+                    
+                    // Calculate shortage if any
+                    const pendingQuantity = order.totalQuantity; // Already in m³
+                    const shortage = pendingQuantity > availableQuantity ? 
+                      pendingQuantity - availableQuantity : 
+                      0;
+                    
+                    const warning = shortage > 0 ? {
+                      shortage: order.product.toLowerCase() === 'ago' ? 
+                        (shortage / 36).toFixed(1) : // 36m³ per AGO truck
+                        (shortage / 40).toFixed(1), // 40m³ per PMS truck
+                      shortageQuantity: shortage,
+                      pendingQuantity,
+                      availableQuantity
+                    } : null;
+                    
+                    return (
+                      <TableRow 
+                        key={index}
+                        className={warning ? 'bg-red-50/50 dark:bg-red-900/20' : ''}
+                      >
+                        <TableCell>{order.product}</TableCell>
+                        <TableCell>{order.destination}</TableCell>
+                        <TableCell>
+                          {order.totalQuantity.toLocaleString()} m³
+                          <div className="text-sm text-muted-foreground">
+                            ({(order.totalQuantity * 1000).toLocaleString()} liters)
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          {availableQuantity.toLocaleString()} m³
+                          <div className="text-sm text-muted-foreground">
+                            ({(availableQuantity * 1000).toLocaleString()} liters)
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          {warning ? (
+                            <div className="text-red-600 dark:text-red-400 font-medium">
+                              ⚠️ Shortage: {warning.shortageQuantity.toLocaleString()} m³
+                              <div className="text-sm">
+                                ({(warning.shortageQuantity * 1000).toLocaleString()} liters)
+                                <br />
+                                ({warning.shortage} trucks will lack entries)
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="text-green-600 dark:text-green-400">
+                              ✓ Sufficient entries available
+                            </div>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {order.orders.map((o, idx) => (
+                            <div key={idx} className="mb-1">
+                              {`${idx + 1}. Truck: ${o.truckNumber}`}
+                              <br />
+                              <span className="text-sm text-muted-foreground">
+                                {`Quantity: ${o.quantity} m³, Order: ${o.orderno}, Owner: ${o.owner}`}
+                              </span>
+                            </div>
+                          ))}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          </div>
         </CardContent>
       </Card>
     );
@@ -2263,32 +2300,32 @@ const renderStockInfo = () => {
     <div className={`min-h-screen ${
       theme === 'dark' ? 'bg-gray-900/50 text-gray-100' : 'bg-gray-50/50 text-gray-900'
     } backdrop-blur-sm`}>
-      <header className={`fixed top=0 left-0 right=0 z-50 w-full border-b ${
+      <header className={`fixed top=0 left=0 right=0 z-50 w-full border-b ${
         theme === 'dark' 
           ? 'bg-gray-900/70 border-gray-800/50' 
           : 'bg-white/70 border-gray-200/50'
       } backdrop-blur-md shadow-sm`}>
-        <div className="container mx-auto px-4 py-3">
-          <div className="flex justify-between items-center gap-4">
-            <div className="flex items-center gap-2 sm:gap-4">
+        <div className="container mx-auto px-2 sm:px-4 py-2 sm:py-3">
+          <div className="flex justify-between items-center">
+            <div className="flex items-center gap-1 sm:gap-4">
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={() => router.push('/dashboard/work')}
-                className="text-muted-foreground hover:text-foreground"
+                className="text-muted-foreground hover:text-foreground p-1 sm:p-2"
               >
                 <ArrowLeft className="h-4 w-4 sm:h-5 sm:w-5" />
               </Button>
-              <h1 className="text-lg sm:text-xl font-semibold bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">
+              <h1 className="text-sm sm:text-xl font-semibold bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent truncate">
                 Allocate Entries
               </h1>
             </div>
-            <div className="flex items-center gap-2 sm:gap-4">
+            <div className="flex items-center gap-1 sm:gap-4">
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-                className="text-muted-foreground hover:text-foreground"
+                className="text-muted-foreground hover:text-foreground p-1 sm:p-2"
               >
                 {theme === 'dark' ? 
                   <Sun className="h-4 w-4 sm:h-5 sm:w-5" /> : 
@@ -2296,7 +2333,7 @@ const renderStockInfo = () => {
                 }
               </Button>
               <div className="relative group">
-                <Avatar className="h-8 w-8 sm:h-10 sm:w-10 cursor-pointer ring-2 ring-pink-500/50 ring-offset-2 ring-offset-background shadow-lg shadow-pink-500/10 transition-shadow hover:ring-pink-500/75">
+                <Avatar className="h-7 w-7 sm:h-10 sm:w-10">
                   <AvatarImage 
                     src={session?.user?.image || lastUploadedImage || ''} 
                     alt="Profile"
@@ -2305,18 +2342,13 @@ const renderStockInfo = () => {
                     {session?.user?.email?.[0]?.toUpperCase() || 'U'}
                   </AvatarFallback>
                 </Avatar>
-                <div className="absolute right=0 mt-2 w-48 py-2 bg-white dark:bg-gray-800 rounded-md shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200">
-                  <div className="px-4 py-2 text-xs sm:text-sm text-gray-700 dark:text-gray-200 truncate">
-                    {session?.user?.email}
-                  </div>
-                </div>
               </div>
             </div>
           </div>
         </div>
       </header>
 
-      <main className="container mx-auto px-4 pt-20 sm:pt-24 pb-8">
+      <main className="container mx-auto px-2 sm:px-4 pt-14 sm:pt-24 pb-8">
         {/* Add the warning modal */}
         <AnimatePresence>
           {showWarningModal && (
@@ -2340,7 +2372,7 @@ const renderStockInfo = () => {
 
         {/* Navigation Buttons */}
         <motion.div 
-          className="mb-4 sm:mb-6"
+          className="mb-4 sm:mb-6 sticky top-14 sm:top-24 z-40 bg-background/80 backdrop-blur-sm py-2"
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.3 }}
@@ -2351,7 +2383,7 @@ const renderStockInfo = () => {
             className="w-full flex items-center justify-between sm:hidden mb-2"
             onClick={() => setShowMobileMenu(!showMobileMenu)}
           >
-            <span>Actions Menu</span>
+            <span className="text-sm">Actions Menu</span>
             {showMobileMenu ? (
               <ChevronUp className="h-4 w-4" />
             ) : (
@@ -2361,7 +2393,7 @@ const renderStockInfo = () => {
 
           {/* Action Buttons */}
           <div className={`
-            flex flex-col sm:flex-row gap-2 sm:gap-4
+            grid grid-cols-1 sm:flex sm:flex-row gap-2 sm:gap-4
             ${showMobileMenu ? 'block' : 'hidden'}
             sm:flex
           `}>
@@ -2413,7 +2445,7 @@ const renderStockInfo = () => {
       </main>
 
       <Dialog open={workIdDialogOpen} onOpenChange={setWorkIdDialogOpen}>
-        <DialogContent>
+        <DialogContent className="sm:max-w-[425px] mx-2 sm:mx-auto">
           <DialogHeader>
             <DialogTitle>Verify Work ID</DialogTitle>
             <DialogDescription>
