@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation"
 import { useTheme } from "next-themes"
 import { 
   ArrowLeft,
+  ArrowUp, // Add this
   Sun,
   Moon,
   FileText,
@@ -227,6 +228,9 @@ export default function EntriesPage() {
   // Add new state for auto-refresh
   const [autoRefresh, setAutoRefresh] = useState(false);
   const autoRefreshIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Add new state for scroll button
+  const [showScrollTop, setShowScrollTop] = useState(false);
 
   // 2. Other hooks
   const { data: session, status } = useSession()
@@ -872,6 +876,24 @@ export default function EntriesPage() {
       }
     };
   }, [autoRefresh, showSummary]);
+
+  // Add scroll handler effect
+  useEffect(() => {
+    const handleScroll = () => {
+      setShowScrollTop(window.scrollY > 400);
+    };
+
+    window.addEventListener('scroll', handleScroll);
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  // Add scroll to top function
+  const scrollToTop = () => {
+    window.scrollTo({
+      top: 0,
+      behavior: 'smooth'
+    });
+  };
 
   // 5. Loading check
   if (!mounted || status === "loading") return null
@@ -1712,84 +1734,106 @@ const renderStockInfo = () => {
 
           <Card className="border-0 shadow-lg bg-white/50 dark:bg-gray-900/50 backdrop-blur-sm">
             <CardContent className="p-6">
-              <Table>
-                <TableHeader>
-                  <TableRow className="border-b border-emerald-500/20">
-                    <TableHead className="text-emerald-700 dark:text-emerald-400">Entry Number</TableHead>
-                    <TableHead className="text-emerald-700 dark:text-emerald-400">Initial Quantity</TableHead>
-                    <TableHead className="text-emerald-700 dark:text-emerald-400">Remaining</TableHead>
-                    <TableHead className="text-emerald-700 dark:text-emerald-400">Product</TableHead>
-                    <TableHead className="text-emerald-700 dark:text-emerald-400">Destination</TableHead>
-                    <TableHead className="text-emerald-700 dark:text-emerald-400">Used By (Truck - Quantity)</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filterUsageData(usageData).map((entry, index) => (
-                    <TableRow key={index}>
-                      <TableCell>{highlightText(entry.number, usageFilters.entryNumber)}</TableCell>
-                      <TableCell>{entry.initialQuantity}</TableCell>
-                      <TableCell>
-                        {editMode === entry.key ? (
-                          <div className="flex items-center gap-2">
-                            <Input
-                              type="number"
-                              value={tempEditValue}
-                              onChange={(e) => setTempEditValue(e.target.value)}
-                              className="w-24"
-                            />
-                            <Button
-                              size="sm"
-                              onClick={() => {
-                                setPendingEdit({
-                                  entryId: entry.key,
-                                  newValue: tempEditValue
-                                });
-                                setWorkIdDialogOpen(true);
-                              }}
-                            >
-                              Save
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => setEditMode(null)}
-                            >
-                              Cancel
-                            </Button>
-                          </div>
-                        ) : (
-                          <div className="flex items-center gap-2">
-                            {entry.remainingQuantity}
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => {
-                                setEditMode(entry.key);
-                                setTempEditValue(entry.remainingQuantity.toString());
-                              }}
-                            >
-                              Edit
-                            </Button>
-                          </div>
-                        )}
-                      </TableCell>
-                      <TableCell>{highlightText(entry.product, usageFilters.product)}</TableCell>
-                      <TableCell>{highlightText(entry.destination, usageFilters.destination)}</TableCell>
-                      <TableCell>
-                        {entry.usedBy.map((usage: { truckNumber: string; quantity: number }, idx: number) => (
-                          <div key={idx} className="mb-1">
-                            {`${idx + 1}. `}
-                            {highlightText(usage.truckNumber, usageFilters.truck)}
-                            {`: ${usage.quantity}`}
-                          </div>
-                        ))}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+              <div className="overflow-auto -mx-2 sm:mx-0">
+                <div className="min-w-[700px] p-2">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="border-b border-emerald-500/20">
+                        <TableHead className="text-emerald-700 dark:text-emerald-400">Entry Number</TableHead>
+                        <TableHead className="text-emerald-700 dark:text-emerald-400">Initial Quantity</TableHead>
+                        <TableHead className="text-emerald-700 dark:text-emerald-400">Remaining</TableHead>
+                        <TableHead className="text-emerald-700 dark:text-emerald-400">Product</TableHead>
+                        <TableHead className="text-emerald-700 dark:text-emerald-400">Destination</TableHead>
+                        <TableHead className="text-emerald-700 dark:text-emerald-400">Used By (Truck - Quantity)</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {filterUsageData(usageData).map((entry, index) => (
+                        <TableRow key={index}>
+                          <TableCell>{highlightText(entry.number, usageFilters.entryNumber)}</TableCell>
+                          <TableCell>{entry.initialQuantity}</TableCell>
+                          <TableCell>
+                            {editMode === entry.key ? (
+                              <div className="flex items-center gap-2">
+                                <Input
+                                  type="number"
+                                  value={tempEditValue}
+                                  onChange={(e) => setTempEditValue(e.target.value)}
+                                  className="w-24"
+                                />
+                                <Button
+                                  size="sm"
+                                  onClick={() => {
+                                    setPendingEdit({
+                                      entryId: entry.key,
+                                      newValue: tempEditValue
+                                    });
+                                    setWorkIdDialogOpen(true);
+                                  }}
+                                >
+                                  Save
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => setEditMode(null)}
+                                >
+                                  Cancel
+                                </Button>
+                              </div>
+                            ) : (
+                              <div className="flex items-center gap-2">
+                                {entry.remainingQuantity}
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => {
+                                    setEditMode(entry.key);
+                                    setTempEditValue(entry.remainingQuantity.toString());
+                                  }}
+                                >
+                                  Edit
+                                </Button>
+                              </div>
+                            )}
+                          </TableCell>
+                          <TableCell>{highlightText(entry.product, usageFilters.product)}</TableCell>
+                          <TableCell>{highlightText(entry.destination, usageFilters.destination)}</TableCell>
+                          <TableCell>
+                            {entry.usedBy.map((usage: { truckNumber: string; quantity: number }, idx: number) => (
+                              <div key={idx} className="mb-1">
+                                {`${idx + 1}. `}
+                                {highlightText(usage.truckNumber, usageFilters.truck)}
+                                {`: ${usage.quantity}`}
+                              </div>
+                            ))}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
             </CardContent>
           </Card>
+
+          {/* Add scroll to top button */}
+          <AnimatePresence>
+            {showScrollTop && (
+              <motion.button
+                initial={{ opacity: 0, scale: 0.8 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.8 }}
+                onClick={scrollToTop}
+                className="fixed bottom-4 right-4 p-2 rounded-full bg-emerald-500/90 text-white shadow-lg hover:bg-emerald-600/90 transition-colors z-50"
+                whileHover={{ scale: 1.1 }}
+                whileTap={{ scale: 0.9 }}
+              >
+                <ArrowUp className="h-6 w-6" />
+                <span className="sr-only">Scroll to top</span>
+              </motion.button>
+            )}
+          </AnimatePresence>
         </motion.div>
       )
     }
@@ -2297,10 +2341,10 @@ const renderStockInfo = () => {
   };
 
   return (
-    <div className={`min-h-screen ${
+    <div className={`min-h-screen relative ${
       theme === 'dark' ? 'bg-gray-900/50 text-gray-100' : 'bg-gray-50/50 text-gray-900'
     } backdrop-blur-sm`}>
-      <header className={`fixed top=0 left=0 right=0 z-50 w-full border-b ${
+      <header className={`sticky top-0 z-50 w-full border-b ${
         theme === 'dark' 
           ? 'bg-gray-900/70 border-gray-800/50' 
           : 'bg-white/70 border-gray-200/50'
@@ -2348,7 +2392,7 @@ const renderStockInfo = () => {
         </div>
       </header>
 
-      <main className="container mx-auto px-2 sm:px-4 pt-14 sm:pt-24 pb-8">
+      <main className="container mx-auto px-2 sm:px-4 py-4 sm:py-8">
         {/* Add the warning modal */}
         <AnimatePresence>
           {showWarningModal && (
@@ -2370,9 +2414,9 @@ const renderStockInfo = () => {
           )}
         </AnimatePresence>
 
-        {/* Navigation Buttons */}
+        {/* Navigation Buttons - remove sticky positioning */}
         <motion.div 
-          className="mb-4 sm:mb-6 sticky top-14 sm:top-24 z-40 bg-background/80 backdrop-blur-sm py-2"
+          className="mb-4 sm:mb-6 bg-background/80 backdrop-blur-sm py-2"
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.3 }}
@@ -2442,6 +2486,24 @@ const renderStockInfo = () => {
         </motion.div>
 
         {renderMainContent()}
+
+        {/* Add scroll to top button */}
+        <AnimatePresence>
+          {showScrollTop && (
+            <motion.button
+              initial={{ opacity: 0, scale: 0.8 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.8 }}
+              onClick={scrollToTop}
+              className="fixed bottom-4 right-4 p-2 rounded-full bg-emerald-500/90 text-white shadow-lg hover:bg-emerald-600/90 transition-colors z-50"
+              whileHover={{ scale: 1.1 }}
+              whileTap={{ scale: 0.9 }}
+            >
+              <ArrowUp className="h-6 w-6" />
+              <span className="sr-only">Scroll to top</span>
+            </motion.button>
+          )}
+        </AnimatePresence>
       </main>
 
       <Dialog open={workIdDialogOpen} onOpenChange={setWorkIdDialogOpen}>
