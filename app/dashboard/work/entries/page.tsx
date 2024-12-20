@@ -91,6 +91,12 @@ interface AllocationReport {
   entryDestination: string;
 }
 
+// Add new interface for selected entry with volume
+interface SelectedEntryWithVolume {
+  entryKey: string;
+  allocatedVolume: number;
+}
+
 export default function EntriesPage() {
   // Add to existing state declarations
   const searchParams = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '');
@@ -232,6 +238,10 @@ export default function EntriesPage() {
   // Add new state for scroll button
   const [showScrollTop, setShowScrollTop] = useState(false);
 
+  // Add to existing state declarations
+  const [selectedEntriesWithVolumes, setSelectedEntriesWithVolumes] = useState<SelectedEntryWithVolume[]>([]);
+  const [remainingRequired, setRemainingRequired] = useState<number>(0);
+
   // 2. Other hooks
   const { data: session, status } = useSession()
   const router = useRouter()
@@ -264,6 +274,8 @@ export default function EntriesPage() {
     setAt20Quantity('')
     setVolumeWarning(null)
     setError(null)
+    setSelectedEntriesWithVolumes([]);
+    setRemainingRequired(0);
   }
 
   const restoreLastForm = () => {
@@ -1893,138 +1905,12 @@ const renderStockInfo = () => {
                 </div>
               )}
 
-              {availableEntries.length > 0 && (
-                <div className="mt-6">
-                  <Label className="text-lg font-semibold mb-4">Available Entries:</Label>
-                  <div className="space-y-2 mt-2">
-                    {availableEntries.map((entry) => (
-                      <div key={entry.key} className="flex items-center gap-4 p-3 border rounded hover:bg-accent">
-                        <input
-                          type="checkbox"
-                          id={`entry-${entry.key}`}
-                          checked={selectedEntries.includes(entry.key)}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setSelectedEntries([...selectedEntries, entry.key])
-                            } else {
-                              setSelectedEntries(selectedEntries.filter(id => id !== entry.key))
-                            }
-                          }}
-                          className="w-4 h-4"
-                        />
-                        <Label htmlFor={`entry-${entry.key}`} className="flex-1 cursor-pointer">
-                          {entry.number} - Remaining: {entry.remainingQuantity}
-                        </Label>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
+              {at20Quantity && availableEntries.length > 0 && renderManualAllocationContent()}
 
               <div className="mt-6 flex flex-col sm:flex-row gap-3">
                 <Button 
                   type="button" // Add this to prevent form submission
-                  onClick={async () => {
-                    try {
-                      if (!truckNumber || !destination || !product || !at20Quantity || selectedEntries.length === 0) {
-                        toast({
-                          title: "Validation Error",
-                          description: "Please fill all fields and select at least one entry",
-                          variant: "destructive"
-                        })
-                        return
-                      }
-  
-                      setIsLoading(true)
-                      const db = getDatabase()
-                      const updates: { [key: string]: any } = {}
-                      const tempOriginalData: { [key: string]: any } = {}
-                      const allocations: Entry[] = []
-                      let required = parseFloat(at20Quantity)
-                      let remaining = required
-  
-                      // Process selected entries
-                      for (const entryKey of selectedEntries) {
-                        const entry = availableEntries.find(e => e.key === entryKey)
-                        if (!entry) continue
-  
-                        const toAllocate = Math.min(entry.remainingQuantity, remaining)
-                        
-                        tempOriginalData[entry.key] = { ...entry }
-                        
-                        const updatedEntry = {
-                          ...entry,
-                          remainingQuantity: entry.remainingQuantity - toAllocate
-                        }
-                        
-                        updates[`tr800/${entry.key}`] = updatedEntry
-                        
-                        allocations.push({
-                          key: entry.key,
-                          motherEntry: entry.number,
-                          initialQuantity: entry.initialQuantity,
-                          remainingQuantity: updatedEntry.remainingQuantity,
-                          truckNumber,
-                          destination,
-                          subtractedQuantity: toAllocate,
-                          number: entry.number,
-                          product,
-                          product_destination: `${product}-${destination}`,
-                          timestamp: Date.now()
-                        })
-                        
-                        remaining -= toAllocate
-                        if (remaining <= 0) break
-                      }
-  
-                      if (remaining > 0) {
-                        const totalAvailable = selectedEntries
-                          .map(key => availableEntries.find(e => e.key === key)?.remainingQuantity || 0)
-                          .reduce((sum, qty) => sum + qty, 0)
-                        
-                        if (!confirm(`Only ${totalAvailable.toFixed(2)} liters available in selected entries. Continue with partial allocation?`)) {
-                          setIsLoading(false)
-                          return
-                        }
-                      }
-  
-                      // Save truck entries
-                      const sanitizedTruckNumber = truckNumber.replace(/\//g, '-')
-                      for (const allocation of allocations) {
-                        const truckEntryRef = dbRef(db, `truckEntries/${sanitizedTruckNumber}`)
-                        await push(truckEntryRef, {
-                          entryNumber: allocation.number,
-                          subtractedQuantity: allocation.subtractedQuantity,
-                          timestamp: Date.now()
-                        })
-                      }
-  
-                      // Apply all updates
-                      await update(dbRef(db), updates)
-                      
-                      setOriginalData(tempOriginalData)
-                      setEntriesData(allocations)
-                      
-                      toast({
-                        title: "Success",
-                        description: `Allocated ${(required - remaining).toFixed(2)} liters to truck ${truckNumber}`
-                      })
-                      
-                      // Clear form and close manual allocation
-                      clearForm()
-                      setSelectedEntries([])
-                      setShowManualAllocation(false)
-                      
-                    } catch (error) {
-                      toast({
-                        title: "Error",
-                        description: "Failed to process manual allocation",
-                        variant: "destructive"
-                      })
-                    } finally {
-                      setIsLoading(false)
-                    }
-                  }}
+                  onClick={handleManualAllocation}
                   disabled={isLoading}
                   className="w-full sm:w-auto bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-600 hover:from-emerald-500 hover:via-teal-400 hover:to-blue-500 text-white"
                 >
@@ -2039,7 +1925,7 @@ const renderStockInfo = () => {
                   variant="outline"
                   onClick={() => {
                     clearForm()
-                    setSelectedEntries([])
+                    setSelectedEntriesWithVolumes([])
                   }}
                   className="w-full sm:w-auto border-emerald-500/30 hover:border-emerald-500/50"
                 >
@@ -2338,6 +2224,196 @@ const renderStockInfo = () => {
         </CardContent>
       </Card>
     );
+  };
+
+  const renderManualAllocationContent = () => {
+    const requiredQuantity = parseFloat(at20Quantity || '0');
+    const totalAllocated = selectedEntriesWithVolumes.reduce((sum, item) => sum + item.allocatedVolume, 0);
+    const remaining = requiredQuantity - totalAllocated;
+  
+    return (
+      <div className="mt-6">
+        <div className="flex justify-between items-center mb-4">
+          <Label className="text-lg font-semibold">Available Entries:</Label>
+          <div className="text-sm text-muted-foreground">
+            Required: {requiredQuantity.toLocaleString()} liters
+            <br />
+            Remaining: <span className={remaining > 0 ? 'text-yellow-600' : remaining < 0 ? 'text-red-600' : 'text-green-600'}>
+              {remaining.toLocaleString()} liters
+            </span>
+          </div>
+        </div>
+        <div className="space-y-4 mt-2">
+          {availableEntries.map((entry) => (
+            <div key={entry.key} className="p-4 border rounded-lg bg-card">
+              <div className="flex items-center justify-between mb-2">
+                <div className="font-medium">{entry.number}</div>
+                <div className="text-sm text-muted-foreground">
+                  Available: {entry.remainingQuantity.toLocaleString()} liters
+                </div>
+              </div>
+              <div className="flex items-center gap-4">
+                <Input
+                  type="number"
+                  placeholder="Volume to allocate"
+                  className="max-w-[200px]"
+                  max={entry.remainingQuantity}
+                  onChange={(e) => {
+                    const value = parseFloat(e.target.value || '0');
+                    if (value > entry.remainingQuantity) {
+                      toast({
+                        title: "Invalid Volume",
+                        description: `Cannot exceed available quantity of ${entry.remainingQuantity.toLocaleString()} liters`,
+                        variant: "destructive"
+                      });
+                      return;
+                    }
+                    
+                    setSelectedEntriesWithVolumes(prev => {
+                      const newSelections = prev.filter(item => item.entryKey !== entry.key);
+                      if (value > 0) {
+                        newSelections.push({ entryKey: entry.key, allocatedVolume: value });
+                      }
+                      return newSelections;
+                    });
+                  }}
+                  value={selectedEntriesWithVolumes.find(item => item.entryKey === entry.key)?.allocatedVolume || ''}
+                />
+                <div className="text-sm text-muted-foreground">
+                  Remaining after allocation: {(entry.remainingQuantity - (selectedEntriesWithVolumes.find(item => item.entryKey === entry.key)?.allocatedVolume || 0)).toLocaleString()} liters
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  const handleManualAllocation = async () => {
+    try {
+      if (!truckNumber || !destination || !product || !at20Quantity || selectedEntriesWithVolumes.length === 0) {
+        toast({
+          title: "Validation Error",
+          description: "Please fill all fields and allocate volumes",
+          variant: "destructive"
+        });
+        return;
+      }
+  
+      const totalAllocated = selectedEntriesWithVolumes.reduce((sum, item) => sum + item.allocatedVolume, 0);
+      const required = parseFloat(at20Quantity);
+  
+      if (totalAllocated !== required) {
+        toast({
+          title: "Volume Mismatch",
+          description: `Total allocated volume (${totalAllocated.toLocaleString()}) must equal required volume (${required.toLocaleString()})`,
+          variant: "destructive"
+        });
+        return;
+      }
+  
+      setIsLoading(true);
+      const db = getDatabase();
+      const updates: { [key: string]: any } = {};
+      const tempOriginalData: { [key: string]: any } = {};
+      const allocations: Entry[] = [];
+  
+      // Process selected entries with their volumes
+      for (const selection of selectedEntriesWithVolumes) {
+        const entry = availableEntries.find(e => e.key === selection.entryKey);
+        if (!entry) continue;
+  
+        tempOriginalData[entry.key] = { ...entry };
+        
+        const updatedEntry = {
+          ...entry,
+          remainingQuantity: entry.remainingQuantity - selection.allocatedVolume
+        };
+        
+        updates[`tr800/${entry.key}`] = updatedEntry;
+        
+        allocations.push({
+          key: entry.key,
+          motherEntry: entry.number,
+          initialQuantity: entry.initialQuantity,
+          remainingQuantity: updatedEntry.remainingQuantity,
+          truckNumber,
+          destination,
+          subtractedQuantity: selection.allocatedVolume,
+          number: entry.number,
+          product,
+          product_destination: `${product}-${destination}`,
+          timestamp: Date.now()
+        });
+      }
+  
+      // Save truck entries
+      const sanitizedTruckNumber = truckNumber.replace(/\//g, '-');
+      for (const allocation of allocations) {
+        const truckEntryRef = dbRef(db, `truckEntries/${sanitizedTruckNumber}`);
+        await push(truckEntryRef, {
+          entryNumber: allocation.motherEntry,
+          subtractedQuantity: allocation.subtractedQuantity,
+          timestamp: Date.now()
+        });
+      }
+  
+      // Get owner information
+      let owner = 'Unknown';
+      const workDetailsRef = dbRef(db, 'work_details');
+      const workDetailsSnapshot = await get(workDetailsRef);
+      
+      if (workDetailsSnapshot.exists()) {
+        Object.values(workDetailsSnapshot.val()).forEach((detail: any) => {
+          if (detail.truck_number === truckNumber) {
+            owner = detail.owner || 'Unknown';
+          }
+        });
+      }
+  
+      // Create allocation report
+      const reportRef = push(dbRef(db, 'allocation_reports'));
+      updates[`allocation_reports/${reportRef.key}`] = {
+        truckNumber,
+        owner,
+        entries: allocations.map(a => ({
+          entryUsed: a.motherEntry,
+          volume: a.subtractedQuantity.toString()
+        })),
+        totalVolume: at20Quantity,
+        at20: at20Quantity,
+        product,
+        loadedDate: new Date().toISOString().split('T')[0],
+        allocationDate: new Date().toISOString(),
+        entryDestination: destination
+      };
+  
+      // Apply all updates
+      await update(dbRef(db), updates);
+      
+      setOriginalData(tempOriginalData);
+      setEntriesData(allocations);
+      
+      toast({
+        title: "Success",
+        description: `Allocated ${at20Quantity} liters using ${allocations.length} entries`
+      });
+      
+      // Clear form and close manual allocation
+      clearForm();
+      setSelectedEntriesWithVolumes([]);
+      setShowManualAllocation(false);
+      
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to process manual allocation",
+        variant: "destructive"
+      });
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
