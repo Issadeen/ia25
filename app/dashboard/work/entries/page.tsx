@@ -50,6 +50,10 @@ import { confirmDialog } from "@/components/ui/confirm-dialog" // Add this line
 import { reminderService } from '@/lib/reminders' // Add this line
 import { StockItem } from '@/types/stock';
 
+// Add new constants at the top of the file
+const WARNING_TIMEOUT = 9 * 60 * 1000; // 9 minutes
+const LOGOUT_TIMEOUT = 10 * 60 * 1000; // 10 minutes
+
 // Update the highlightText function
 function highlightText(text: string, filter: string) {
   if (!filter) return text;
@@ -211,7 +215,6 @@ export default function EntriesPage() {
   // Add this warning modal state
   const [showWarningModal, setShowWarningModal] = useState(false)
   const [warningMessage, setWarningMessage] = useState("")
-  const [warningTimeout, setWarningTimeout] = useState<NodeJS.Timeout | null>(null)
 
   // Add to existing state declarations
   const [stocks, setStocks] = useState<{ ago: StockItem; pms: StockItem } | null>(null);
@@ -247,7 +250,6 @@ export default function EntriesPage() {
   const router = useRouter()
   const { theme, setTheme } = useTheme()
   const { toast } = useToast()
-  const inactivityTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
   // 3. Helper functions
   function generateProfileImageFilename(email: string): string {
@@ -697,58 +699,54 @@ export default function EntriesPage() {
   }, [at20Quantity, product])
 
   // Update the inactivity timeout effect
-
   useEffect(() => {
-    const handleActivity = () => {
-      // Clear any existing timeouts
-      if (inactivityTimeoutRef.current) {
-        clearTimeout(inactivityTimeoutRef.current)
-      }
-      if (warningTimeout) {
-        clearTimeout(warningTimeout)
-        setWarningTimeout(null) // Add this line
-      }
+    let warningTimer: NodeJS.Timeout;
+    let logoutTimer: NodeJS.Timeout;
 
-      // Hide warning modal if it's showing
-      setShowWarningModal(false)
-      setWarningMessage("")
+    const resetTimers = () => {
+      // Clear existing timers
+      clearTimeout(warningTimer);
+      clearTimeout(logoutTimer);
+      setShowWarningModal(false);
 
-      // Set warning at 9 minutes
-      const warning = setTimeout(() => {
-        setWarningMessage("Your session will expire in 1 minute due to inactivity.")
-        setShowWarningModal(true)
-      }, 9 * 60 * 1000)
-      
-      setWarningTimeout(warning)
+      // Set new warning timer
+      warningTimer = setTimeout(() => {
+        setWarningMessage("Your session will expire in 1 minute due to inactivity.");
+        setShowWarningModal(true);
+      }, WARNING_TIMEOUT);
 
-      // Logout at 10 minutes
-      inactivityTimeoutRef.current = setTimeout(async () => {
-        await signOut()
-        router.push('/login')
-      }, 10 * 60 * 1000)
-    }
+      // Set new logout timer
+      logoutTimer = setTimeout(async () => {
+        await signOut();
+        router.push('/login');
+      }, LOGOUT_TIMEOUT);
+    };
 
-    // Add event listeners
-    window.addEventListener('mousemove', handleActivity)
-    window.addEventListener('keydown', handleActivity)
-    window.addEventListener('click', handleActivity)
-    
-    // Initial call
-    handleActivity()
+    // Debounce the reset timer function
+    let debounceTimeout: NodeJS.Timeout;
+    const debouncedResetTimers = () => {
+      clearTimeout(debounceTimeout);
+      debounceTimeout = setTimeout(resetTimers, 1000); // 1 second debounce
+    };
+
+    // Add event listeners with debounced handler
+    window.addEventListener('mousemove', debouncedResetTimers);
+    window.addEventListener('keydown', debouncedResetTimers);
+    window.addEventListener('click', debouncedResetTimers);
+
+    // Initial setup
+    resetTimers();
 
     // Cleanup
     return () => {
-      window.removeEventListener('mousemove', handleActivity)
-      window.removeEventListener('keydown', handleActivity)
-      window.removeEventListener('click', handleActivity)
-      if (inactivityTimeoutRef.current) {
-        clearTimeout(inactivityTimeoutRef.current)
-      }
-      if (warningTimeout) {
-        clearTimeout(warningTimeout)
-      }
-    }
-  }, [router])
+      clearTimeout(warningTimer);
+      clearTimeout(logoutTimer);
+      clearTimeout(debounceTimeout);
+      window.removeEventListener('mousemove', debouncedResetTimers);
+      window.removeEventListener('keydown', debouncedResetTimers);
+      window.removeEventListener('click', debouncedResetTimers);
+    };
+  }, [router]);
 
   // Add to useEffect for initial load
   useEffect(() => {
