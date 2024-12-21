@@ -23,8 +23,8 @@ interface TruckData {
   truck_no: string;
   driver: string;
   transporter: string;
-  ago_comps: Record<string, string>;  // For dynamic AGO compartments
-  pms_comps: Record<string, string>;  // For dynamic PMS compartments
+  ago_comps: string[];  // Changed from Record<string, string> to string array
+  pms_comps: string[];  // Changed from Record<string, string> to string array
 }
 
 interface FirebaseUserData {
@@ -32,23 +32,28 @@ interface FirebaseUserData {
   workId: string;
 }
 
-const calculateTotal = (compartments: Record<string, string> | undefined | null): number => {
-  if (!compartments || typeof compartments !== 'object') {
+const calculateTotal = (compartments: string[] | undefined | null): number => {
+  if (!compartments || !Array.isArray(compartments)) {
     return 0;
   }
-  return Object.values(compartments)
+  return compartments
     .filter(val => val && parseFloat(val) > 0) // Only include positive values
     .reduce((sum, val) => sum + parseFloat(val || '0'), 0);
 };
 
-const formatCompartments = (compartments: Record<string, string> | undefined | null): string => {
-  if (!compartments || typeof compartments !== 'object') {
+const formatNumber = (value: string): string => {
+  const num = parseFloat(value);
+  return num % 1 === 0 ? num.toFixed(0) : num.toFixed(1);
+};
+
+const formatCompartments = (compartments: string[] | undefined | null): string => {
+  if (!compartments || !Array.isArray(compartments)) {
     return '0';
   }
-  const sortedComps = Object.entries(compartments)
-    .filter(([_, value]) => value && parseFloat(value) > 0) // Filter out zeros and invalid values
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([_, value]) => parseFloat(value).toFixed(1)); // Format to 1 decimal place
+  const sortedComps = compartments
+    .filter(value => value && parseFloat(value) > 0) // Filter out zeros and invalid values
+    .sort()
+    .map(value => formatNumber(value)); // Format to 1 decimal place
 
   return sortedComps.length > 0 ? sortedComps.join(', ') : '0';
 };
@@ -150,28 +155,13 @@ export default function TrucksPage() {
         }
 
         const trucksData = Object.entries(snapshot.val()).map(([id, data]: [string, any]) => {
-          // Convert old format to new format if necessary
-          const ago_comps: Record<string, string> = {};
-          const pms_comps: Record<string, string> = {};
-
-          // Handle old format
-          for (let i = 1; i <= 4; i++) {
-            if (data[`ago_comp_${i}`]) {
-              ago_comps[`comp_${i}`] = data[`ago_comp_${i}`];
-            }
-            if (data[`pms_${i}`]) {
-              pms_comps[`comp_${i}`] = data[`pms_${i}`];
-            }
-          }
-
-          // Use new format if available, otherwise use converted old format
           return {
             id,
             truck_no: data.truck_no || '',
             driver: data.driver || '',
             transporter: data.transporter || '',
-            ago_comps: data.ago_comps || ago_comps,
-            pms_comps: data.pms_comps || pms_comps,
+            ago_comps: Array.isArray(data.ago_comps) ? data.ago_comps : [],
+            pms_comps: Array.isArray(data.pms_comps) ? data.pms_comps : [],
           };
         });
 
@@ -226,8 +216,8 @@ export default function TrucksPage() {
 Driver: ${truck.driver}
 Transporter: ${truck.transporter}
 
-AGO: ${formatCompartments(truck.ago_comps)} (Total: ${agoTotal.toFixed(1)})
-PMS: ${formatCompartments(truck.pms_comps)} (Total: ${pmsTotal.toFixed(1)})`;
+AGO: ${formatCompartments(truck.ago_comps)} (Total: ${formatNumber(agoTotal.toString())})
+PMS: ${formatCompartments(truck.pms_comps)} (Total: ${formatNumber(pmsTotal.toString())})`;
 
     navigator.clipboard.writeText(textToCopy).then(() => {
       toast({
@@ -419,7 +409,7 @@ PMS: ${formatCompartments(truck.pms_comps)} (Total: ${pmsTotal.toFixed(1)})`;
                             {formatCompartments(truck.ago_comps)}
                             {' '}
                             <span className="text-emerald-600 dark:text-emerald-400 font-medium">
-                              (Total: {calculateTotal(truck.ago_comps).toFixed(1)})
+                              (Total: {formatNumber(calculateTotal(truck.ago_comps).toFixed(1))})
                             </span>
                           </span>
                         </p>
@@ -429,7 +419,7 @@ PMS: ${formatCompartments(truck.pms_comps)} (Total: ${pmsTotal.toFixed(1)})`;
                             {formatCompartments(truck.pms_comps)}
                             {' '}
                             <span className="text-emerald-600 dark:text-emerald-400 font-medium">
-                              (Total: {calculateTotal(truck.pms_comps).toFixed(1)})
+                              (Total: {formatNumber(calculateTotal(truck.pms_comps).toFixed(1))})
                             </span>
                           </span>
                         </p>

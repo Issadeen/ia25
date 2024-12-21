@@ -117,14 +117,14 @@ export default function NewTruckPage() {
       const db = getDatabase();
       const newTruckRef = push(ref(db, 'trucks'));
 
-      // Convert arrays to individual fields and objects
+      // Convert arrays to individual fields (only first 4 compartments)
       const agoCompsObj: Record<string, string> = {};
-      data.ago_comps.forEach((value, index) => {
+      data.ago_comps.slice(0,4).forEach((value, index) => {
         agoCompsObj[`ago_comp_${index + 1}`] = value || "0";
       });
 
       const pmsCompsObj: Record<string, string> = {};
-      data.pms_comps.forEach((value, index) => {
+      data.pms_comps.slice(0,4).forEach((value, index) => {
         pmsCompsObj[`pms_${index + 1}`] = value || "0";
       });
 
@@ -135,10 +135,10 @@ export default function NewTruckPage() {
         transporter: data.transporter,
         created_at: new Date().toISOString(),
         created_by: session?.user?.email || 'unknown',
-        ...agoCompsObj,
-        ...pmsCompsObj,
-        ago_comps: data.ago_comps,
-        pms_comps: data.pms_comps,
+        ...agoCompsObj, // Add individual AGO compartment fields
+        ...pmsCompsObj, // Add individual PMS compartment fields
+        ago_comps: data.ago_comps, // Store as array
+        pms_comps: data.pms_comps, // Store as array
       };
 
       await set(newTruckRef, truckData);
@@ -177,39 +177,40 @@ export default function NewTruckPage() {
 
   return (
     <div className="min-h-screen">
-      {/* Header */}
-      <header className="sticky top-0 z-50 w-full border-b bg-background/80 backdrop-blur-sm">
-        <div className="container flex h-14 items-center justify-between">
-          <div className="flex items-center gap-4">
-            <Link href="/dashboard/trucks">
-              <Button variant="ghost" size="icon">
-                <ArrowLeft className="h-5 w-5" />
-              </Button>
-            </Link>
-            <h1 className="text-xl font-semibold bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">
-              Add New Truck
-            </h1>
-          </div>
+      <header className="sticky top-0 z-50 w-full border-b bg-background/80 backdrop-blur-sm supports-[backdrop-filter]:bg-background/60">
+        <div className="container flex flex-col gap-4 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <Link href="/dashboard/trucks">
+                <Button variant="ghost" size="icon" className="hover:bg-transparent">
+                  <ArrowLeft className="h-5 w-5" />
+                </Button>
+              </Link>
+              <h1 className="text-xl font-semibold bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">
+                Add New Truck
+              </h1>
+            </div>
 
-          {/* Theme and Profile */}
-          <div className="flex items-center gap-4">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-            >
-              {theme === "dark" ? (
-                <Sun className="h-5 w-5" />
-              ) : (
-                <Moon className="h-5 w-5" />
-              )}
-            </Button>
-            <Avatar className="h-8 w-8">
-              <AvatarImage src={profilePicUrl || ""} />
-              <AvatarFallback>
-                {session?.user?.name?.[0] || "U"}
-              </AvatarFallback>
-            </Avatar>
+            <div className="flex items-center gap-4">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+                className="hover:bg-transparent"
+              >
+                {theme === 'dark' ? (
+                  <Sun className="h-5 w-5" />
+                ) : (
+                  <Moon className="h-5 w-5" />
+                )}
+              </Button>
+              <Avatar className="h-8 w-8">
+                <AvatarImage src={profilePicUrl || ''} alt="Profile" />
+                <AvatarFallback>
+                  {session?.user?.name?.[0] || 'U'}
+                </AvatarFallback>
+              </Avatar>
+            </div>
           </div>
         </div>
       </header>
