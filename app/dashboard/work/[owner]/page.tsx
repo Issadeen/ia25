@@ -19,10 +19,13 @@ import type { WorkDetail, TruckPayment, OwnerBalance, BalanceUsage } from "@/typ
 import { motion } from 'framer-motion'
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { useSession } from "next-auth/react"
-import { ArrowLeft } from 'lucide-react'
+import { ArrowLeft, Download, Receipt } from 'lucide-react' // Remove FileSpreadsheet
 import { ThemeToggle } from "@/components/ui/molecules/theme-toggle" // Add ThemeToggle import
+import { Skeleton } from "@/components/ui/skeleton"
+import jsPDF from 'jspdf'
+import autoTable from 'jspdf-autotable'
 
-// Add interfaces for function returns
+// Add interfaces at the top
 interface TruckAllocation {
   totalAllocated: number;
   totalDue: number;
@@ -54,6 +57,11 @@ export default function OwnerDetailsPage() {
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false)
   const { data: session } = useSession()
   const [lastUploadedImage, setLastUploadedImage] = useState<string | null>(null)
+  const [sortConfig, setSortConfig] = useState<{
+    key: string;
+    direction: 'asc' | 'desc';
+  }>({ key: 'truck_number', direction: 'asc' });
+
   interface PaymentFormData {
     amount: number;
     note: string;
@@ -428,44 +436,106 @@ export default function OwnerDetailsPage() {
       : paymentFormData.amount;
   };
 
+  // Add sorting function
+  const sortData = (data: any[], key: string) => {
+    return [...data].sort((a, b) => {
+      if (sortConfig.direction === 'asc') {
+        return a[key] > b[key] ? 1 : -1;
+      }
+      return a[key] < b[key] ? 1 : -1;
+    });
+  };
+
+  // Add export functions
+  const handleDownloadPDF = () => {
+    const doc = new jsPDF('landscape');
+    const totals = calculateTotals();
+
+    // Add header
+    doc.setFontSize(20);
+    doc.text(`${owner} - Financial Summary`, 14, 15);
+
+    // Add summary section
+    autoTable(doc, {
+      startY: 25,
+      head: [['Total Due', 'Total Paid', 'Balance', 'Available Balance']],
+      body: [[
+        `$${formatNumber(totals.totalDue)}`,
+        `$${formatNumber(totals.totalPaid)}`,
+        `$${formatNumber(Math.abs(totals.balance))}`,
+        `$${formatNumber(totals.existingBalance)}`
+      ]],
+    });
+
+    // Add trucks table
+    autoTable(doc, {
+      startY: (doc as any).lastAutoTable?.finalY + 10 || 45,
+      head: [['Truck', 'Product', 'At20', 'Price', 'Total Due', 'Paid', 'Balance', 'Status']],
+      body: workDetails.filter(truck => truck.loaded).map(truck => {
+        const { totalDue, totalAllocated, balance } = getTruckAllocations(truck);
+        return [
+          truck.truck_number,
+          truck.product,
+          truck.at20 || '-',
+          `$${formatNumber(parseFloat(truck.price))}`,
+          `$${formatNumber(totalDue)}`,
+          `$${formatNumber(totalAllocated)}`,
+          `$${formatNumber(Math.abs(balance))}`,
+          balance <= 0 ? 'Paid' : truck.paymentPending ? 'Pending' : 'Due'
+        ];
+      }),
+    });
+
+    doc.save(`${owner}_summary_${new Date().toISOString().split('T')[0]}.pdf`);
+  };
+
+  // Add loading skeletons component
+  const LoadingSkeleton = () => (
+    <div className="space-y-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        {[...Array(4)].map((_, i) => (
+          <div key={i} className="p-4 rounded-lg border">
+            <Skeleton className="h-4 w-24 mb-2" />
+            <Skeleton className="h-8 w-32" />
+          </div>
+        ))}
+      </div>
+      <Skeleton className="h-[200px] w-full" />
+      <Skeleton className="h-[300px] w-full" />
+    </div>
+  );
+
   return (
     <div className="min-h-screen">
-      {/* New Header */}
+      {/* Header - Make more compact on mobile */}
       <header className="fixed top-0 left-0 w-full border-b z-50 bg-gradient-to-r from-emerald-900/10 via-blue-900/10 to-blue-900/10 backdrop-blur-xl">
         <div className="w-full">
-          <div className="max-w-7xl mx-auto px-4 py-3 flex justify-between items-center">
-            {/* Left side */}
-            <div className="flex items-center gap-4">
+          <div className="max-w-7xl mx-auto px-2 sm:px-4 py-2 sm:py-3 flex justify-between items-center">
+            {/* Left side - Simplified for mobile */}
+            <div className="flex items-center gap-2 sm:gap-4">
               <Button
                 variant="ghost"
                 size="icon"
                 onClick={() => router.back()}
                 className="text-emerald-700 hover:text-emerald-800 hover:bg-emerald-100"
               >
-                <ArrowLeft className="h-5 w-5" />
+                <ArrowLeft className="h-4 w-4 sm:h-5 sm:w-5" />
               </Button>
-              <h1 className="text-xl font-semibold bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">
-                {owner} Details
+              <h1 className="text-base sm:text-xl font-semibold bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent truncate">
+                {owner}
               </h1>
             </div>
-            {/* Right side */}
-            <div className="flex items-center gap-4">
-              <motion.div
-                className="relative"
-                whileHover={{ width: 'auto' }}
-                initial={{ width: 40 }}
-                style={{ overflow: 'hidden' }}
+            {/* Right side - Compact layout for mobile */}
+            <div className="flex items-center gap-2 sm:gap-4">
+              <Button
+                variant="outline"
+                onClick={handleAddPayment}
+                className="text-xs sm:text-sm px-2 py-1 sm:px-4 sm:py-2"
               >
-                <Button
-                  variant="outline"
-                  onClick={handleAddPayment}
-                  className="whitespace-nowrap hover:bg-emerald-100 hover:text-emerald-700"
-                >
-                  Add Payment
-                </Button>
-              </motion.div>
+                Add Payment
+              </Button>
               <ThemeToggle />
-              <Avatar className="h-8 w-8 ring-2 ring-pink-500/50 ring-offset-2 ring-offset-background shadow-lg shadow-pink-500/10 transition-shadow hover:ring-pink-500/75">
+              <Avatar className="h-6 w-6 sm:h-8 sm:w-8 ring-2 ring-pink-500/50">
                 <AvatarImage 
                   src={session?.user?.image || lastUploadedImage || ''} 
                   alt="Profile"
@@ -480,41 +550,71 @@ export default function OwnerDetailsPage() {
       </header>
 
       {/* Update main content container to account for fixed header */}
-      <main className="max-w-7xl mx-auto px-4 pt-24 pb-8">
+      <main className="max-w-7xl mx-auto px-2 sm:px-4 pt-16 sm:pt-24 pb-6 sm:pb-8">
         {isLoading ? (
-          <div>Loading...</div>
+          <LoadingSkeleton />
         ) : (
-          <>
-            {/* Summary Card */}
-            <Card className="p-6">
-              <h2 className="text-xl font-semibold mb-4">Financial Summary</h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="space-y-4 sm:space-y-6">
+            {/* Export button - Mobile friendly */}
+            <div className="flex justify-end">
+              <Button variant="outline" onClick={handleDownloadPDF} className="text-xs sm:text-sm">
+                <Download className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
+                Summary PDF
+              </Button>
+            </div>
+
+            {/* Mini stats - Update to 3-column grid */}
+            <div className="grid grid-cols-3 gap-2 sm:gap-4">
+              <Card className="p-2 sm:p-4">
+                <div className="text-xs sm:text-sm font-medium text-muted-foreground">Total Trucks</div>
+                <div className="text-lg sm:text-2xl font-bold">
+                  {workDetails.filter(t => t.loaded).length}
+                </div>
+              </Card>
+              <Card className="p-2 sm:p-4">
+                <div className="text-xs sm:text-sm font-medium text-muted-foreground">AGO Trucks</div>
+                <div className="text-lg sm:text-2xl font-bold">
+                  {workDetails.filter(t => t.loaded && t.product === 'AGO').length}
+                </div>
+              </Card>
+              <Card className="p-2 sm:p-4">
+                <div className="text-xs sm:text-sm font-medium text-muted-foreground">PMS Trucks</div>
+                <div className="text-lg sm:text-2xl font-bold">
+                  {workDetails.filter(t => t.loaded && t.product === 'PMS').length}
+                </div>
+              </Card>
+            </div>
+
+            {/* Financial Summary - Mobile responsive */}
+            <Card className="p-3 sm:p-6">
+              <h2 className="text-lg sm:text-xl font-semibold mb-3 sm:mb-4">Financial Summary</h2>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-4">
                 {(() => {
                   const totals = calculateTotals();
                   return (
                     <>
-                      <div className="p-4 rounded-lg border">
-                        <div className="text-sm font-medium text-muted-foreground">Total Due</div>
-                        <div className="text-2xl font-bold">${formatNumber(totals.totalDue)}</div>
+                      <div className="p-2 sm:p-4 rounded-lg border">
+                        <div className="text-xs sm:text-sm font-medium text-muted-foreground">Total Due</div>
+                        <div className="text-lg sm:text-2xl font-bold">${formatNumber(totals.totalDue)}</div>
                       </div>
-                      <div className="p-4 rounded-lg border">
-                        <div className="text-sm font-medium text-muted-foreground">Total Paid</div>
-                        <div className="text-2xl font-bold">${formatNumber(totals.totalPaid)}</div>
+                      <div className="p-2 sm:p-4 rounded-lg border">
+                        <div className="text-xs sm:text-sm font-medium text-muted-foreground">Total Paid</div>
+                        <div className="text-lg sm:text-2xl font-bold">${formatNumber(totals.totalPaid)}</div>
                       </div>
-                      <div className="p-4 rounded-lg border">
-                        <div className="text-sm font-medium text-muted-foreground">Balance</div>
-                        <div className={`text-2xl font-bold ${totals.balance < 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      <div className="p-2 sm:p-4 rounded-lg border">
+                        <div className="text-xs sm:text-sm font-medium text-muted-foreground">Balance</div>
+                        <div className={`text-lg sm:text-2xl font-bold ${totals.balance < 0 ? 'text-green-600' : 'text-red-600'}`}>
                           ${formatNumber(Math.abs(totals.balance))}
                           {totals.pendingTotal > 0 && (
-                            <div className="text-sm text-orange-500">
+                            <div className="text-xs sm:text-sm text-orange-500">
                               Includes ${formatNumber(totals.pendingTotal)} pending
                             </div>
                           )}
                         </div>
                       </div>
-                      <div className="p-4 rounded-lg border">
-                        <div className="text-sm font-medium text-muted-foreground">Available Balance</div>
-                        <div className="text-2xl font-bold text-green-600">
+                      <div className="p-2 sm:p-4 rounded-lg border">
+                        <div className="text-xs sm:text-sm font-medium text-muted-foreground">Available Balance</div>
+                        <div className="text-lg sm:text-2xl font-bold text-green-600">
                           ${formatNumber(totals.existingBalance)}
                         </div>
                       </div>
@@ -524,99 +624,127 @@ export default function OwnerDetailsPage() {
               </div>
             </Card>
 
-            {/* Loaded Trucks */}
-            <Card className="p-6">
-              <h2 className="text-xl font-semibold mb-4">Loaded Trucks</h2>
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead>
-                    <tr>
-                      <th className="text-left p-2">Truck</th>
-                      <th className="text-left p-2">Product</th>
-                      <th className="text-left p-2">At20</th>
-                      <th className="text-left p-2">Price</th>
-                      <th className="text-left p-2">Total Due</th>
-                      <th className="text-left p-2">Paid</th>
-                      <th className="text-left p-2">Balance</th>
-                      <th className="text-left p-2">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {workDetails.filter(truck => truck.loaded).map(truck => {
-                      const { totalDue, totalAllocated, balance, pendingAmount } = getTruckAllocations(truck);
-                      return (
-                        <tr key={truck.id} className="border-t">
-                          <td className="p-2">{truck.truck_number}</td>
-                          <td className="p-2">{truck.product}</td>
-                          <td className="p-2">{truck.at20 || '-'}</td>
-                          <td className="p-2">${formatNumber(parseFloat(truck.price))}</td>
-                          <td className="p-2">${formatNumber(totalDue)}</td>
-                          <td className="p-2">${formatNumber(totalAllocated)}</td>
-                          <td className="p-2">${formatNumber(Math.abs(balance))}</td>
-                          <td className="p-2">
-                            {balance <= 0 ? (
-                              <span className="text-green-600">Paid</span>
-                            ) : truck.paymentPending ? (
-                              <span className="text-orange-500">Pending</span>
-                            ) : (
-                              <span className="text-red-600">Due</span>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </Card>
-
-            {/* Payment History */}
-            <Card className="p-6">
-              <h2 className="text-xl font-semibold mb-4">Payment History</h2>
-              <div className="overflow-x-auto">
-                <table className="min-w-full text-sm">
-                  <thead>
-                    <tr>
-                      <th className="p-2 text-left">ID</th>
-                      <th className="p-2 text-left">Amount</th>
-                      <th className="p-2 text-left">Date</th>
-                      <th className="p-2 text-left">Note</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {ownerPayments.map((payment) => (
-                      <tr key={payment.id} className="border-t">
-                        <td className="p-2">{payment.id}</td>
-                        <td className="p-2">${formatNumber(payment.amount)}</td>
-                        <td className="p-2">{new Date(payment.timestamp).toLocaleString()}</td>
-                        <td className="p-2 whitespace-nowrap">{payment.note || '—'}</td>
+            {/* Loaded Trucks - Horizontal scroll on mobile */}
+            <Card className="p-3 sm:p-6">
+              <h2 className="text-lg sm:text-xl font-semibold mb-3 sm:mb-4">Loaded Trucks</h2>
+              <div className="overflow-x-auto -mx-3 sm:mx-0">
+                <div className="min-w-[800px] sm:min-w-0"> {/* Force minimum width on mobile */}
+                  <table className="w-full">
+                    <thead>
+                      <tr>
+                        <th className="text-left p-2">Truck</th>
+                        <th className="text-left p-2">Product</th>
+                        <th className="text-left p-2">At20</th>
+                        <th className="text-left p-2">Price</th>
+                        <th className="text-left p-2">Total Due</th>
+                        <th className="text-left p-2">Paid</th>
+                        <th className="text-left p-2">Balance</th>
+                        <th className="text-left p-2">Status</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {workDetails.filter(truck => truck.loaded).map(truck => {
+                        const { totalDue, totalAllocated, balance, pendingAmount } = getTruckAllocations(truck);
+                        return (
+                          <tr key={truck.id} className="border-t">
+                            <td className="p-2">{truck.truck_number}</td>
+                            <td className="p-2">{truck.product}</td>
+                            <td className="p-2">{truck.at20 || '-'}</td>
+                            <td className="p-2">${formatNumber(parseFloat(truck.price))}</td>
+                            <td className="p-2">${formatNumber(totalDue)}</td>
+                            <td className="p-2">${formatNumber(totalAllocated)}</td>
+                            <td className="p-2">${formatNumber(Math.abs(balance))}</td>
+                            <td className="p-2">
+                              {balance <= 0 ? (
+                                <span className="text-green-600">Paid</span>
+                              ) : truck.paymentPending ? (
+                                <span className="text-orange-500">Pending</span>
+                              ) : (
+                                <span className="text-red-600">Due</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </Card>
 
-            {/* Balance Usage History */}
-            <Card className="p-6">
-              <h2 className="text-xl font-semibold mb-4">Balance Usage History</h2>
-              <div className="overflow-x-auto">
-                {/* Add balance usage table here */}
+            {/* Payment History - Stack on mobile */}
+            <Card className="p-3 sm:p-6">
+              <h2 className="text-lg sm:text-xl font-semibold mb-3 sm:mb-4">Payment History</h2>
+              <div className="space-y-2 sm:space-y-0">
+                {ownerPayments.map((payment) => (
+                  <div key={payment.id} className="block sm:hidden border-b pb-2">
+                    <div className="flex justify-between">
+                      <div className="font-medium">${formatNumber(payment.amount)}</div>
+                      <div className="text-sm text-muted-foreground">
+                        {new Date(payment.timestamp).toLocaleDateString()}
+                      </div>
+                    </div>
+                    {payment.allocatedTrucks?.map((allocation: any) => {
+                      const truck = workDetails.find(t => t.id === allocation.truckId);
+                      return truck ? (
+                        <div key={allocation.truckId} className="text-xs text-muted-foreground">
+                          {truck.truck_number} (${formatNumber(allocation.amount)})
+                        </div>
+                      ) : null;
+                    })}
+                    {payment.note && (
+                      <div className="text-xs italic mt-1">{payment.note}</div>
+                    )}
+                  </div>
+                ))}
+                <div className="hidden sm:block overflow-x-auto">
+                  <table className="min-w-full text-sm">
+                    <thead>
+                      <tr>
+                        <th className="p-2 text-left">ID</th>
+                        <th className="p-2 text-left">Amount</th>
+                        <th className="p-2 text-left">Date</th>
+                        <th className="p-2 text-left">Allocated Trucks</th>
+                        <th className="p-2 text-left">Note</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {ownerPayments.map((payment) => (
+                        <tr key={payment.id} className="border-t">
+                          <td className="p-2">{payment.id}</td>
+                          <td className="p-2">${formatNumber(payment.amount)}</td>
+                          <td className="p-2">{new Date(payment.timestamp).toLocaleString()}</td>
+                          <td className="p-2">
+                            {payment.allocatedTrucks?.map((allocation: any) => {
+                              const truck = workDetails.find(t => t.id === allocation.truckId);
+                              return truck ? (
+                                <div key={allocation.truckId} className="text-xs">
+                                  {truck.truck_number} (${formatNumber(allocation.amount)})
+                                </div>
+                              ) : null;
+                            })}
+                          </td>
+                          <td className="p-2 whitespace-nowrap">{payment.note || '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </Card>
-          </>
+          </div>
         )}
 
-        {/* Payment Modal */}
+        {/* Payment Modal - Mobile optimized */}
         <Dialog open={isPaymentModalOpen} onOpenChange={setIsPaymentModalOpen}>
-          <DialogContent className="sm:max-w-[800px] w-[90vw] max-h-[90vh] overflow-y-auto">
+          <DialogContent className="w-[95vw] sm:max-w-[800px] h-[90vh] sm:h-auto overflow-y-auto p-3 sm:p-6">
             <DialogHeader>
               <DialogTitle className="text-xl font-semibold">
                 Add Payment for {owner}
               </DialogTitle>
             </DialogHeader>
 
-            <form onSubmit={handlePaymentSubmit} className="space-y-6">
+            <form onSubmit={handlePaymentSubmit} className="space-y-4 sm:space-y-6">
               {/* Balance Section */}
               {ownerBalance && ownerBalance.amount > 0 && (
                 <Card className="p-4 bg-muted/50">
@@ -778,5 +906,5 @@ export default function OwnerDetailsPage() {
         </Dialog>
       </main>
     </div>
-  )
+  );
 }

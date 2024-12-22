@@ -119,9 +119,9 @@ export default function ReportsPage() {
           ]
         }));
 
-        // Sort from oldest to newest
+        // Sort by loadedDate, oldest first
         setReports(processedReports.sort((a, b) => 
-          new Date(a.allocationDate).getTime() - new Date(b.allocationDate).getTime()
+          new Date(a.loadedDate).getTime() - new Date(b.loadedDate).getTime()
         ));
       } else {
         setReports([]);
@@ -208,30 +208,97 @@ export default function ReportsPage() {
     try {
       const date = new Date(dateString);
       if (isNaN(date.getTime())) return '-';
-      return format(date, 'dd/MM/yyyy');
+      return format(date, 'dd-MMM-yyyy');
     } catch (error) {
       return '-';
     }
   }
 
   const exportToExcel = () => {
+    // Prepare the data
     const data = filteredReports.map(report => ({
-      'Date': formatDate(report.allocationDate),
       'Loaded Date': formatSimpleDate(report.loadedDate),
       'Truck Number': report.truckNumber,
       'Owner': report.owner,
       'Product': report.product.toUpperCase(),
-      'Volume': report.totalVolume,
+      'Volume': report.totalVolume ? `${report.totalVolume}L` : '-',
       'AT20': report.at20,
       'Entries': report.entries.map(entry => `${entry.entryUsed}: ${entry.volume}L`).join(', '),
       'Destination': report.entryDestination.toUpperCase(),
-      'Depot': report.depot.toUpperCase()  // Add this line
+      'Depot': report.depot.toUpperCase()
     }))
-
+  
+    // Create worksheet
     const ws = XLSX.utils.json_to_sheet(data)
+  
+    // Set column widths
+    const colWidths = {
+      'A': 15, // Loaded Date
+      'B': 15, // Truck Number
+      'C': 20, // Owner
+      'D': 10, // Product
+      'E': 12, // Volume
+      'F': 10, // AT20
+      'G': 40, // Entries
+      'H': 15, // Destination
+      'I': 12  // Depot
+    }
+  
+    ws['!cols'] = Object.values(colWidths).map(width => ({ width }))
+  
+    // Add styles
+    const headerStyle = {
+      font: { bold: true, color: { rgb: "FFFFFF" } },
+      fill: { fgColor: { rgb: "10B981" } }, // Emerald-500
+      alignment: { horizontal: "center" },
+      border: {
+        top: { style: "thin" },
+        bottom: { style: "thin" },
+        left: { style: "thin" },
+        right: { style: "thin" }
+      }
+    }
+  
+    const cellStyle = {
+      alignment: { horizontal: "left" },
+      border: {
+        top: { style: "thin" },
+        bottom: { style: "thin" },
+        left: { style: "thin" },
+        right: { style: "thin" }
+      }
+    }
+  
+    // Apply styles to headers
+    const range = XLSX.utils.decode_range(ws['!ref'] || 'A1:I1')
+    for (let C = range.s.c; C <= range.e.c; ++C) {
+      const address = XLSX.utils.encode_cell({ r: 0, c: C })
+      if (!ws[address]) continue
+      ws[address].s = headerStyle
+    }
+  
+    // Create workbook and add sheet
     const wb = XLSX.utils.book_new()
+    wb.Props = {
+      Title: "Allocation Reports",
+      Subject: "Allocation Reports Export",
+      Author: "System",
+      CreatedDate: new Date()
+    }
+    
     XLSX.utils.book_append_sheet(wb, ws, 'Allocation Reports')
-    XLSX.writeFile(wb, `Allocation_Reports_${format(new Date(), 'dd-MM-yyyy')}.xlsx`)
+  
+    // Generate file name with current month and year
+    const fileName = `Allocation_Reports_${format(currentDate, 'MMM_yyyy')}.xlsx`
+    
+    // Save the file
+    XLSX.writeFile(wb, fileName)
+  
+    toast({
+      title: "Export Successful",
+      description: `File saved as ${fileName}`,
+      duration: 3000,
+    })
   }
 
   // Add function to handle entry fields
@@ -504,13 +571,17 @@ export default function ReportsPage() {
 
       <main className="max-w-7xl mx-auto px-4 pt-24 pb-8">
         <div className="flex flex-col items-center gap-6 mb-6">
-          <div className="flex items-center gap-4 w-full max-w-xl">
-            <Search className="h-4 w-4 text-muted-foreground" />
+          <div className="flex items-center gap-4 w-full max-w-xl relative group">
+            <Search className={`h-4 w-4 absolute left-3 transition-all duration-300 ${
+              searchTerm 
+                ? 'from-emerald-600 via-teal-500 to-blue-500 animate-gradient-x' 
+                : 'text-muted-foreground group-hover:bg-gradient-to-r group-hover:from-emerald-600 group-hover:via-teal-500 group-hover:to-blue-500 group-hover:bg-clip-text group-hover:text-transparent'
+            }`} />
             <Input
               placeholder="Search by truck number, owner, product, or entry..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full"
+              className="w-full pl-10 transition-all duration-200 focus-visible:ring-emerald-500/50 focus-visible:ring-offset-2"
             />
             <Button onClick={exportToExcel}>
               <Download className="h-4 w-4 mr-2" />
@@ -550,13 +621,22 @@ export default function ReportsPage() {
             <Table>
   <TableHeader>
     <TableRow>
-      <TableHead>Date</TableHead><TableHead>Loaded Date</TableHead><TableHead>Truck Number</TableHead><TableHead>Owner</TableHead><TableHead>Product</TableHead><TableHead>Entries</TableHead><TableHead>Total Volume</TableHead><TableHead>AT20</TableHead><TableHead>Destination</TableHead><TableHead>Depot</TableHead>{showEditControls && <TableHead className="w-[50px]">Edit</TableHead>}
+      <TableHead>Loaded Date</TableHead>
+      <TableHead>Truck Number</TableHead>
+      <TableHead>Owner</TableHead>
+      <TableHead>Product</TableHead>
+      <TableHead>Entries</TableHead>
+      <TableHead>Total Volume</TableHead>
+      <TableHead>AT20</TableHead>
+      <TableHead>Destination</TableHead>
+      <TableHead>Depot</TableHead>
+      {showEditControls && <TableHead className="w-[50px]">Edit</TableHead>}
     </TableRow>
   </TableHeader>
   <TableBody>
     {filteredReports.map((report, index) => (
       <TableRow key={index} className={`${report.id === newReportId ? 'animate-highlight bg-emerald-100' : ''} transition-colors duration-500`}>
-        <TableCell>{formatDate(report?.allocationDate)}</TableCell><TableCell>{editingReport === report.truckNumber ? (
+        <TableCell>{editingReport === report.truckNumber ? (
           <Input
             type="date"
             value={editFormData.loadedDate || report.loadedDate}
@@ -564,32 +644,41 @@ export default function ReportsPage() {
           />
         ) : (
           formatSimpleDate(report?.loadedDate)
-        )}</TableCell><TableCell>{editingReport === report.truckNumber ? (
+        )}</TableCell>
+        <TableCell>{editingReport === report.truckNumber ? (
           <Input
             value={editFormData.truckNumber || report.truckNumber}
             onChange={(e) => setEditFormData(prev => ({ ...prev, truckNumber: e.target.value }))}
           />
         ) : (
           report?.truckNumber || '-'
-        )}</TableCell><TableCell>{editingReport === report.truckNumber ? (
+        )}</TableCell>
+        <TableCell>{editingReport === report.truckNumber ? (
           <Input
             value={editFormData.owner || report.owner}
             onChange={(e) => setEditFormData(prev => ({ ...prev, owner: e.target.value }))}
           />
         ) : (
           report?.owner || '-'
-        )}</TableCell><TableCell>{report?.product?.toUpperCase() || '-'}</TableCell><TableCell>
+        )}</TableCell>
+        <TableCell>{report?.product?.toUpperCase() || '-'}</TableCell>
+        <TableCell>
           <div className="space-y-1">{report?.entries?.map((entry, i) => (
             <div key={i} className="text-sm">{entry?.entryUsed || '-'}: {entry?.volume || '0'}L</div>
           ))}</div>
-        </TableCell><TableCell>{report?.totalVolume ? `${report.totalVolume}L` : '-'}</TableCell><TableCell>{report?.at20 || '-'}</TableCell><TableCell>{report?.entryDestination?.toUpperCase() || '-'}</TableCell><TableCell>{editingReport === report.truckNumber ? (
+        </TableCell>
+        <TableCell>{report?.totalVolume ? `${report.totalVolume}L` : '-'}</TableCell>
+        <TableCell>{report?.at20 || '-'}</TableCell>
+        <TableCell>{report?.entryDestination?.toUpperCase() || '-'}</TableCell>
+        <TableCell>{editingReport === report.truckNumber ? (
           <Input
             value={editFormData.depot || report.depot}
             onChange={(e) => setEditFormData(prev => ({ ...prev, depot: e.target.value }))}
           />
         ) : (
           report?.depot || '-'
-        )}</TableCell>{showEditControls && (
+        )}</TableCell>
+        {showEditControls && (
           <TableCell>
             {editingReport === report.truckNumber ? (
               <div className="flex gap-2">
