@@ -15,7 +15,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { toast } from "@/components/ui/use-toast"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 // Import all the interfaces from a shared types file
-import type { WorkDetail, TruckPayment, OwnerBalance, BalanceUsage } from "@/types" 
+import type { WorkDetail, TruckPayment, OwnerBalance } from "@/types" 
 import { motion } from 'framer-motion'
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { useSession } from "next-auth/react"
@@ -24,6 +24,7 @@ import { ThemeToggle } from "@/components/ui/molecules/theme-toggle" // Add Them
 import { Skeleton } from "@/components/ui/skeleton"
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
+import { OwnerBalanceDialog } from "@/components/ui/molecules/owner-balance-dialog" // Add OwnerBalanceDialog import
 
 // Add interfaces at the top
 interface TruckAllocation {
@@ -39,6 +40,24 @@ interface OwnerTotals {
   pendingTotal: number;
   balance: number;
   existingBalance: number;
+}
+
+// Update the BalanceUsage interface to include the type field
+interface BalanceUsage {
+  amount: number;
+  timestamp: string;
+  usedFor: string[];
+  paymentId: string;
+  type: 'deposit' | 'usage';  // Add this field
+  note?: string;  // Add optional note field
+}
+
+// Add new type
+interface Prepayment extends BalanceUsage {
+  type: 'deposit';
+  amount: number;
+  timestamp: string;
+  note?: string;
 }
 
 export default function OwnerDetailsPage() {
@@ -61,6 +80,7 @@ export default function OwnerDetailsPage() {
     key: string;
     direction: 'asc' | 'desc';
   }>({ key: 'truck_number', direction: 'asc' });
+  const [isBalanceDialogOpen, setIsBalanceDialogOpen] = useState(false); // Add state for balance dialog
 
   interface PaymentFormData {
     amount: number;
@@ -505,6 +525,24 @@ export default function OwnerDetailsPage() {
     </div>
   );
 
+  // Add function to fetch owner balances
+  const fetchOwnerBalances = async () => {
+    try {
+      const balanceRef = ref(database, `owner_balances/${owner}`);
+      const snapshot = await get(balanceRef);
+      if (snapshot.exists()) {
+        setOwnerBalance(snapshot.val());
+      }
+    } catch (error) {
+      console.error('Error fetching balance:', error);
+    }
+  };
+
+  // Add this useEffect to fetch balances when the component mounts
+  useEffect(() => {
+    fetchOwnerBalances();
+  }, [owner]);
+
   return (
     <div className="min-h-screen">
       {/* Header - Make more compact on mobile */}
@@ -527,6 +565,13 @@ export default function OwnerDetailsPage() {
             </div>
             {/* Right side - Compact layout for mobile */}
             <div className="flex items-center gap-2 sm:gap-4">
+              <Button
+                variant="outline"
+                onClick={() => setIsBalanceDialogOpen(true)}
+                className="text-xs sm:text-sm px-2 py-1 sm:px-4 sm:py-2"
+              >
+                Add Prepayment
+              </Button>
               <Button
                 variant="outline"
                 onClick={handleAddPayment}
@@ -732,6 +777,39 @@ export default function OwnerDetailsPage() {
                 </div>
               </div>
             </Card>
+
+            {/* Balance History */}
+            <Card className="p-6 mt-4">
+              <h2 className="text-xl font-semibold mb-4">Balance History</h2>
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr>
+                      <th className="text-left p-2">Date</th>
+                      <th className="text-left p-2">Amount</th>
+                      <th className="text-left p-2">Type</th>
+                      <th className="text-left p-2">Note</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {balanceUsageHistory.map((entry) => (
+                      <tr key={entry.timestamp} className="border-t">
+                        <td className="p-2">
+                          {new Date(entry.timestamp).toLocaleDateString()}
+                        </td>
+                        <td className="p-2">
+                          <span className={entry.type === 'deposit' ? 'text-green-600' : 'text-red-600'}>
+                            {entry.type === 'deposit' ? '+' : '-'}${formatNumber(entry.amount)}
+                          </span>
+                        </td>
+                        <td className="p-2">{entry.type}</td>
+                        <td className="p-2">{entry.note || '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
           </div>
         )}
 
@@ -904,6 +982,13 @@ export default function OwnerDetailsPage() {
             </form>
           </DialogContent>
         </Dialog>
+        <OwnerBalanceDialog 
+          owner={owner}
+          open={isBalanceDialogOpen}
+          onOpenChange={setIsBalanceDialogOpen}
+          currentBalance={ownerBalance?.amount || 0}
+          onBalanceUpdate={fetchOwnerBalances}
+        />
       </main>
     </div>
   );
