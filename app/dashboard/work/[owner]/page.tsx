@@ -624,24 +624,30 @@ export default function OwnerDetailsPage() {
               </Button>
             </div>
 
-            {/* Mini stats - Update to 3-column grid */}
-            <div className="grid grid-cols-3 gap-2 sm:gap-4">
+            {/* Mini stats - Update to 4-column grid */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-4">
               <Card className="p-2 sm:p-4">
-                <div className="text-xs sm:text-sm font-medium text-muted-foreground">Total Trucks</div>
+                <div className="text-xs sm:text-sm font-medium text-muted-foreground">Total Orders</div>
+                <div className="text-lg sm:text-2xl font-bold">
+                  {workDetails.length}
+                </div>
+              </Card>
+              <Card className="p-2 sm:p-4">
+                <div className="text-xs sm:text-sm font-medium text-muted-foreground">Loaded Trucks</div>
                 <div className="text-lg sm:text-2xl font-bold">
                   {workDetails.filter(t => t.loaded).length}
                 </div>
               </Card>
               <Card className="p-2 sm:p-4">
-                <div className="text-xs sm:text-sm font-medium text-muted-foreground">AGO Trucks</div>
+                <div className="text-xs sm:text-sm font-medium text-muted-foreground">AGO Orders</div>
                 <div className="text-lg sm:text-2xl font-bold">
-                  {workDetails.filter(t => t.loaded && t.product === 'AGO').length}
+                  {workDetails.filter(t => t.product === 'AGO').length}
                 </div>
               </Card>
               <Card className="p-2 sm:p-4">
-                <div className="text-xs sm:text-sm font-medium text-muted-foreground">PMS Trucks</div>
+                <div className="text-xs sm:text-sm font-medium text-muted-foreground">PMS Orders</div>
                 <div className="text-lg sm:text-2xl font-bold">
-                  {workDetails.filter(t => t.loaded && t.product === 'PMS').length}
+                  {workDetails.filter(t => t.product === 'PMS').length}
                 </div>
               </Card>
             </div>
