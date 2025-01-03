@@ -167,6 +167,10 @@ export default function WorkManagementPage() {
   // Add new state
   const [balanceUsageHistory, setBalanceUsageHistory] = useState<{[owner: string]: BalanceUsage[]}>({});
 
+  // Add to existing state declarations
+  const [profileClickCount, setProfileClickCount] = useState(0);
+  const [showUnloadedGP, setShowUnloadedGP] = useState(false);
+
   // 2. Define functions before useEffect hooks
   const updateSummaryData = (data: WorkDetail[]) => {
     const stats: SummaryStats = {
@@ -985,6 +989,17 @@ const calculateOwnerTotals = (owner: string | null) => {
     fetchOwnerBalances();
   }, []);
 
+  // Add a useEffect to handle toast notifications
+  useEffect(() => {
+    if (showUnloadedGP) {
+      toast({
+        title: "Developer Mode",
+        description: "Unloaded Gate Pass enabled",
+        variant: "default"
+      });
+    }
+  }, [showUnloadedGP]);
+
   // 4. Early return after hooks
   if (!mounted) {
     return null
@@ -1015,21 +1030,50 @@ const calculateOwnerTotals = (owner: string | null) => {
     })
   }
 
-  const handleGenerateGatePass = (detail: WorkDetail) => {
-    const params = new URLSearchParams({
-      orderNo: detail.orderno,
-      destination: detail.destination,
-      truck: detail.truck_number,
-      product: detail.product,
-      quantity: detail.quantity.toString(),
-      at20: detail.at20 || ''
-    })
-    
-    router.push(`/dashboard/work/orders/gate-pass?${params.toString()}`)
+  // Update handleGenerateGatePass to show warning for unloaded trucks
+const handleGenerateGatePass = (detail: WorkDetail) => {
+  if (!detail.loaded) {
+    const shouldProceed = window.confirm(
+      "⚠️ WARNING: Generating gate pass for unloaded truck!\n\n" +
+      "This should only be done in special circumstances.\n" +
+      "Are you sure you want to continue?"
+    );
+    if (!shouldProceed) return;
   }
+  
+  const params = new URLSearchParams({
+    orderNo: detail.orderno,
+    destination: detail.destination,
+    truck: detail.truck_number,
+    product: detail.product,
+    quantity: detail.quantity.toString(),
+    at20: detail.at20 || '',
+    isLoaded: detail.loaded ? 'true' : 'false'
+  });
+  
+  router.push(`/dashboard/work/orders/gate-pass?${params.toString()}`);
+};
 
+// Add new function to handle profile click
+const handleProfileClick = () => {
+  const newCount = profileClickCount + 1;
+  if (newCount === 3) {
+    setProfileClickCount(0);
+    setShowUnloadedGP(true);
+    // Move toast to useEffect
+    setTimeout(() => {
+      toast({
+        title: "Developer Mode",
+        description: "Unloaded Gate Pass enabled",
+        variant: "default"
+      });
+    }, 0);
+  } else {
+    setProfileClickCount(newCount);
+  }
+};
 
-  // Modify the helper function for decimal precision
+// Modify the helper function for decimal precision
 const toFixed2 = (num: number) => Number(Math.round(num * 100) / 100);
 
 // Update the calculateOptimalAllocation function to handle exact amounts
@@ -1225,7 +1269,10 @@ const handleBalanceUseChange = (checked: boolean) => {
                 </Button>
               </motion.div>
               <ThemeToggle />
-              <Avatar className="h-8 w-8 ring-2 ring-pink-500/50 ring-offset-2 ring-offset-background shadow-lg shadow-pink-500/10 transition-shadow hover:ring-pink-500/75">
+              <Avatar 
+                className="h-8 w-8 ring-2 ring-pink-500/50 ring-offset-2 ring-offset-background shadow-lg shadow-pink-500/10 transition-shadow hover:ring-pink-500/75 cursor-pointer"
+                onClick={handleProfileClick}
+              >
                 <AvatarImage 
                   src={session?.user?.image || lastUploadedImage || ''} 
                   alt="Profile"
@@ -1457,13 +1504,24 @@ const handleBalanceUseChange = (checked: boolean) => {
                     <td className="p-3">
                       <div className="flex gap-2">
                         {!detail.loaded ? (
-                          <Button 
-                            variant="default"
-                            size="sm"
-                            onClick={() => handleLoadedStatus(detail.id)}
-                          >
-                            Loaded?
-                          </Button>
+                          <div className="flex gap-2">
+                            <Button 
+                              variant="default"
+                              size="sm"
+                              onClick={() => handleLoadedStatus(detail.id)}
+                            >
+                              Loaded?
+                            </Button>
+                            {showUnloadedGP && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handleGenerateGatePass(detail)}
+                              >
+                                GP
+                              </Button>
+                            )}
+                          </div>
                         ) : !detail.released ? (
                           <div className="flex gap-2">
                             {isTruckPaymentAllocated(detail.id) ? (

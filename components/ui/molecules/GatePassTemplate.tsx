@@ -18,6 +18,14 @@ interface GatePassTemplateProps {
   }[];
   preparedBy: string;
   authorizedBy: string;
+  // Add optional props
+  orderNo?: string;
+  destination?: string;
+  truck?: string;
+  product?: string;
+  quantity?: string;
+  at20?: string;
+  isLoaded?: string;
 }
 
 export const GatePassTemplate: React.FC<GatePassTemplateProps> = ({
@@ -32,7 +40,8 @@ export const GatePassTemplate: React.FC<GatePassTemplateProps> = ({
   loadingDepot,
   productDetails,
   preparedBy,
-  authorizedBy
+  authorizedBy,
+  // Other props are not needed since we have them directly
 }) => {
   // Function to format date
   const formatDate = (date: string) => {

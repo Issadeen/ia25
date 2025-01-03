@@ -11,10 +11,48 @@ import { database } from "@/lib/firebase"
 import { ref, get, set } from "firebase/database"
 import { useTheme } from 'next-themes' // Add this import
 import { toast } from "@/components/ui/use-toast" // Update this import
+import { useSearchParams } from 'next/navigation'
+
+interface ProductDetail {
+  productName: string;
+  volumeOrdered: string;
+  volumeLoaded: string;
+  truckCompartment: string;
+}
+
+interface GatePassData {
+  orderNo: string;
+  destination: string;
+  truck: string;
+  product: string;
+  quantity: string;
+  at20?: string;
+  isLoaded?: string;
+  loadingOrderNo?: string;
+  deliverTo?: string;
+  mokNo?: string;
+  dateOfRelease?: string;
+  timeOfRelease?: string;
+  driversName?: string;
+  idNo?: string;
+  truckRegistration?: string;
+  loadingDepot?: string;
+  preparedBy?: string;
+  authorizedBy?: string;
+  productDetails: ProductDetail[];
+}
 
 export function GatePassForm() {
+  const searchParams = useSearchParams()
   const { theme } = useTheme() // Add theme hook
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<GatePassData>({
+    orderNo: searchParams.get('orderNo') || '',
+    destination: searchParams.get('destination') || '',
+    truck: searchParams.get('truck') || '',
+    product: searchParams.get('product') || '',
+    quantity: searchParams.get('quantity') || '',
+    at20: searchParams.get('at20') || '',
+    isLoaded: searchParams.get('isLoaded') || 'false',
     loadingOrderNo: '',
     deliverTo: '',
     mokNo: '',
@@ -24,11 +62,9 @@ export function GatePassForm() {
     idNo: '',
     truckRegistration: '',
     loadingDepot: '',
-    productDetails: [
-      { productName: '', volumeOrdered: '', volumeLoaded: '', truckCompartment: '' }
-    ],
     preparedBy: '',
-    authorizedBy: ''
+    authorizedBy: '',
+    productDetails: []
   })
 
   const [errors, setErrors] = useState<{ [key: string]: string }>({});
@@ -50,7 +86,7 @@ export function GatePassForm() {
 
   const handleProductChange = (index: number, field: string, value: string) => {
     setFormData(prevState => {
-      const newProductDetails = [...prevState.productDetails]
+      const newProductDetails = [...(prevState.productDetails || [])]
       newProductDetails[index] = { ...newProductDetails[index], [field]: value }
       return { ...prevState, productDetails: newProductDetails }
     })
@@ -195,6 +231,21 @@ export function GatePassForm() {
 
       const pdf = new jsPDF('landscape', 'pt', 'a4');
 
+      // Update watermark for unloaded trucks to be very subtle
+      if (formData.isLoaded !== 'true') {
+        pdf.setTextColor(240, 240, 240) // Very light gray, almost invisible
+        pdf.setFontSize(28) // Smaller font size
+        pdf.text('PENDING', pdfWidth / 2, pdfHeight / 2, { 
+          angle: 45, 
+          align: 'center',
+          renderingMode: 'fill'
+        })
+      }
+
+      // Reset text color for normal content
+      pdf.setTextColor(0, 0, 0)
+      pdf.setFontSize(12)
+
       pdf.addImage(
         canvas.toDataURL('image/png', 1.0),
         'PNG',
@@ -203,6 +254,11 @@ export function GatePassForm() {
         width,
         height
       );
+
+      // And update the status text to be more subtle
+      pdf.setFontSize(8) // Smaller font size
+      pdf.setTextColor(200, 200, 200) // Light gray
+      pdf.text(`Status: ${formData.isLoaded === 'true' ? 'Loaded' : 'Pending'}`, 20, pdfHeight - 20)
 
       pdf.save(`GatePass_${formData.loadingOrderNo || 'draft'}.pdf`);
 
@@ -485,16 +541,29 @@ export function GatePassForm() {
       </form>
 
       <div 
-        ref={templateRef}
-        className="bg-white w-[1100px]"
-        style={{ 
-          display: 'none',
-          aspectRatio: '1.414/1',
-          margin: '0 auto'
-        }}
-      >
-        <GatePassTemplate {...formData} />
-      </div>
+            ref={templateRef}
+            className="bg-white w-[1100px]"
+            style={{ 
+              display: 'none',
+              aspectRatio: '1.414/1',
+              margin: '0 auto'
+            }}
+          >
+            <GatePassTemplate 
+              {...formData} 
+              loadingOrderNo={formData.loadingOrderNo || ''}
+              deliverTo={formData.deliverTo || ''}
+              mokNo={formData.mokNo || ''}
+              dateOfRelease={formData.dateOfRelease || ''}
+              timeOfRelease={formData.timeOfRelease || ''}
+              driversName={formData.driversName || ''}
+              idNo={formData.idNo || ''}
+              truckRegistration={formData.truckRegistration || ''}
+              loadingDepot={formData.loadingDepot || ''}
+              preparedBy={formData.preparedBy || ''}
+              authorizedBy={formData.authorizedBy || ''}
+            />
+          </div>
     </div>
   )
 }
