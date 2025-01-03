@@ -19,7 +19,7 @@ import type { WorkDetail, TruckPayment, OwnerBalance } from "@/types"
 import { motion } from 'framer-motion'
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { useSession } from "next-auth/react"
-import { ArrowLeft, Download, Receipt } from 'lucide-react' // Remove FileSpreadsheet
+import { ArrowLeft, Download, Receipt, Wallet2, PlusCircle } from 'lucide-react' // Remove FileSpreadsheet, Add Wallet2 and PlusCircle
 import { ThemeToggle } from "@/components/ui/molecules/theme-toggle" // Add ThemeToggle import
 import { Skeleton } from "@/components/ui/skeleton"
 import jsPDF from 'jspdf'
@@ -545,12 +545,12 @@ export default function OwnerDetailsPage() {
 
   return (
     <div className="min-h-screen">
-      {/* Header - Make more compact on mobile */}
+      {/* Improved Mobile-First Header */}
       <header className="fixed top-0 left-0 w-full border-b z-50 bg-gradient-to-r from-emerald-900/10 via-blue-900/10 to-blue-900/10 backdrop-blur-xl">
-        <div className="w-full">
-          <div className="max-w-7xl mx-auto px-2 sm:px-4 py-2 sm:py-3 flex justify-between items-center">
-            {/* Left side - Simplified for mobile */}
-            <div className="flex items-center gap-2 sm:gap-4">
+        <div className="max-w-7xl mx-auto px-2 sm:px-4 py-2 sm:py-3">
+          <div className="flex items-center justify-between">
+            {/* Left side */}
+            <div className="flex items-center gap-2">
               <Button
                 variant="ghost"
                 size="icon"
@@ -559,28 +559,44 @@ export default function OwnerDetailsPage() {
               >
                 <ArrowLeft className="h-4 w-4 sm:h-5 sm:w-5" />
               </Button>
-              <h1 className="text-base sm:text-xl font-semibold bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent truncate">
-                {owner}
-              </h1>
+              <div className="flex items-center gap-2">
+                <h1 className="text-base sm:text-xl font-semibold bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent truncate">
+                  {owner}
+                </h1>
+              </div>
             </div>
-            {/* Right side - Compact layout for mobile */}
-            <div className="flex items-center gap-2 sm:gap-4">
+
+            {/* Right side - Action buttons with tooltips */}
+            <div className="flex items-center gap-1 sm:gap-2">
+              <div className="hidden sm:flex items-center gap-2 mr-2">
+                <span className="text-sm text-muted-foreground">
+                  Balance: ${formatNumber(ownerBalance?.amount || 0)}
+                </span>
+              </div>
               <Button
-                variant="outline"
+                variant="ghost"
+                size="icon"
                 onClick={() => setIsBalanceDialogOpen(true)}
-                className="text-xs sm:text-sm px-2 py-1 sm:px-4 sm:py-2"
+                className="relative hover:bg-emerald-100"
+                title="Add Prepayment"
               >
-                Add Prepayment
+                <Wallet2 className="h-4 w-4 sm:h-5 sm:w-5 text-emerald-600" />
+                <span className="sr-only">Add Prepayment</span>
               </Button>
               <Button
-                variant="outline"
+                variant="ghost"
+                size="icon"
                 onClick={handleAddPayment}
-                className="text-xs sm:text-sm px-2 py-1 sm:px-4 sm:py-2"
+                className="relative hover:bg-emerald-100"
+                title="Add Payment"
               >
-                Add Payment
+                <PlusCircle className="h-4 w-4 sm:h-5 sm:w-5 text-emerald-600" />
+                <span className="sr-only">Add Payment</span>
               </Button>
               <ThemeToggle />
-              <Avatar className="h-6 w-6 sm:h-8 sm:w-8 ring-2 ring-pink-500/50">
+              <Avatar 
+                className="h-7 w-7 sm:h-8 sm:w-8 ring-2 ring-pink-500/50"
+              >
                 <AvatarImage 
                   src={session?.user?.image || lastUploadedImage || ''} 
                   alt="Profile"
