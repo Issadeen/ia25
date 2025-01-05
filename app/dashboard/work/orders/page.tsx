@@ -1465,7 +1465,9 @@ const handleBalanceUseChange = (checked: boolean) => {
                       initial="hidden"
                       animate="visible"
                       transition={{ delay: index * 0.05 }}
-                      className={`border-b hover:bg-muted/50 ${detail.loaded ? 'opacity-50' : ''} ${
+                      className={`border-b hover:bg-muted/50 ${
+                        detail.loaded ? 'opacity-50 bg-muted/20' : ''
+                      } ${
                         detail.id === lastAddedId ? 'highlight-new-record' : ''
                       }`}
                     >
