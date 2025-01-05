@@ -42,6 +42,22 @@ interface GatePassData {
   productDetails: ProductDetail[];
 }
 
+// Add this helper function after the interfaces
+const getTimeAgoString = (timestamp: number) => {
+  const now = Date.now();
+  const diffInMinutes = Math.round((now - timestamp) / (1000 * 60));
+  const diffInHours = Math.floor(diffInMinutes / 60);
+  const diffInDays = Math.floor(diffInHours / 24);
+
+  if (diffInDays > 0) {
+    return `${diffInDays} day${diffInDays > 1 ? 's' : ''} ago`;
+  } else if (diffInHours > 0) {
+    return `${diffInHours} hour${diffInHours > 1 ? 's' : ''} ago`;
+  } else {
+    return `${diffInMinutes} minute${diffInMinutes > 1 ? 's' : ''} ago`;
+  }
+};
+
 export function GatePassForm() {
   const searchParams = useSearchParams()
   const { theme } = useTheme() // Add theme hook
@@ -128,23 +144,21 @@ export function GatePassForm() {
     return newNumber
   }
 
-  const checkDuplicateTruck = async (truckNumber: string) => {
+  // Replace the checkDuplicateTruck function with this new one
+  const checkDuplicateOrder = async (orderNumber: string) => {
     const gatePassesRef = ref(database, 'gatePasses');
     const snapshot = await get(gatePassesRef);
     if (snapshot.exists()) {
       const gatePasses = snapshot.val();
       for (const passNumber in gatePasses) {
         const pass = gatePasses[passNumber];
-        const passTruckReg = pass.truckRegistration?.toString().toLowerCase().trim() || '';
-        if (
-          passTruckReg &&
-          passTruckReg === truckNumber.toLowerCase().trim()
-        ) {
-          // Found duplicate
+        if (pass.loadingOrderNo?.toString().trim() === orderNumber.trim()) {
+          // Found duplicate order
           return {
             passNumber,
-            previousDestination: pass.destination,
+            previousTruck: pass.truckRegistration,
             timestamp: pass.timestamp,
+            destination: pass.deliverTo
           };
         }
       }
@@ -157,34 +171,27 @@ export function GatePassForm() {
     if (!validateForm()) return;
 
     try {
-      // Ensure truckRegistration is defined and is a string
-      const truckRegistration = formData.truckRegistration?.toString().trim() || '';
-      if (!truckRegistration) {
-        toast({
-          title: "Error",
-          description: "Truck Registration is required.",
-          variant: "destructive",
-        });
-        return;
-      }
-
-      // Check for duplicate truck first
-      const duplicateInfo = await checkDuplicateTruck(truckRegistration);
-      
+      // Check for duplicate order first
+      if (!formData.loadingOrderNo) return;
+      const duplicateInfo = await checkDuplicateOrder(formData.loadingOrderNo);
+        
       // Generate or get the pass number
       let currentPassNumber;
       if (duplicateInfo) {
-        const timeAgo = Math.round((Date.now() - duplicateInfo.timestamp) / (1000 * 60));
+        const timeAgoString = getTimeAgoString(duplicateInfo.timestamp);
         const shouldProceed = window.confirm(
-          `Warning: This truck was gatepassed ${timeAgo} minutes ago\n` +
+          `⚠️ Warning: This order number was used ${timeAgoString}\n\n` +
           `Previous Gate Pass: ${duplicateInfo.passNumber}\n` +
-          `Previous Destination: ${duplicateInfo.previousDestination}\n\n` +
-          `Do you want to proceed?`
+          `Previous Truck: ${duplicateInfo.previousTruck}\n` +
+          `Previous Destination: ${duplicateInfo.destination}\n\n` +
+          `Do you want to proceed with generating a new gate pass?`
         );
-        
+          
         if (!shouldProceed) return;
-        
-        currentPassNumber = duplicateInfo.passNumber;
+          
+        // Generate new pass number if proceeding with duplicate order
+        const newNumber = await incrementPassNumber();
+        currentPassNumber = `MOK-GP-${newNumber}`;
       } else {
         const newNumber = await incrementPassNumber();
         currentPassNumber = `MOK-GP-${newNumber}`;
