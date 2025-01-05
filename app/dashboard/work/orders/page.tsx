@@ -1,7 +1,7 @@
 'use client'
 
 // Add AnimatePresence and motion imports
-import { motion } from 'framer-motion'
+import { motion, AnimatePresence } from 'framer-motion'
 // Add Avatar imports
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 // Remove useTheme and Sun/Moon imports since they're now in theme-toggle
@@ -111,6 +111,30 @@ interface BalanceUsage {
   timestamp: string;
   usedFor: string[];
   paymentId: string;
+}
+
+// Add animation variants before the component
+const tableRowVariants = {
+  hidden: { opacity: 0, y: 20 },
+  visible: { opacity: 1, y: 0 }
+}
+
+const cardVariants = {
+  hidden: { opacity: 0, scale: 0.95 },
+  visible: { 
+    opacity: 1, 
+    scale: 1,
+    transition: { type: "spring", stiffness: 300, damping: 30 }
+  }
+}
+
+const filterVariants = {
+  hidden: { opacity: 0, height: 0 },
+  visible: { 
+    opacity: 1, 
+    height: "auto",
+    transition: { duration: 0.3 }
+  }
 }
 
 export default function WorkManagementPage() {
@@ -1315,76 +1339,84 @@ const handleBalanceUseChange = (checked: boolean) => {
         </div>
 
         {/* Conditionally Rendered Filter Controls with reduced sizes */} 
-        {showFilters && (
-          <div className="flex flex-wrap justify-center mb-8 gap-2">
-            {/* Owner Filter */} 
-            <Input
-              placeholder="Filter by Owner"
-              value={ownerFilter}
-              onChange={(e) => setOwnerFilter(e.target.value)}
-              className="max-w-xs w-full sm:w-auto"
-            />
-            {/* Product Filter */} 
-            <div className="max-w-xs w-full sm:w-auto">
+        <AnimatePresence>
+          {showFilters && (
+            <motion.div
+              variants={filterVariants}
+              initial="hidden"
+              animate="visible"
+              exit="hidden"
+              className="flex flex-wrap justify-center mb-8 gap-2"
+            >
+              {/* Owner Filter */} 
+              <Input
+                placeholder="Filter by Owner"
+                value={ownerFilter}
+                onChange={(e) => setOwnerFilter(e.target.value)}
+                className="max-w-xs w-full sm:w-auto"
+              />
+              {/* Product Filter */} 
+              <div className="max-w-xs w-full sm:w-auto">
+                <Select
+                  value={productFilter}
+                  onValueChange={(value) => setProductFilter(value)}
+                >
+                <SelectTrigger>
+                  <SelectValue placeholder="Filter by Product" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ALL">All</SelectItem>
+                  <SelectItem value="AGO">AGO</SelectItem>
+                  <SelectItem value="PMS">PMS</SelectItem> {/* Fixed missing closing tag */} 
+                </SelectContent>
+                </Select>
+              </div>
+              {/* Status Filter */} 
               <Select
-                value={productFilter}
-                onValueChange={(value) => setProductFilter(value)}
+                value={statusFilter}
+                onValueChange={(value) => setStatusFilter(value)}
               >
-              <SelectTrigger>
-                <SelectValue placeholder="Filter by Product" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="ALL">All</SelectItem>
-                <SelectItem value="AGO">AGO</SelectItem>
-                <SelectItem value="PMS">PMS</SelectItem> {/* Fixed missing closing tag */} 
-              </SelectContent>
+                <SelectTrigger>
+                  <SelectValue placeholder="Filter by Status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ALL">All</SelectItem>
+                  <SelectItem value="queued">Queued</SelectItem>
+                  <SelectItem value="not queued">Not Queued</SelectItem>
+                </SelectContent>
               </Select>
-            </div>
-            {/* Status Filter */} 
-            <Select
-              value={statusFilter}
-              onValueChange={(value) => setStatusFilter(value)}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Filter by Status" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="ALL">All</SelectItem>
-                <SelectItem value="queued">Queued</SelectItem>
-                <SelectItem value="not queued">Not Queued</SelectItem>
-              </SelectContent>
-            </Select>
-            {/* Depot Filter */} 
-            <Input
-              placeholder="Filter by Depot"
-              value={depotFilter}
-              onChange={(e) => setDepotFilter(e.target.value)}
-              className="max-w-xs w-full sm:w-auto"
-            />
-            {/* Destination Filter */} 
-            <Input
-              placeholder="Filter by Destination"
-              value={destinationFilter}
-              onChange={(e) => setDestinationFilter(e.target.value)}
-              className="max-w-xs w-full sm:w-auto"
-            />
-            {/* Clear Filters Button */} 
-            <Button
-              variant="outline"
-              onClick={() => {
-                setOwnerFilter("")
-                setProductFilter("ALL")
-                setStatusFilter("ALL")
-                setDepotFilter("")
-                setDestinationFilter("")
-                // Removed setSearchTerm("") to keep the search box intact
-              }}
-              className="max-w-xs w-full sm:w-auto"
-            >
-              Clear Filters
-            </Button>
-          </div>
-        )}
+              {/* Depot Filter */} 
+              <Input
+                placeholder="Filter by Depot"
+                value={depotFilter}
+                onChange={(e) => setDepotFilter(e.target.value)}
+                className="max-w-xs w-full sm:w-auto"
+              />
+              {/* Destination Filter */} 
+              <Input
+                placeholder="Filter by Destination"
+                value={destinationFilter}
+                onChange={(e) => setDestinationFilter(e.target.value)}
+                className="max-w-xs w-full sm:w-auto"
+              />
+              {/* Clear Filters Button */} 
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setOwnerFilter("")
+                  setProductFilter("ALL")
+                  setStatusFilter("ALL")
+                  setDepotFilter("")
+                  setDestinationFilter("")
+                  // Removed setSearchTerm("") to keep the search box intact
+                }}
+                className="max-w-xs w-full sm:w-auto"
+              >
+                Clear Filters
+              </Button>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Download PDF Button */} 
         <div className="flex justify-end mb-4">
@@ -1401,9 +1433,13 @@ const handleBalanceUseChange = (checked: boolean) => {
         </div>
 
         {isLoading ? (
-          <div className="flex justify-center items-center h-64">
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="flex justify-center items-center h-64"
+          >
             <Loader2 className="h-8 w-8 animate-spin" />
-          </div>
+          </motion.div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full border-collapse bg-card text-card-foreground">
@@ -1420,273 +1456,310 @@ const handleBalanceUseChange = (checked: boolean) => {
                   <th className="p-3 text-left font-medium bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">Actions</th>
                 </tr>
               </thead>
-              <tbody>
-                {getFilteredWorkDetails().map(detail => (
-                  <tr 
-                    key={detail.id} 
-                    className={`border-b hover:bg-muted/50 ${detail.loaded ? 'opacity-50' : ''} ${
-                      detail.id === lastAddedId ? 'highlight-new-record' : ''
-                    }`}
-                  >
-                    <td className="p-3">{detail.owner}</td>
-                    <td className="p-3">{detail.product}</td>
-                    <td className="p-3">
-                      <div className="flex items-center gap-2">
-                        {editingTruckId === detail.id ? (
-                          <Input
-                            value={detail.truck_number}
-                            onChange={(e) => handleTruckNumberChange(detail.id, e.target.value, detail.truck_number)}
-                            className="w-32"
-                          />
-                        ) : (
-                          <span>{detail.truck_number}</span>
-                        )}
-                        {!detail.loaded && (
-                          editingTruckId === detail.id ? (
-                            <>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => handleTruckNumberChange(detail.id, detail.truck_number, detail.truck_number)}
-                              >
-                                <Check className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => setEditingTruckId(null)}
-                              >
-                                <X className="h-4 w-4" />
-                              </Button>
-                            </>
+              <AnimatePresence>
+                <tbody>
+                  {getFilteredWorkDetails().map((detail, index) => (
+                    <motion.tr
+                      key={detail.id}
+                      variants={tableRowVariants}
+                      initial="hidden"
+                      animate="visible"
+                      transition={{ delay: index * 0.05 }}
+                      className={`border-b hover:bg-muted/50 ${detail.loaded ? 'opacity-50' : ''} ${
+                        detail.id === lastAddedId ? 'highlight-new-record' : ''
+                      }`}
+                    >
+                      <td className="p-3">{detail.owner}</td>
+                      <td className="p-3">{detail.product}</td>
+                      <td className="p-3">
+                        <div className="flex items-center gap-2">
+                          {editingTruckId === detail.id ? (
+                            <Input
+                              value={detail.truck_number}
+                              onChange={(e) => handleTruckNumberChange(detail.id, e.target.value, detail.truck_number)}
+                              className="w-32"
+                            />
                           ) : (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => setEditingTruckId(detail.id)}
-                            >
-                              <Edit className="h-4 w-4" />
-                            </Button>
-                          )
-                        )}
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => {
-                            setSelectedTruckHistory(detail)
-                            setShowTruckHistory(true)
-                          }}
-                        >
-                          <History className="h-4 w-4" />
-                        </Button>
-                      </div>
-                      {detail.previous_trucks && detail.previous_trucks.length > 0 && (
-                        <small className="text-muted-foreground">
-                          Previous: {detail.previous_trucks[detail.previous_trucks.length - 1]}
-                        </small>
-                      )}
-                    </td>
-                    <td className="p-3">{detail.quantity}</td>
-                    <td className="p-3">
-                      <Button
-                        variant={detail.status === "queued" ? "default" : "secondary"}
-                        size="sm"
-                        className={detail.status === "queued" ? "bg-emerald-600 hover:bg-emerald-700" : ""}
-                        disabled={detail.loaded}
-                        onClick={() => handleStatusChange(detail.id, detail.status)}
-                      >
-                        {detail.status}
-                      </Button>
-                    </td>
-                    <td className="p-3">{detail.orderno}</td>
-                    <td className="p-3">{detail.depot}</td>
-                    <td className="p-3">{detail.destination}</td>
-                    <td className="p-3">
-                      <div className="flex gap-2">
-                        {!detail.loaded ? (
-                          <div className="flex gap-2">
-                            <Button 
-                              variant="default"
-                              size="sm"
-                              onClick={() => handleLoadedStatus(detail.id)}
-                            >
-                              Loaded?
-                            </Button>
-                            {showUnloadedGP && (
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => handleGenerateGatePass(detail)}
-                              >
-                                GP
-                              </Button>
-                            )}
-                          </div>
-                        ) : !detail.released ? (
-                          <div className="flex gap-2">
-                            {isTruckPaymentAllocated(detail.id) ? (
-                              <Button
-                                variant="default"
-                                size="sm"
-                                onClick={async () => {
-                                  if (confirm('Confirm release of truck?')) {
-                                    await update(ref(database, `work_details/${detail.id}`), {
-                                      released: true,
-                                      paid: true,
-                                      paymentPending: false
-                                    });
-                                    toast({
-                                      title: "Released",
-                                      description: "Truck has been released",
-                                    });
-                                  }
-                                }}
-                              >
-                                Release
-                              </Button>
-                            ) : (
-                              <div className="flex items-center gap-1">
+                            <span>{detail.truck_number}</span>
+                          )}
+                          {!detail.loaded && (
+                            editingTruckId === detail.id ? (
+                              <>
                                 <Button
                                   variant="ghost"
                                   size="sm"
-                                  onClick={() => {
-                                    toast({
-                                      title: "Payment Required",
-                                      description: "Please allocate payment from owner details",
-                                    });
-                                  }}
+                                  onClick={() => handleTruckNumberChange(detail.id, detail.truck_number, detail.truck_number)}
                                 >
-                                  Payment Required
+                                  <Check className="h-4 w-4" />
                                 </Button>
                                 <Button
                                   variant="ghost"
-                                  size="icon"
-                                  className="h-8 w-8 text-red-500 hover:text-red-700"
-                                  onClick={() => handleForceRelease(detail)}
+                                  size="sm"
+                                  onClick={() => setEditingTruckId(null)}
                                 >
-                                  <Triangle className="h-4 w-4" />
+                                  <X className="h-4 w-4" />
                                 </Button>
-                              </div>
-                            )}
-                          </div>
-                        ) : (
-                          <div className="flex gap-2">
-                            <Button
-                              variant="default"
-                              size="sm"
-                              onClick={() => handleGenerateGatePass(detail)}
-                              disabled={!detail.loaded}
-                            >
-                              GP
-                            </Button>
-                            {detail.paymentPending && (
+                              </>
+                            ) : (
                               <Button
                                 variant="ghost"
                                 size="sm"
-                                onClick={() => handleOwnerInfo(detail.owner)}
-                                className="text-red-500"
+                                onClick={() => setEditingTruckId(detail.id)}
                               >
-                                Payment Pending
+                                <Edit className="h-4 w-4" />
                               </Button>
-                            )}
-                          </div>
+                            )
+                          )}
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              setSelectedTruckHistory(detail)
+                              setShowTruckHistory(true)
+                            }}
+                          >
+                            <History className="h-4 w-4" />
+                          </Button>
+                        </div>
+                        {detail.previous_trucks && detail.previous_trucks.length > 0 && (
+                          <small className="text-muted-foreground">
+                            Previous: {detail.previous_trucks[detail.previous_trucks.length - 1]}
+                          </small>
                         )}
+                      </td>
+                      <td className="p-3">{detail.quantity}</td>
+                      <td className="p-3">
                         <Button
-                          variant="destructive"
+                          variant={detail.status === "queued" ? "default" : "secondary"}
                           size="sm"
-                          onClick={() => handleDelete(detail.id)}
+                          className={detail.status === "queued" ? "bg-emerald-600 hover:bg-emerald-700" : ""}
+                          disabled={detail.loaded}
+                          onClick={() => handleStatusChange(detail.id, detail.status)}
                         >
-                          <Trash2 className="h-4 w-4" />
+                          {detail.status}
                         </Button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
+                      </td>
+                      <td className="p-3">{detail.orderno}</td>
+                      <td className="p-3">{detail.depot}</td>
+                      <td className="p-3">{detail.destination}</td>
+                      <td className="p-3">
+                        <div className="flex gap-2">
+                          {!detail.loaded ? (
+                            <div className="flex gap-2">
+                              <Button 
+                                variant="default"
+                                size="sm"
+                                onClick={() => handleLoadedStatus(detail.id)}
+                              >
+                                Loaded?
+                              </Button>
+                              {showUnloadedGP && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleGenerateGatePass(detail)}
+                                >
+                                  GP
+                                </Button>
+                              )}
+                            </div>
+                          ) : !detail.released ? (
+                            <div className="flex gap-2">
+                              {isTruckPaymentAllocated(detail.id) ? (
+                                <Button
+                                  variant="default"
+                                  size="sm"
+                                  onClick={async () => {
+                                    if (confirm('Confirm release of truck?')) {
+                                      await update(ref(database, `work_details/${detail.id}`), {
+                                        released: true,
+                                        paid: true,
+                                        paymentPending: false
+                                      });
+                                      toast({
+                                        title: "Released",
+                                        description: "Truck has been released",
+                                      });
+                                    }
+                                  }}
+                                >
+                                  Release
+                                </Button>
+                              ) : (
+                                <div className="flex items-center gap-1">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => {
+                                      toast({
+                                        title: "Payment Required",
+                                        description: "Please allocate payment from owner details",
+                                      });
+                                    }}
+                                  >
+                                    Payment Required
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-8 w-8 text-red-500 hover:text-red-700"
+                                    onClick={() => handleForceRelease(detail)}
+                                  >
+                                    <Triangle className="h-4 w-4" />
+                                  </Button>
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="flex gap-2">
+                              <Button
+                                variant="default"
+                                size="sm"
+                                onClick={() => handleGenerateGatePass(detail)}
+                                disabled={!detail.loaded}
+                              >
+                                GP
+                              </Button>
+                              {detail.paymentPending && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => handleOwnerInfo(detail.owner)}
+                                  className="text-red-500"
+                                >
+                                  Payment Pending
+                                </Button>
+                              )}
+                            </div>
+                          )}
+                          <Button
+                            variant="destructive"
+                            size="sm"
+                            onClick={() => handleDelete(detail.id)}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </td>
+                    </motion.tr>
+                  ))}
+                </tbody>
+              </AnimatePresence>
             </table>
           </div>
         )}
 
         <div className="mt-8 space-y-8">
           {/* Summary Stats */} 
-          <Card className="p-6">
-            <div className="flex justify-between items-center">
-              <h2 className="text-xl font-semibold mb-4 bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">Summary</h2>
-              <Button variant="ghost" onClick={handleCopySummary}>
-                <Copy className="h-5 w-5" />
-              </Button>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="space-y-2">
-                <div>Total Orders: {summaryStats.totalOrders}</div>
-                <div>Queued Orders: {summaryStats.queuedOrders}</div>
-                <div>Unqueued Orders: {summaryStats.unqueuedOrders}</div>
+          <motion.div
+            variants={cardVariants}
+            initial="hidden"
+            animate="visible"
+          >
+            <Card className="p-6">
+              <div className="flex justify-between items-center">
+                <h2 className="text-xl font-semibold mb-4 bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">Summary</h2>
+                <Button variant="ghost" onClick={handleCopySummary}>
+                  <Copy className="h-5 w-5" />
+                </Button>
               </div>
-              <div className="space-y-2">
-                <div>Loaded Orders: {summaryStats.loadedOrders}</div>
-                <div>Pending Orders: {summaryStats.pendingOrders}</div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="space-y-2">
+                  <div>Total Orders: {summaryStats.totalOrders}</div>
+                  <div>Queued Orders: {summaryStats.queuedOrders}</div>
+                  <div>Unqueued Orders: {summaryStats.unqueuedOrders}</div>
+                </div>
+                <div className="space-y-2">
+                  <div>Loaded Orders: {summaryStats.loadedOrders}</div>
+                  <div>Pending Orders: {summaryStats.pendingOrders}</div>
+                </div>
+                <div className="space-y-2">
+                  <div>AGO Orders: {summaryStats.agoOrders}</div>
+                  <div>PMS Orders: {summaryStats.pmsOrders}</div>
+                </div>
               </div>
-              <div className="space-y-2">
-                <div>AGO Orders: {summaryStats.agoOrders}</div>
-                <div>PMS Orders: {summaryStats.pmsOrders}</div>
-              </div>
-            </div>
-          </Card>
+            </Card>
+          </motion.div>
 
           {/* Owner Summary */} 
-          <Card className="p-6">
-            <div className="flex justify-between items-center">
-              <h2 className="text-xl font-semibold mb-4 bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">Owner Summary</h2>
-              <Button variant="ghost" onClick={handleCopySummary}>
-                <Copy className="h-5 w-5" />
-              </Button>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {Object.entries(ownerSummary).map(([owner, data]) => (
-                <Card key={owner} className="p-4">
-                  <div className="flex justify-between items-start">
-                    <h3 className="text-lg font-semibold mb-2 bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">{owner}</h3>
-                    <Button 
-                      variant="ghost" 
-                      size="sm"
-                      onClick={() => handleOwnerInfo(owner)}
-                    >
-                      Info
-                    </Button>
-                  </div>
-                  <div className="space-y-1">
-                    <div>Total Orders: {data.totalOrders}</div>
-                    <div>Queued Orders: {data.queuedOrders}</div>
-                    <div>Loaded Orders: {data.loadedOrders}</div>
-                    <div>Pending Orders: {data.pendingOrders}</div>
-                    <div>AGO Orders: {data.agoOrders}</div>
-                    <div>PMS Orders: {data.pmsOrders}</div>
-                  </div>
-                </Card>
-              ))}
-            </div>
-          </Card>
+          <motion.div
+            variants={cardVariants}
+            initial="hidden"
+            animate="visible"
+            transition={{ delay: 0.2 }}
+          >
+            <Card className="p-6">
+              <div className="flex justify-between items-center">
+                <h2 className="text-xl font-semibold mb-4 bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">Owner Summary</h2>
+                <Button variant="ghost" onClick={handleCopySummary}>
+                  <Copy className="h-5 w-5" />
+                </Button>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {Object.entries(ownerSummary).map(([owner, data], index) => (
+                  <motion.div
+                    key={owner}
+                    variants={cardVariants}
+                    initial="hidden"
+                    animate="visible"
+                    transition={{ delay: index * 0.1 }}
+                  >
+                    <Card key={owner} className="p-4">
+                      <div className="flex justify-between items-start">
+                        <h3 className="text-lg font-semibold mb-2 bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">{owner}</h3>
+                        <Button 
+                          variant="ghost" 
+                          size="sm"
+                          onClick={() => handleOwnerInfo(owner)}
+                        >
+                          Info
+                        </Button>
+                      </div>
+                      <div className="space-y-1">
+                        <div>Total Orders: {data.totalOrders}</div>
+                        <div>Queued Orders: {data.queuedOrders}</div>
+                        <div>Loaded Orders: {data.loadedOrders}</div>
+                        <div>Pending Orders: {data.pendingOrders}</div>
+                        <div>AGO Orders: {data.agoOrders}</div>
+                        <div>PMS Orders: {data.pmsOrders}</div>
+                      </div>
+                    </Card>
+                  </motion.div>
+                ))}
+              </div>
+            </Card>
+          </motion.div>
         </div>
       </main>
 
       {/* Add Work Dialog */} 
-      <Dialog open={isAddModalOpen} onOpenChange={setIsAddModalOpen}>
-        <DialogContent className="sm:max-w-[800px] w-[90vw] max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">Add New Work Detail</DialogTitle>
-          </DialogHeader>
-          <AddWorkDialog 
-            onClose={() => setIsAddModalOpen(false)} 
-            onSave={async (formData) => {
-              const result = await handleAddNew(formData);
-              if (result.success) {
-                setIsAddModalOpen(false);
-              }
-              return result; // Return the full result object
-            }} 
-          />
-        </DialogContent>
-      </Dialog>
+      <AnimatePresence>
+        {isAddModalOpen && (
+          <Dialog open={isAddModalOpen} onOpenChange={setIsAddModalOpen}>
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+            >
+              <DialogContent className="sm:max-w-[800px] w-[90vw] max-h-[90vh] overflow-y-auto">
+                <DialogHeader>
+                  <DialogTitle className="bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">Add New Work Detail</DialogTitle>
+                </DialogHeader>
+                <AddWorkDialog 
+                  onClose={() => setIsAddModalOpen(false)} 
+                  onSave={async (formData) => {
+                    const result = await handleAddNew(formData);
+                    if (result.success) {
+                      setIsAddModalOpen(false);
+                    }
+                    return result; // Return the full result object
+                  }} 
+                />
+              </DialogContent>
+            </motion.div>
+          </Dialog>
+        )}
+      </AnimatePresence>
 
       {/* Add Payment Modal */} 
       <Dialog open={isPaymentModalOpen} onOpenChange={setIsPaymentModalOpen}>

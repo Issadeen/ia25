@@ -16,7 +16,7 @@ import { toast } from "@/components/ui/use-toast"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 // Import all the interfaces from a shared types file
 import type { WorkDetail, TruckPayment, OwnerBalance } from "@/types" 
-import { motion } from 'framer-motion'
+import { motion, AnimatePresence } from 'framer-motion'
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { useSession } from "next-auth/react"
 import { ArrowLeft, Download, Receipt, Wallet2, PlusCircle, X } from 'lucide-react' // Add X icon to imports
@@ -59,6 +59,32 @@ interface Prepayment extends BalanceUsage {
   timestamp: string;
   note?: string;
 }
+
+// Add these animation variants before the component
+const fadeIn = {
+  hidden: { opacity: 0 },
+  visible: { opacity: 1 }
+};
+
+const slideUp = {
+  hidden: { y: 20, opacity: 0 },
+  visible: { y: 0, opacity: 1 }
+};
+
+const staggeredList = {
+  hidden: { opacity: 0 },
+  visible: {
+    opacity: 1,
+    transition: {
+      staggerChildren: 0.1
+    }
+  }
+};
+
+const listItem = {
+  hidden: { x: -20, opacity: 0 },
+  visible: { x: 0, opacity: 1 }
+};
 
 export default function OwnerDetailsPage() {
   const params = useParams()
@@ -603,8 +629,13 @@ export default function OwnerDetailsPage() {
 
   return (
     <div className="min-h-screen">
-      {/* Improved Mobile-First Header */}
-      <header className="fixed top-0 left-0 w-full border-b z-50 bg-gradient-to-r from-emerald-900/10 via-blue-900/10 to-blue-900/10 backdrop-blur-xl">
+      {/* Animate header */}
+      <motion.header
+        initial="hidden"
+        animate="visible"
+        variants={fadeIn}
+        className="fixed top-0 left-0 w-full border-b z-50 bg-gradient-to-r from-emerald-900/10 via-blue-900/10 to-blue-900/10 backdrop-blur-xl"
+      >
         <div className="max-w-7xl mx-auto px-2 sm:px-4 py-2 sm:py-3">
           <div className="flex items-center justify-between">
             {/* Left side */}
@@ -669,468 +700,510 @@ export default function OwnerDetailsPage() {
             </div>
           </div>
         </div>
-      </header>
+      </motion.header>
 
       {/* Update main content container to account for fixed header */}
       <main className="max-w-7xl mx-auto px-2 sm:px-4 pt-16 sm:pt-24 pb-6 sm:pb-8">
         {isLoading ? (
           <LoadingSkeleton />
         ) : (
-          <div className="space-y-4 sm:space-y-6">
-            {/* Export button - Mobile friendly */}
-            <div className="flex justify-end">
+          <motion.div 
+            initial="hidden"
+            animate="visible"
+            variants={staggeredList}
+            className="space-y-4 sm:space-y-6"
+          >
+            {/* Export button */}
+            <motion.div variants={fadeIn} className="flex justify-end">
               <Button variant="outline" onClick={handleDownloadPDF} className="text-xs sm:text-sm">
                 <Download className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
                 Summary PDF
               </Button>
-            </div>
+            </motion.div>
 
-            {/* Mini stats - Update to 4-column grid */}
+            {/* Stats grid */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-4">
-              <Card 
-                className="p-2 sm:p-4 cursor-pointer hover:bg-muted/50 transition-colors"
-                onClick={handleOrderStatsClick}
-              >
-                <div className="text-xs sm:text-sm font-medium text-muted-foreground">
-                  Total Orders
-                  {showPendingOrders && (
-                    <span className="ml-2 text-xs text-emerald-500">●</span>
-                  )}
-                </div>
-                <div className="text-lg sm:text-2xl font-bold">
-                  {workDetails.length}
-                </div>
-              </Card>
-              <Card className="p-2 sm:p-4">
-                <div className="text-xs sm:text-sm font-medium text-muted-foreground">Loaded Trucks</div>
-                <div className="text-lg sm:text-2xl font-bold">
-                  {workDetails.filter(t => t.loaded).length}
-                </div>
-              </Card>
-              <Card className="p-2 sm:p-4">
-                <div className="text-xs sm:text-sm font-medium text-muted-foreground">AGO Orders</div>
-                <div className="text-lg sm:text-2xl font-bold">
-                  {workDetails.filter(t => t.product === 'AGO').length}
-                </div>
-              </Card>
-              <Card className="p-2 sm:p-4">
-                <div className="text-xs sm:text-sm font-medium text-muted-foreground">PMS Orders</div>
-                <div className="text-lg sm:text-2xl font-bold">
-                  {workDetails.filter(t => t.product === 'PMS').length}
-                </div>
-              </Card>
+              {/* Wrap each card in motion.div */}
+              <motion.div variants={slideUp}>
+                <Card 
+                  className="p-2 sm:p-4 cursor-pointer hover:bg-muted/50 transition-colors"
+                  onClick={handleOrderStatsClick}
+                >
+                  <div className="text-xs sm:text-sm font-medium text-muted-foreground">
+                    Total Orders
+                    {showPendingOrders && (
+                      <span className="ml-2 text-xs text-emerald-500">●</span>
+                    )}
+                  </div>
+                  <div className="text-lg sm:text-2xl font-bold">
+                    {workDetails.length}
+                  </div>
+                </Card>
+              </motion.div>
+              <motion.div variants={slideUp}>
+                <Card className="p-2 sm:p-4">
+                  <div className="text-xs sm:text-sm font-medium text-muted-foreground">Loaded Trucks</div>
+                  <div className="text-lg sm:text-2xl font-bold">
+                    {workDetails.filter(t => t.loaded).length}
+                  </div>
+                </Card>
+              </motion.div>
+              <motion.div variants={slideUp}>
+                <Card className="p-2 sm:p-4">
+                  <div className="text-xs sm:text-sm font-medium text-muted-foreground">AGO Orders</div>
+                  <div className="text-lg sm:text-2xl font-bold">
+                    {workDetails.filter(t => t.product === 'AGO').length}
+                  </div>
+                </Card>
+              </motion.div>
+              <motion.div variants={slideUp}>
+                <Card className="p-2 sm:p-4">
+                  <div className="text-xs sm:text-sm font-medium text-muted-foreground">PMS Orders</div>
+                  <div className="text-lg sm:text-2xl font-bold">
+                    {workDetails.filter(t => t.product === 'PMS').length}
+                  </div>
+                </Card>
+              </motion.div>
             </div>
 
-            {/* Add Pending Orders Section */}
-            {showPendingOrders && (
-              <Card className="p-3 sm:p-6 mt-4 border-dashed border-2">
-                <div className="flex justify-between items-center mb-4">
-                  <h2 className="text-lg sm:text-xl font-semibold text-orange-500">
-                    Pending Orders (Admin View)
-                  </h2>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setShowPendingOrders(false)}
-                  >
-                    <X className="h-4 w-4" />
-                  </Button>
+            {/* Animate pending orders section */}
+            <AnimatePresence>
+              {showPendingOrders && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: "auto", opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.3 }}
+                >
+                  <Card className="p-3 sm:p-6 mt-4 border-dashed border-2">
+                    <div className="flex justify-between items-center mb-4">
+                      <h2 className="text-lg sm:text-xl font-semibold text-orange-500">
+                        Pending Orders (Admin View)
+                      </h2>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setShowPendingOrders(false)}
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full">
+                        <thead>
+                          <tr>
+                            <th className="text-left p-2">Date</th>
+                            <th className="text-left p-2">Truck</th>
+                            <th className="text-left p-2">Product</th>
+                            <th className="text-left p-2">Quantity</th>
+                            <th className="text-left p-2">Destination</th>
+                            <th className="text-left p-2">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {workDetails
+                            .filter(detail => !detail.loaded && detail.status === "queued")
+                            .sort((a, b) => new Date(a.createdAt || '').getTime() - new Date(b.createdAt || '').getTime())
+                            .map(detail => (
+                              <tr key={detail.id} className="border-t">
+                                <td className="p-2">
+                                  {new Date(detail.createdAt || '').toLocaleDateString()}
+                                </td>
+                                <td className="p-2">{detail.truck_number}</td>
+                                <td className="p-2">{detail.product}</td>
+                                <td className="p-2">{detail.quantity}</td>
+                                <td className="p-2">{detail.destination}</td>
+                                <td className="p-2">
+                                  <span className="text-orange-500 text-sm">
+                                    ⏳ Pending Loading
+                                  </span>
+                                </td>
+                              </tr>
+                            ))}
+                        </tbody>
+                      </table>
+                      {workDetails.filter(detail => !detail.loaded && detail.status === "queued").length === 0 && (
+                        <p className="text-center text-muted-foreground py-4">
+                          No pending orders
+                        </p>
+                      )}
+                    </div>
+                  </Card>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* Financial Summary */}
+            <motion.div variants={slideUp}>
+              <Card className="p-3 sm:p-6">
+                <h2 className="text-lg sm:text-xl font-semibold mb-3 sm:mb-4">Financial Summary</h2>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-4">
+                  {(() => {
+                    const totals = calculateTotals();
+                    return (
+                      <>
+                        <div className="p-2 sm:p-4 rounded-lg border">
+                          <div className="text-xs sm:text-sm font-medium text-muted-foreground">Total Due</div>
+                          <div className="text-lg sm:text-2xl font-bold">${formatNumber(totals.totalDue)}</div>
+                        </div>
+                        <div className="p-2 sm:p-4 rounded-lg border">
+                          <div className="text-xs sm:text-sm font-medium text-muted-foreground">Total Paid</div>
+                          <div className="text-lg sm:text-2xl font-bold">${formatNumber(totals.totalPaid)}</div>
+                        </div>
+                        <div className="p-2 sm:p-4 rounded-lg border">
+                          <div className="text-xs sm:text-sm font-medium text-muted-foreground">Balance</div>
+                          <div className={`text-lg sm:text-2xl font-bold ${totals.balance < 0 ? 'text-green-600' : 'text-red-600'}`}>
+                            ${formatNumber(Math.abs(totals.balance))}
+                            {totals.pendingTotal > 0 && (
+                              <div className="text-xs sm:text-sm text-orange-500">
+                                Includes ${formatNumber(totals.pendingTotal)} pending
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                        <div className="p-2 sm:p-4 rounded-lg border">
+                          <div className="text-xs sm:text-sm font-medium text-muted-foreground">Available Balance</div>
+                          <div className="text-lg sm:text-2xl font-bold text-green-600">
+                            ${formatNumber(totals.existingBalance)}
+                          </div>
+                        </div>
+                      </>
+                    );
+                  })()}
                 </div>
+              </Card>
+            </motion.div>
+
+            {/* Loaded Trucks Table */}
+            <motion.div variants={slideUp}>
+              <Card className="p-3 sm:p-6">
+                <h2 className="text-lg sm:text-xl font-semibold mb-3 sm:mb-4">Loaded Trucks</h2>
+                <div className="overflow-x-auto -mx-3 sm:mx-0">
+                  <div className="min-w-[800px] sm:min-w-0"> {/* Force minimum width on mobile */}
+                    <table className="w-full">
+                      <thead>
+                        <tr>
+                          <th className="text-left p-2">Truck</th>
+                          <th className="text-left p-2">Product</th>
+                          <th className="text-left p-2">At20</th>
+                          <th className="text-left p-2">Price</th>
+                          <th className="text-left p-2">Total Due</th>
+                          <th className="text-left p-2">Paid</th>
+                          <th className="text-left p-2">Balance</th>
+                          <th className="text-left p-2">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {workDetails.filter(truck => truck.loaded).map(truck => {
+                          const { totalDue, totalAllocated, balance, pendingAmount } = getTruckAllocations(truck);
+                          return (
+                            <tr key={truck.id} className="border-t">
+                              <td className="p-2">{truck.truck_number}</td>
+                              <td className="p-2">{truck.product}</td>
+                              <td className="p-2">{truck.at20 || '-'}</td>
+                              <td className="p-2">${formatNumber(parseFloat(truck.price))}</td>
+                              <td className="p-2">${formatNumber(totalDue)}</td>
+                              <td className="p-2">${formatNumber(totalAllocated)}</td>
+                              <td className="p-2">${formatNumber(Math.abs(balance))}</td>
+                              <td className="p-2">
+                                {balance <= 0 ? (
+                                  <span className="text-green-600">Paid</span>
+                                ) : truck.paymentPending ? (
+                                  <span className="text-orange-500">Pending</span>
+                                ) : (
+                                  <span className="text-red-600">Due</span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </Card>
+            </motion.div>
+
+            {/* Payment History */}
+            <motion.div variants={slideUp}>
+              <Card className="p-3 sm:p-6">
+                <h2 className="text-lg sm:text-xl font-semibold mb-3 sm:mb-4">Payment History</h2>
+                <div className="space-y-2 sm:space-y-0">
+                  {ownerPayments.map((payment) => (
+                    <div key={payment.id} className="block sm:hidden border-b pb-2">
+                      <div className="flex justify-between">
+                        <div className="font-medium">${formatNumber(payment.amount)}</div>
+                        <div className="text-sm text-muted-foreground">
+                          {new Date(payment.timestamp).toLocaleDateString()}
+                        </div>
+                      </div>
+                      {payment.allocatedTrucks?.map((allocation: any) => {
+                        const truck = workDetails.find(t => t.id === allocation.truckId);
+                        return truck ? (
+                          <div key={allocation.truckId} className="text-xs text-muted-foreground">
+                            {truck.truck_number} (${formatNumber(allocation.amount)})
+                          </div>
+                        ) : null;
+                      })}
+                      {payment.note && (
+                        <div className="text-xs italic mt-1">{payment.note}</div>
+                      )}
+                    </div>
+                  ))}
+                  <div className="hidden sm:block overflow-x-auto">
+                    <table className="min-w-full text-sm">
+                      <thead>
+                        <tr>
+                          <th className="p-2 text-left">ID</th>
+                          <th className="p-2 text-left">Amount</th>
+                          <th className="p-2 text-left">Date</th>
+                          <th className="p-2 text-left">Allocated Trucks</th>
+                          <th className="p-2 text-left">Note</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {ownerPayments.map((payment) => (
+                          <tr key={payment.id} className="border-t">
+                            <td className="p-2">{payment.id}</td>
+                            <td className="p-2">${formatNumber(payment.amount)}</td>
+                            <td className="p-2">{new Date(payment.timestamp).toLocaleString()}</td>
+                            <td className="p-2">
+                              {payment.allocatedTrucks?.map((allocation: any) => {
+                                const truck = workDetails.find(t => t.id === allocation.truckId);
+                                return truck ? (
+                                  <div key={allocation.truckId} className="text-xs">
+                                    {truck.truck_number} (${formatNumber(allocation.amount)})
+                                  </div>
+                                ) : null;
+                              })}
+                            </td>
+                            <td className="p-2 whitespace-nowrap">{payment.note || '—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </Card>
+            </motion.div>
+
+            {/* Balance History */}
+            <motion.div variants={slideUp}>
+              <Card className="p-6 mt-4">
+                <h2 className="text-xl font-semibold mb-4">Balance History</h2>
                 <div className="overflow-x-auto">
                   <table className="w-full">
                     <thead>
                       <tr>
                         <th className="text-left p-2">Date</th>
-                        <th className="text-left p-2">Truck</th>
-                        <th className="text-left p-2">Product</th>
-                        <th className="text-left p-2">Quantity</th>
-                        <th className="text-left p-2">Destination</th>
-                        <th className="text-left p-2">Status</th>
+                        <th className="text-left p-2">Amount</th>
+                        <th className="text-left p-2">Type</th>
+                        <th className="text-left p-2">Note</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {workDetails
-                        .filter(detail => !detail.loaded && detail.status === "queued")
-                        .sort((a, b) => new Date(a.createdAt || '').getTime() - new Date(b.createdAt || '').getTime())
-                        .map(detail => (
-                          <tr key={detail.id} className="border-t">
-                            <td className="p-2">
-                              {new Date(detail.createdAt || '').toLocaleDateString()}
-                            </td>
-                            <td className="p-2">{detail.truck_number}</td>
-                            <td className="p-2">{detail.product}</td>
-                            <td className="p-2">{detail.quantity}</td>
-                            <td className="p-2">{detail.destination}</td>
-                            <td className="p-2">
-                              <span className="text-orange-500 text-sm">
-                                ⏳ Pending Loading
-                              </span>
-                            </td>
-                          </tr>
-                        ))}
-                    </tbody>
-                  </table>
-                  {workDetails.filter(detail => !detail.loaded && detail.status === "queued").length === 0 && (
-                    <p className="text-center text-muted-foreground py-4">
-                      No pending orders
-                    </p>
-                  )}
-                </div>
-              </Card>
-            )}
-
-            {/* Financial Summary - Mobile responsive */}
-            <Card className="p-3 sm:p-6">
-              <h2 className="text-lg sm:text-xl font-semibold mb-3 sm:mb-4">Financial Summary</h2>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-4">
-                {(() => {
-                  const totals = calculateTotals();
-                  return (
-                    <>
-                      <div className="p-2 sm:p-4 rounded-lg border">
-                        <div className="text-xs sm:text-sm font-medium text-muted-foreground">Total Due</div>
-                        <div className="text-lg sm:text-2xl font-bold">${formatNumber(totals.totalDue)}</div>
-                      </div>
-                      <div className="p-2 sm:p-4 rounded-lg border">
-                        <div className="text-xs sm:text-sm font-medium text-muted-foreground">Total Paid</div>
-                        <div className="text-lg sm:text-2xl font-bold">${formatNumber(totals.totalPaid)}</div>
-                      </div>
-                      <div className="p-2 sm:p-4 rounded-lg border">
-                        <div className="text-xs sm:text-sm font-medium text-muted-foreground">Balance</div>
-                        <div className={`text-lg sm:text-2xl font-bold ${totals.balance < 0 ? 'text-green-600' : 'text-red-600'}`}>
-                          ${formatNumber(Math.abs(totals.balance))}
-                          {totals.pendingTotal > 0 && (
-                            <div className="text-xs sm:text-sm text-orange-500">
-                              Includes ${formatNumber(totals.pendingTotal)} pending
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                      <div className="p-2 sm:p-4 rounded-lg border">
-                        <div className="text-xs sm:text-sm font-medium text-muted-foreground">Available Balance</div>
-                        <div className="text-lg sm:text-2xl font-bold text-green-600">
-                          ${formatNumber(totals.existingBalance)}
-                        </div>
-                      </div>
-                    </>
-                  );
-                })()}
-              </div>
-            </Card>
-
-            {/* Loaded Trucks - Horizontal scroll on mobile */}
-            <Card className="p-3 sm:p-6">
-              <h2 className="text-lg sm:text-xl font-semibold mb-3 sm:mb-4">Loaded Trucks</h2>
-              <div className="overflow-x-auto -mx-3 sm:mx-0">
-                <div className="min-w-[800px] sm:min-w-0"> {/* Force minimum width on mobile */}
-                  <table className="w-full">
-                    <thead>
-                      <tr>
-                        <th className="text-left p-2">Truck</th>
-                        <th className="text-left p-2">Product</th>
-                        <th className="text-left p-2">At20</th>
-                        <th className="text-left p-2">Price</th>
-                        <th className="text-left p-2">Total Due</th>
-                        <th className="text-left p-2">Paid</th>
-                        <th className="text-left p-2">Balance</th>
-                        <th className="text-left p-2">Status</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {workDetails.filter(truck => truck.loaded).map(truck => {
-                        const { totalDue, totalAllocated, balance, pendingAmount } = getTruckAllocations(truck);
-                        return (
-                          <tr key={truck.id} className="border-t">
-                            <td className="p-2">{truck.truck_number}</td>
-                            <td className="p-2">{truck.product}</td>
-                            <td className="p-2">{truck.at20 || '-'}</td>
-                            <td className="p-2">${formatNumber(parseFloat(truck.price))}</td>
-                            <td className="p-2">${formatNumber(totalDue)}</td>
-                            <td className="p-2">${formatNumber(totalAllocated)}</td>
-                            <td className="p-2">${formatNumber(Math.abs(balance))}</td>
-                            <td className="p-2">
-                              {balance <= 0 ? (
-                                <span className="text-green-600">Paid</span>
-                              ) : truck.paymentPending ? (
-                                <span className="text-orange-500">Pending</span>
-                              ) : (
-                                <span className="text-red-600">Due</span>
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </Card>
-
-            {/* Payment History - Stack on mobile */}
-            <Card className="p-3 sm:p-6">
-              <h2 className="text-lg sm:text-xl font-semibold mb-3 sm:mb-4">Payment History</h2>
-              <div className="space-y-2 sm:space-y-0">
-                {ownerPayments.map((payment) => (
-                  <div key={payment.id} className="block sm:hidden border-b pb-2">
-                    <div className="flex justify-between">
-                      <div className="font-medium">${formatNumber(payment.amount)}</div>
-                      <div className="text-sm text-muted-foreground">
-                        {new Date(payment.timestamp).toLocaleDateString()}
-                      </div>
-                    </div>
-                    {payment.allocatedTrucks?.map((allocation: any) => {
-                      const truck = workDetails.find(t => t.id === allocation.truckId);
-                      return truck ? (
-                        <div key={allocation.truckId} className="text-xs text-muted-foreground">
-                          {truck.truck_number} (${formatNumber(allocation.amount)})
-                        </div>
-                      ) : null;
-                    })}
-                    {payment.note && (
-                      <div className="text-xs italic mt-1">{payment.note}</div>
-                    )}
-                  </div>
-                ))}
-                <div className="hidden sm:block overflow-x-auto">
-                  <table className="min-w-full text-sm">
-                    <thead>
-                      <tr>
-                        <th className="p-2 text-left">ID</th>
-                        <th className="p-2 text-left">Amount</th>
-                        <th className="p-2 text-left">Date</th>
-                        <th className="p-2 text-left">Allocated Trucks</th>
-                        <th className="p-2 text-left">Note</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {ownerPayments.map((payment) => (
-                        <tr key={payment.id} className="border-t">
-                          <td className="p-2">{payment.id}</td>
-                          <td className="p-2">${formatNumber(payment.amount)}</td>
-                          <td className="p-2">{new Date(payment.timestamp).toLocaleString()}</td>
+                      {balanceUsageHistory.map((entry) => (
+                        <tr key={entry.timestamp} className="border-t">
                           <td className="p-2">
-                            {payment.allocatedTrucks?.map((allocation: any) => {
-                              const truck = workDetails.find(t => t.id === allocation.truckId);
-                              return truck ? (
-                                <div key={allocation.truckId} className="text-xs">
-                                  {truck.truck_number} (${formatNumber(allocation.amount)})
-                                </div>
-                              ) : null;
-                            })}
+                            {new Date(entry.timestamp).toLocaleDateString()}
                           </td>
-                          <td className="p-2 whitespace-nowrap">{payment.note || '—'}</td>
+                          <td className="p-2">
+                            <span className={entry.type === 'deposit' ? 'text-green-600' : 'text-red-600'}>
+                              {entry.type === 'deposit' ? '+' : '-'}${formatNumber(entry.amount)}
+                            </span>
+                          </td>
+                          <td className="p-2">{entry.type}</td>
+                          <td className="p-2">{entry.note || '—'}</td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
-              </div>
-            </Card>
-
-            {/* Balance History */}
-            <Card className="p-6 mt-4">
-              <h2 className="text-xl font-semibold mb-4">Balance History</h2>
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead>
-                    <tr>
-                      <th className="text-left p-2">Date</th>
-                      <th className="text-left p-2">Amount</th>
-                      <th className="text-left p-2">Type</th>
-                      <th className="text-left p-2">Note</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {balanceUsageHistory.map((entry) => (
-                      <tr key={entry.timestamp} className="border-t">
-                        <td className="p-2">
-                          {new Date(entry.timestamp).toLocaleDateString()}
-                        </td>
-                        <td className="p-2">
-                          <span className={entry.type === 'deposit' ? 'text-green-600' : 'text-red-600'}>
-                            {entry.type === 'deposit' ? '+' : '-'}${formatNumber(entry.amount)}
-                          </span>
-                        </td>
-                        <td className="p-2">{entry.type}</td>
-                        <td className="p-2">{entry.note || '—'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </Card>
-          </div>
+              </Card>
+            </motion.div>
+          </motion.div>
         )}
 
-        {/* Payment Modal - Mobile optimized */}
-        <Dialog open={isPaymentModalOpen} onOpenChange={setIsPaymentModalOpen}>
-          <DialogContent className="w-[95vw] sm:max-w-[800px] h-[90vh] sm:h-auto overflow-y-auto p-3 sm:p-6">
-            <DialogHeader>
-              <DialogTitle className="text-xl font-semibold">
-                Add Payment for {owner}
-              </DialogTitle>
-            </DialogHeader>
+        {/* Animate dialogs */}
+        <AnimatePresence>
+          {isPaymentModalOpen && (
+            <Dialog open={isPaymentModalOpen} onOpenChange={setIsPaymentModalOpen}>
+              <motion.div
+                initial={{ scale: 0.95, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.95, opacity: 0 }}
+                transition={{ duration: 0.2 }}
+              >
+                <DialogContent className="w-[95vw] sm:max-w-[800px] h-[90vh] sm:h-auto overflow-y-auto p-3 sm:p-6">
+                  <DialogHeader>
+                    <DialogTitle className="text-xl font-semibold">
+                      Add Payment for {owner}
+                    </DialogTitle>
+                  </DialogHeader>
 
-            <form onSubmit={handlePaymentSubmit} className="space-y-4 sm:space-y-6">
-              {/* Balance Section */}
-              {ownerBalance && ownerBalance.amount > 0 && (
-                <Card className="p-4 bg-muted/50">
-                  <div className="flex items-center gap-4">
-                    <Checkbox
-                      id="useBalance"
-                      checked={paymentFormData.useExistingBalance}
-                      onCheckedChange={handleBalanceUseChange}
-                    />
-                    <div className="flex-1">
-                      <Label htmlFor="useBalance" className="font-medium">
-                        Use available balance
-                      </Label>
-                      <p className="text-sm text-emerald-600">
-                        ${formatNumber(ownerBalance.amount)} available
-                      </p>
-                    </div>
-                  </div>
-                </Card>
-              )}
-
-              {/* Amount Input */}
-              <div className="space-y-2">
-                <Label htmlFor="paymentAmount" className="text-base font-medium">
-                  Payment Amount {paymentFormData.useExistingBalance && '(Including Balance)'}
-                </Label>
-                <div className="flex gap-4 items-center">
-                  <div className="flex-1">
-                    <Input
-                      id="paymentAmount"
-                      type="number"
-                      step="0.01"
-                      value={paymentFormData.amount}
-                      onChange={(e) => setPaymentFormData(prev => ({
-                        ...prev,
-                        amount: parseFloat(e.target.value) || 0,
-                        allocatedTrucks: []
-                      }))}
-                      className="text-lg"
-                      placeholder="Enter amount"
-                    />
-                  </div>
-                  {paymentFormData.useExistingBalance && (
-                    <div className="text-sm text-muted-foreground whitespace-nowrap">
-                      New Payment: ${formatNumber(paymentFormData.amount - paymentFormData.balanceToUse)}
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Truck Allocation Section */}
-              <div className="space-y-4">
-                <div className="flex justify-between items-center">
-                  <Label className="text-base font-medium">Allocate to Trucks</Label>
-                  <div className="flex items-center gap-4">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => {
-                        const totalAvailable = getTotalAvailable();
-                        const allocations = calculateOptimalAllocation(
-                          totalAvailable, // Pass the total available amount
-                          workDetails.filter(t => t.loaded),
-                          truckPayments
-                        );
-                        setPaymentFormData(prev => ({ ...prev, allocatedTrucks: allocations }));
-                      }}
-                    >
-                      Auto Allocate
-                    </Button>
-                  </div>
-                </div>
-
-                <Card className="p-4">
-                  <div className="text-sm grid grid-cols-3 gap-2">
-                    <div>Available: ${formatNumber(getTotalAvailable())}</div>
-                    <div>Allocated: ${formatNumber(
-                      paymentFormData.allocatedTrucks.reduce((sum, t) => sum + t.amount, 0)
-                    )}</div>
-                    <div className={cn(
-                      "font-medium",
-                      calculateRemainingAmount(getTotalAvailable(), paymentFormData.allocatedTrucks) > 0 
-                        ? "text-orange-500" 
-                        : "text-emerald-600"
-                    )}>
-                      Remaining: ${formatNumber(calculateRemainingAmount(
-                        getTotalAvailable(),
-                        paymentFormData.allocatedTrucks
-                      ))}
-                    </div>
-                  </div>
-                </Card>
-
-                <div className="space-y-2 max-h-[400px] overflow-y-auto rounded-lg border bg-card p-4">
-                  {workDetails
-                    .filter((t) => t.loaded && getTruckAllocations(t).balance > 0)
-                    .map((truck) => {
-                      const truckAllocation = getTruckAllocations(truck);
-                      return (
-                        <div key={truck.id} 
-                          className="flex items-center gap-4 p-3 border rounded-lg hover:bg-muted/50 transition-colors">
+                  <form onSubmit={handlePaymentSubmit} className="space-y-4 sm:space-y-6">
+                    {/* Balance Section */}
+                    {ownerBalance && ownerBalance.amount > 0 && (
+                      <Card className="p-4 bg-muted/50">
+                        <div className="flex items-center gap-4">
                           <Checkbox
-                            checked={!!paymentFormData.allocatedTrucks.find(
-                              (a) => a.truckId === truck.id
-                            )}
-                            onCheckedChange={(checked) => handleTruckSelection(!!checked, truck)}
+                            id="useBalance"
+                            checked={paymentFormData.useExistingBalance}
+                            onCheckedChange={handleBalanceUseChange}
                           />
                           <div className="flex-1">
-                            <div className="font-medium">{truck.truck_number}</div>
-                            <div className="text-sm text-muted-foreground">
-                              Balance: ${formatNumber(truckAllocation.balance)}
-                            </div>
+                            <Label htmlFor="useBalance" className="font-medium">
+                              Use available balance
+                            </Label>
+                            <p className="text-sm text-emerald-600">
+                              ${formatNumber(ownerBalance.amount)} available
+                            </p>
                           </div>
+                        </div>
+                      </Card>
+                    )}
+
+                    {/* Amount Input */}
+                    <div className="space-y-2">
+                      <Label htmlFor="paymentAmount" className="text-base font-medium">
+                        Payment Amount {paymentFormData.useExistingBalance && '(Including Balance)'}
+                      </Label>
+                      <div className="flex gap-4 items-center">
+                        <div className="flex-1">
                           <Input
+                            id="paymentAmount"
                             type="number"
                             step="0.01"
-                            min="0"
-                            value={paymentFormData.allocatedTrucks.find(
-                              (a) => a.truckId === truck.id
-                            )?.amount || ''}
-                            onChange={(e) => handleAllocationChange(e, truck.id)}
-                            className="w-32"
+                            value={paymentFormData.amount}
+                            onChange={(e) => setPaymentFormData(prev => ({
+                              ...prev,
+                              amount: parseFloat(e.target.value) || 0,
+                              allocatedTrucks: []
+                            }))}
+                            className="text-lg"
+                            placeholder="Enter amount"
                           />
                         </div>
-                      );
-                    })}
-                </div>
-              </div>
+                        {paymentFormData.useExistingBalance && (
+                          <div className="text-sm text-muted-foreground whitespace-nowrap">
+                            New Payment: ${formatNumber(paymentFormData.amount - paymentFormData.balanceToUse)}
+                          </div>
+                        )}
+                      </div>
+                    </div>
 
-              {/* Note Input */}
-              <div className="space-y-2">
-                <Label htmlFor="note" className="text-base font-medium">Note</Label>
-                <Input
-                  id="note"
-                  value={paymentFormData.note}
-                  onChange={(e) => setPaymentFormData(prev => ({ ...prev, note: e.target.value }))}
-                  placeholder="Add a note for this payment"
-                />
-              </div>
+                    {/* Truck Allocation Section */}
+                    <div className="space-y-4">
+                      <div className="flex justify-between items-center">
+                        <Label className="text-base font-medium">Allocate to Trucks</Label>
+                        <div className="flex items-center gap-4">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => {
+                              const totalAvailable = getTotalAvailable();
+                              const allocations = calculateOptimalAllocation(
+                                totalAvailable, // Pass the total available amount
+                                workDetails.filter(t => t.loaded),
+                                truckPayments
+                              );
+                              setPaymentFormData(prev => ({ ...prev, allocatedTrucks: allocations }));
+                            }}
+                          >
+                            Auto Allocate
+                          </Button>
+                        </div>
+                      </div>
 
-              {/* Action Buttons */}
-              <div className="flex justify-end gap-2 pt-4">
-                <Button type="button" variant="outline" onClick={() => setIsPaymentModalOpen(false)}>
-                  Cancel
-                </Button>
-                <Button
-                  type="submit"
-                  disabled={
-                    paymentFormData.amount <= 0 ||
-                    paymentFormData.allocatedTrucks.length === 0 ||
-                    calculateRemainingAmount(paymentFormData.amount, paymentFormData.allocatedTrucks) === paymentFormData.amount
-                  }
-                >
-                  Save Payment
-                </Button>
-              </div>
-            </form>
-          </DialogContent>
-        </Dialog>
+                      <Card className="p-4">
+                        <div className="text-sm grid grid-cols-3 gap-2">
+                          <div>Available: ${formatNumber(getTotalAvailable())}</div>
+                          <div>Allocated: ${formatNumber(
+                            paymentFormData.allocatedTrucks.reduce((sum, t) => sum + t.amount, 0)
+                          )}</div>
+                          <div className={cn(
+                            "font-medium",
+                            calculateRemainingAmount(getTotalAvailable(), paymentFormData.allocatedTrucks) > 0 
+                              ? "text-orange-500" 
+                              : "text-emerald-600"
+                          )}>
+                            Remaining: ${formatNumber(calculateRemainingAmount(
+                              getTotalAvailable(),
+                              paymentFormData.allocatedTrucks
+                            ))}
+                          </div>
+                        </div>
+                      </Card>
+
+                      <div className="space-y-2 max-h-[400px] overflow-y-auto rounded-lg border bg-card p-4">
+                        {workDetails
+                          .filter((t) => t.loaded && getTruckAllocations(t).balance > 0)
+                          .map((truck) => {
+                            const truckAllocation = getTruckAllocations(truck);
+                            return (
+                              <div key={truck.id} 
+                                className="flex items-center gap-4 p-3 border rounded-lg hover:bg-muted/50 transition-colors">
+                                <Checkbox
+                                  checked={!!paymentFormData.allocatedTrucks.find(
+                                    (a) => a.truckId === truck.id
+                                  )}
+                                  onCheckedChange={(checked) => handleTruckSelection(!!checked, truck)}
+                                />
+                                <div className="flex-1">
+                                  <div className="font-medium">{truck.truck_number}</div>
+                                  <div className="text-sm text-muted-foreground">
+                                    Balance: ${formatNumber(truckAllocation.balance)}
+                                  </div>
+                                </div>
+                                <Input
+                                  type="number"
+                                  step="0.01"
+                                  min="0"
+                                  value={paymentFormData.allocatedTrucks.find(
+                                    (a) => a.truckId === truck.id
+                                  )?.amount || ''}
+                                  onChange={(e) => handleAllocationChange(e, truck.id)}
+                                  className="w-32"
+                                />
+                              </div>
+                            );
+                          })}
+                      </div>
+                    </div>
+
+                    {/* Note Input */}
+                    <div className="space-y-2">
+                      <Label htmlFor="note" className="text-base font-medium">Note</Label>
+                      <Input
+                        id="note"
+                        value={paymentFormData.note}
+                        onChange={(e) => setPaymentFormData(prev => ({ ...prev, note: e.target.value }))}
+                        placeholder="Add a note for this payment"
+                      />
+                    </div>
+
+                    {/* Action Buttons */}
+                    <div className="flex justify-end gap-2 pt-4">
+                      <Button type="button" variant="outline" onClick={() => setIsPaymentModalOpen(false)}>
+                        Cancel
+                      </Button>
+                      <Button
+                        type="submit"
+                        disabled={
+                          paymentFormData.amount <= 0 ||
+                          paymentFormData.allocatedTrucks.length === 0 ||
+                          calculateRemainingAmount(paymentFormData.amount, paymentFormData.allocatedTrucks) === paymentFormData.amount
+                        }
+                      >
+                        Save Payment
+                      </Button>
+                    </div>
+                  </form>
+                </DialogContent>
+              </motion.div>
+            </Dialog>
+          )}
+        </AnimatePresence>
         <OwnerBalanceDialog 
           owner={owner}
           open={isBalanceDialogOpen}
@@ -1139,41 +1212,52 @@ export default function OwnerDetailsPage() {
           onBalanceUpdate={fetchOwnerBalances}
         />
         {/* Add the balance edit dialog */}
-        <Dialog open={isBalanceEditMode} onOpenChange={setIsBalanceEditMode}>
-          <DialogContent className="sm:max-w-[425px]">
-            <DialogHeader>
-              <DialogTitle className="text-xl font-semibold text-red-500">
-                ⚠️ Manual Balance Adjustment
-              </DialogTitle>
-            </DialogHeader>
-            <div className="space-y-4 py-4">
-              <div className="space-y-2">
-                <Label>Current Balance</Label>
-                <Input
-                  type="number"
-                  step="0.01"
-                  value={manualBalance}
-                  onChange={(e) => setManualBalance(e.target.value)}
-                  placeholder="Enter new balance amount"
-                />
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Warning: This is a manual override. Use only when necessary.
-              </p>
-            </div>
-            <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={() => setIsBalanceEditMode(false)}>
-                Cancel
-              </Button>
-              <Button 
-                variant="destructive" 
-                onClick={handleManualBalanceUpdate}
+        <AnimatePresence>
+          {isBalanceEditMode && (
+            <Dialog open={isBalanceEditMode} onOpenChange={setIsBalanceEditMode}>
+              <motion.div
+                initial={{ scale: 0.95, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.95, opacity: 0 }}
+                transition={{ duration: 0.2 }}
               >
-                Update Balance
-              </Button>
-            </div>
-          </DialogContent>
-        </Dialog>
+                <DialogContent className="sm:max-w-[425px]">
+                  <DialogHeader>
+                    <DialogTitle className="text-xl font-semibold text-red-500">
+                      ⚠️ Manual Balance Adjustment
+                    </DialogTitle>
+                  </DialogHeader>
+                  <div className="space-y-4 py-4">
+                    <div className="space-y-2">
+                      <Label>Current Balance</Label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        value={manualBalance}
+                        onChange={(e) => setManualBalance(e.target.value)}
+                        placeholder="Enter new balance amount"
+                      />
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Warning: This is a manual override. Use only when necessary.
+                    </p>
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <Button variant="outline" onClick={() => setIsBalanceEditMode(false)}>
+                      Cancel
+                    </Button>
+                    <Button 
+                      variant="destructive" 
+                      onClick={handleManualBalanceUpdate}
+                    >
+                      Update Balance
+                    </Button>
+                  </div>
+                </DialogContent>
+              </motion.div>
+            </Dialog>
+          )}
+        </AnimatePresence>
       </main>
     </div>
   );
