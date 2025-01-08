@@ -23,6 +23,12 @@ import { Button } from "@/components/ui/button";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import Link from "next/link";
 import { WorkCard } from "@/components/dashboard/WorkCard";
+import { 
+  getTruckAllocations, 
+  calculateOptimalAllocation, 
+  validatePaymentForm,
+  updatePaymentStatuses 
+} from "@/lib/payment-utils";
 
 export default function WorkPage() {
   const { theme, setTheme } = useTheme();

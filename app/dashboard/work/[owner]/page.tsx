@@ -19,12 +19,19 @@ import type { WorkDetail, TruckPayment, OwnerBalance } from "@/types"
 import { motion, AnimatePresence } from 'framer-motion'
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { useSession } from "next-auth/react"
-import { ArrowLeft, Download, Receipt, Wallet2, PlusCircle, X } from 'lucide-react' // Add X icon to imports
+import { ArrowLeft, Download, Receipt, Wallet2, PlusCircle, X, FileSpreadsheet } from 'lucide-react' // Add X and FileSpreadsheet icon to imports
 import { ThemeToggle } from "@/components/ui/molecules/theme-toggle" // Add ThemeToggle import
 import { Skeleton } from "@/components/ui/skeleton"
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import { OwnerBalanceDialog } from "@/components/ui/molecules/owner-balance-dialog" // Add OwnerBalanceDialog import
+import * as XLSX from 'xlsx'; // Add XLSX import
+import { 
+  getTruckAllocations, 
+  calculateOptimalAllocation, 
+  validatePaymentForm,
+  updatePaymentStatuses 
+} from "@/lib/payment-utils";
 
 // Add interfaces at the top
 interface TruckAllocation {
@@ -213,32 +220,12 @@ export default function OwnerDetailsPage() {
     fetchImageUrl()
   }, [session?.user])
 
-  // Implement getTruckAllocations with proper typing
-  const getTruckAllocations = (truck: WorkDetail): TruckAllocation => {
-    const payments = truckPayments[truck.id] ? Object.values(truckPayments[truck.id]) : [];
-    const totalAllocated = toFixed2(payments.reduce((sum, p) => sum + p.amount, 0));
-    
-    const totalDue = truck.at20 
-      ? toFixed2(parseFloat(truck.price) * parseFloat(truck.at20))
-      : 0;
-    
-    const balance = toFixed2(totalDue - totalAllocated);
-    const pendingAmount = (balance > 0 && truck.paymentPending) ? balance : 0;
-    
-    return {
-      totalAllocated,
-      totalDue,
-      balance,
-      pendingAmount
-    };
-  };
-
   // Update calculateTotals with proper typing
   const calculateTotals = (): OwnerTotals => {
     const loadedTrucks = workDetails.filter(truck => truck.loaded);
     
     const totals = loadedTrucks.reduce((sum, truck) => {
-      const { totalDue, totalAllocated, pendingAmount } = getTruckAllocations(truck);
+      const { totalDue, totalAllocated, pendingAmount } = getTruckAllocations(truck, truckPayments);
       return {
         totalDue: sum.totalDue + totalDue,
         totalPaid: sum.totalPaid + totalAllocated,
@@ -281,52 +268,90 @@ export default function OwnerDetailsPage() {
         paymentFormData.allocatedTrucks.reduce((sum, t) => sum + t.amount, 0)
       );
   
-      // Calculate how much of the balance is actually being used
-      const balanceUsed = paymentFormData.useExistingBalance
-        ? Math.min(
-            totalAllocation, // Don't use more balance than needed
-            ownerBalance?.amount || 0, // Don't use more than available
-            paymentFormData.balanceToUse // Don't use more than selected
-          )
-        : 0;
+      // Validate using shared utility
+      if (!validatePaymentForm(getTotalAvailable(), paymentFormData.allocatedTrucks)) {
+        throw new Error("Invalid payment allocation");
+      }
   
-      // Create payment record if there's a new payment amount
-      if (paymentFormData.amount > 0) {
+      // Handle balance usage
+      let remainingAmount = paymentFormData.amount;
+      if (paymentFormData.useExistingBalance) {
+        const balanceToUse = Math.min(
+          paymentFormData.balanceToUse,
+          ownerBalance?.amount || 0,
+          totalAllocation
+        );
+  
+        if (balanceToUse > 0) {
+          // Record balance usage
+          const balanceUsageRef = push(ref(database, `balance_usage/${owner}`));
+          updates[`balance_usage/${owner}/${balanceUsageRef.key}`] = {
+            amount: balanceToUse,
+            timestamp,
+            usedFor: paymentFormData.allocatedTrucks.map(t => t.truckId),
+            paymentId: paymentKey,
+            type: 'usage',
+            note: `Used for payment ${paymentKey}`
+          };
+  
+          // Update owner balance
+          const newBalance = toFixed2((ownerBalance?.amount || 0) - balanceToUse);
+          updates[`owner_balances/${owner}`] = {
+            amount: newBalance,
+            lastUpdated: timestamp
+          };
+  
+          remainingAmount = toFixed2(remainingAmount - balanceToUse);
+        }
+      }
+  
+      // Record the new payment if there's a new cash payment
+      if (remainingAmount > 0) {
         updates[`payments/${owner}/${paymentKey}`] = {
-          amount: paymentFormData.amount,
+          amount: remainingAmount,
           timestamp,
           allocatedTrucks: paymentFormData.allocatedTrucks,
+          note: paymentFormData.note,
+          type: 'cash_payment'
+        };
+      }
+  
+      // Update truck payments using shared logic
+      for (const allocation of paymentFormData.allocatedTrucks) {
+        const truckPaymentRef = push(ref(database, `truckPayments/${allocation.truckId}`));
+        updates[`truckPayments/${allocation.truckId}/${truckPaymentRef.key}`] = {
+          amount: allocation.amount,
+          timestamp,
+          paymentId: paymentKey,
           note: paymentFormData.note
         };
+  
+        const truck = workDetails.find(t => t.id === allocation.truckId);
+        if (truck) {
+          await updatePaymentStatuses(updates, truck, allocation, truckPayments);
+        }
       }
   
-      // Handle balance usage - only subtract what was actually used
-      if (paymentFormData.useExistingBalance && balanceUsed > 0) {
-        const balanceUsageRef = push(ref(database, `balance_usage/${owner}`));
-        updates[`balance_usage/${owner}/${balanceUsageRef.key}`] = {
-          amount: balanceUsed, // Record actual amount used
-          timestamp,
-          usedFor: paymentFormData.allocatedTrucks.map(t => t.truckId),
-          paymentId: paymentKey,
-          type: 'usage'
-        };
-  
-        // Update owner balance with actual amount used
-        const currentBalance = ownerBalance?.amount || 0;
-        updates[`owner_balances/${owner}`] = {
-          amount: toFixed2(currentBalance - balanceUsed),
-          lastUpdated: timestamp
-        };
-      }
-  
-      // Rest of the payment processing remains the same
-      // ...existing code for processing truck payments...
-  
+      // Commit all updates
       await update(ref(database), updates);
-      // ...existing success handling...
+  
+      // Show success message
+      toast({
+        title: "Payment Added",
+        description: `Successfully processed payment of $${formatNumber(totalAllocation)}`,
+      });
+  
+      // Close modal and refresh data
+      setIsPaymentModalOpen(false);
+      await fetchOwnerBalances();
   
     } catch (error) {
-      // ...existing error handling...
+      console.error('Payment error:', error);
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to process payment",
+        variant: "destructive"
+      });
     }
   };
   
@@ -357,7 +382,37 @@ export default function OwnerDetailsPage() {
     e: React.ChangeEvent<HTMLInputElement>,
     truckId: string
   ) => {
-    // ...existing code from orders page that updates paymentFormData.allocatedTrucks...
+    const newAmount = parseFloat(e.target.value);
+    if (isNaN(newAmount)) return;
+  
+    const truck = workDetails.find(t => t.id === truckId);
+    if (!truck) return;
+  
+    const { balance } = getTruckAllocations(truck, truckPayments);
+    const totalAvailable = getTotalAvailable();
+    
+    // Calculate current total allocation excluding this truck
+    const currentTotal = paymentFormData.allocatedTrucks
+      .filter(t => t.truckId !== truckId)
+      .reduce((sum, t) => sum + t.amount, 0);
+  
+    // Calculate maximum allowed amount for this truck
+    const maxAllowed = Math.min(
+      balance, // Can't allocate more than truck's balance
+      totalAvailable - currentTotal, // Can't exceed total available amount
+      newAmount // Can't exceed input amount
+    );
+  
+    if (maxAllowed >= 0) {
+      setPaymentFormData(prev => ({
+        ...prev,
+        allocatedTrucks: prev.allocatedTrucks.map(t =>
+          t.truckId === truckId
+            ? { ...t, amount: toFixed2(maxAllowed) }
+            : t
+        )
+      }));
+    }
   };
 
   // Add the missing calculateOptimalAllocation function
@@ -373,7 +428,7 @@ export default function OwnerDetailsPage() {
     // Sort trucks by creation date and balance
     const trucksWithBalances = trucks
       .filter(truck => {
-        const { balance } = getTruckAllocations(truck);
+        const { balance } = getTruckAllocations(truck, truckPayments);
         return balance > 0;
       })
       .sort((a, b) => {
@@ -389,7 +444,7 @@ export default function OwnerDetailsPage() {
     for (const truck of trucksWithBalances) {
       if (remainingAmount <= 0) break;
 
-      const { balance } = getTruckAllocations(truck);
+      const { balance } = getTruckAllocations(truck, truckPayments);
       const allocation = toFixed2(Math.min(balance, remainingAmount));
       
       if (allocation > 0) {
@@ -420,7 +475,7 @@ export default function OwnerDetailsPage() {
     
     if (!truck) return;
   
-    const { balance } = getTruckAllocations(truck);
+    const { balance } = getTruckAllocations(truck, truckPayments);
     const otherAllocations = paymentFormData.allocatedTrucks
       .filter(t => t.truckId !== truckId)
       .reduce((sum, t) => sum + t.amount, 0);
@@ -496,7 +551,7 @@ export default function OwnerDetailsPage() {
       startY: (doc as any).lastAutoTable?.finalY + 10 || 45,
       head: [['Truck', 'Product', 'At20', 'Price', 'Total Due', 'Paid', 'Balance', 'Status']],
       body: workDetails.filter(truck => truck.loaded).map(truck => {
-        const { totalDue, totalAllocated, balance } = getTruckAllocations(truck);
+        const { totalDue, totalAllocated, balance } = getTruckAllocations(truck, truckPayments);
         return [
           truck.truck_number,
           truck.product,
@@ -511,6 +566,85 @@ export default function OwnerDetailsPage() {
     });
 
     doc.save(`${owner}_summary_${new Date().toISOString().split('T')[0]}.pdf`);
+  };
+
+  // Add this new function after handleDownloadPDF
+  const handleDownloadExcel = () => {
+    // Create workbook
+    const wb = XLSX.utils.book_new();
+    const totals = calculateTotals();
+  
+    // Summary worksheet
+    const summaryData = [
+      ['Financial Summary'],
+      ['Total Due', `$${formatNumber(totals.totalDue)}`],
+      ['Total Paid', `$${formatNumber(totals.totalPaid)}`],
+      ['Balance', `$${formatNumber(Math.abs(totals.balance))}`],
+      ['Available Balance', `$${formatNumber(totals.existingBalance)}`],
+      [],
+    ];
+    const summaryWs = XLSX.utils.aoa_to_sheet(summaryData);
+    XLSX.utils.book_append_sheet(wb, summaryWs, 'Summary');
+  
+    // Trucks worksheet
+    const trucksData = [
+      ['Truck', 'Product', 'At20', 'Price', 'Total Due', 'Paid', 'Balance', 'Status', 'Date Loaded']
+    ];
+    workDetails
+      .filter(truck => truck.loaded)
+      .forEach(truck => {
+        const { totalDue, totalAllocated, balance } = getTruckAllocations(truck, truckPayments);
+        trucksData.push([
+          truck.truck_number,
+          truck.product,
+          truck.at20 || '-',
+          `$${formatNumber(parseFloat(truck.price))}`,
+          `$${formatNumber(totalDue)}`,
+          `$${formatNumber(totalAllocated)}`,
+          `$${formatNumber(Math.abs(balance))}`,
+          balance <= 0 ? 'Paid' : truck.paymentPending ? 'Pending' : 'Due',
+          new Date(truck.createdAt || Date.now()).toLocaleDateString()
+        ]);
+      });
+    const trucksWs = XLSX.utils.aoa_to_sheet(trucksData);
+    XLSX.utils.book_append_sheet(wb, trucksWs, 'Trucks');
+  
+    // Payments worksheet
+    const paymentsData = [
+      ['Date', 'Amount', 'Type', 'Note', 'Allocated Trucks']
+    ];
+    ownerPayments.forEach(payment => {
+      paymentsData.push([
+        new Date(payment.timestamp).toLocaleString(),
+        `$${formatNumber(payment.amount)}`,
+        payment.type || 'Payment',
+        payment.note || '-',
+        payment.allocatedTrucks?.map((allocation: any) => {
+          const truck = workDetails.find(t => t.id === allocation.truckId);
+          return truck ? `${truck.truck_number} ($${formatNumber(allocation.amount)})` : '';
+        }).join(', ') || '-'
+      ]);
+    });
+    const paymentsWs = XLSX.utils.aoa_to_sheet(paymentsData);
+    XLSX.utils.book_append_sheet(wb, paymentsWs, 'Payments');
+  
+    // Balance History worksheet
+    const balanceData = [
+      ['Date', 'Amount', 'Type', 'Note']
+    ];
+    balanceUsageHistory.forEach(entry => {
+      balanceData.push([
+        new Date(entry.timestamp).toLocaleDateString(),
+        `${entry.type === 'deposit' ? '+' : '-'}$${formatNumber(entry.amount)}`,
+        entry.type,
+        entry.note || '-'
+      ]);
+    });
+    const balanceWs = XLSX.utils.aoa_to_sheet(balanceData);
+    XLSX.utils.book_append_sheet(wb, balanceWs, 'Balance History');
+  
+    // Save the file
+    XLSX.writeFile(wb, `${owner}_transactions_${new Date().toISOString().split('T')[0]}.xlsx`);
   };
 
   // Add loading skeletons component
@@ -714,10 +848,14 @@ export default function OwnerDetailsPage() {
             className="space-y-4 sm:space-y-6"
           >
             {/* Export button */}
-            <motion.div variants={fadeIn} className="flex justify-end">
+            <motion.div variants={fadeIn} className="flex justify-end gap-2">
+              <Button variant="outline" onClick={handleDownloadExcel} className="text-xs sm:text-sm">
+                <FileSpreadsheet className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
+                Export Excel
+              </Button>
               <Button variant="outline" onClick={handleDownloadPDF} className="text-xs sm:text-sm">
                 <Download className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
-                Summary PDF
+                Export PDF
               </Button>
             </motion.div>
 
@@ -895,7 +1033,7 @@ export default function OwnerDetailsPage() {
                       </thead>
                       <tbody>
                         {workDetails.filter(truck => truck.loaded).map(truck => {
-                          const { totalDue, totalAllocated, balance, pendingAmount } = getTruckAllocations(truck);
+                                                  const { totalDue, totalAllocated, balance, pendingAmount } = getTruckAllocations(truck, truckPayments);
                           return (
                             <tr key={truck.id} className="border-t">
                               <td className="p-2">{truck.truck_number}</td>
@@ -1034,156 +1172,172 @@ export default function OwnerDetailsPage() {
                 exit={{ scale: 0.95, opacity: 0 }}
                 transition={{ duration: 0.2 }}
               >
-                <DialogContent className="w-[95vw] sm:max-w-[800px] h-[90vh] sm:h-auto overflow-y-auto p-3 sm:p-6">
+                <DialogContent className="w-[95vw] sm:max-w-[900px] h-[90vh] overflow-y-auto">
                   <DialogHeader>
                     <DialogTitle className="text-xl font-semibold">
                       Add Payment for {owner}
                     </DialogTitle>
                   </DialogHeader>
 
-                  <form onSubmit={handlePaymentSubmit} className="space-y-4 sm:space-y-6">
-                    {/* Balance Section */}
-                    {ownerBalance && ownerBalance.amount > 0 && (
-                      <Card className="p-4 bg-muted/50">
-                        <div className="flex items-center gap-4">
-                          <Checkbox
-                            id="useBalance"
-                            checked={paymentFormData.useExistingBalance}
-                            onCheckedChange={handleBalanceUseChange}
-                          />
-                          <div className="flex-1">
-                            <Label htmlFor="useBalance" className="font-medium">
-                              Use available balance
-                            </Label>
-                            <p className="text-sm text-emerald-600">
-                              ${formatNumber(ownerBalance.amount)} available
-                            </p>
-                          </div>
-                        </div>
-                      </Card>
-                    )}
-
-                    {/* Amount Input */}
-                    <div className="space-y-2">
-                      <Label htmlFor="paymentAmount" className="text-base font-medium">
-                        Payment Amount {paymentFormData.useExistingBalance && '(Including Balance)'}
-                      </Label>
-                      <div className="flex gap-4 items-center">
-                        <div className="flex-1">
-                          <Input
-                            id="paymentAmount"
-                            type="number"
-                            step="0.01"
-                            value={paymentFormData.amount}
-                            onChange={(e) => setPaymentFormData(prev => ({
-                              ...prev,
-                              amount: parseFloat(e.target.value) || 0,
-                              allocatedTrucks: []
-                            }))}
-                            className="text-lg"
-                            placeholder="Enter amount"
-                          />
-                        </div>
-                        {paymentFormData.useExistingBalance && (
-                          <div className="text-sm text-muted-foreground whitespace-nowrap">
-                            New Payment: ${formatNumber(paymentFormData.amount - paymentFormData.balanceToUse)}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Truck Allocation Section */}
-                    <div className="space-y-4">
-                      <div className="flex justify-between items-center">
-                        <Label className="text-base font-medium">Allocate to Trucks</Label>
-                        <div className="flex items-center gap-4">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            onClick={() => {
-                              const totalAvailable = getTotalAvailable();
-                              const allocations = calculateOptimalAllocation(
-                                totalAvailable, // Pass the total available amount
-                                workDetails.filter(t => t.loaded),
-                                truckPayments
-                              );
-                              setPaymentFormData(prev => ({ ...prev, allocatedTrucks: allocations }));
-                            }}
-                          >
-                            Auto Allocate
-                          </Button>
-                        </div>
-                      </div>
-
-                      <Card className="p-4">
-                        <div className="text-sm grid grid-cols-3 gap-2">
-                          <div>Available: ${formatNumber(getTotalAvailable())}</div>
-                          <div>Allocated: ${formatNumber(
-                            paymentFormData.allocatedTrucks.reduce((sum, t) => sum + t.amount, 0)
-                          )}</div>
-                          <div className={cn(
-                            "font-medium",
-                            calculateRemainingAmount(getTotalAvailable(), paymentFormData.allocatedTrucks) > 0 
-                              ? "text-orange-500" 
-                              : "text-emerald-600"
-                          )}>
-                            Remaining: ${formatNumber(calculateRemainingAmount(
-                              getTotalAvailable(),
-                              paymentFormData.allocatedTrucks
-                            ))}
-                          </div>
-                        </div>
-                      </Card>
-
-                      <div className="space-y-2 max-h-[400px] overflow-y-auto rounded-lg border bg-card p-4">
-                        {workDetails
-                          .filter((t) => t.loaded && getTruckAllocations(t).balance > 0)
-                          .map((truck) => {
-                            const truckAllocation = getTruckAllocations(truck);
-                            return (
-                              <div key={truck.id} 
-                                className="flex items-center gap-4 p-3 border rounded-lg hover:bg-muted/50 transition-colors">
+                  <form onSubmit={handlePaymentSubmit} className="space-y-4">
+                    {/* Main content grid */}
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 lg:gap-6">
+                      {/* Left column - Payment Details */}
+                      <div className="space-y-4">
+                        <div className="rounded-lg border p-4">
+                          <h3 className="text-sm font-medium mb-3">Payment Details</h3>
+                          
+                          {/* Balance Section */}
+                          {ownerBalance && ownerBalance.amount > 0 && (
+                            <Card className="p-4 bg-muted/50 mb-4">
+                              <div className="flex items-center gap-4">
                                 <Checkbox
-                                  checked={!!paymentFormData.allocatedTrucks.find(
-                                    (a) => a.truckId === truck.id
-                                  )}
-                                  onCheckedChange={(checked) => handleTruckSelection(!!checked, truck)}
+                                  id="useBalance"
+                                  checked={paymentFormData.useExistingBalance}
+                                  onCheckedChange={handleBalanceUseChange}
                                 />
                                 <div className="flex-1">
-                                  <div className="font-medium">{truck.truck_number}</div>
-                                  <div className="text-sm text-muted-foreground">
-                                    Balance: ${formatNumber(truckAllocation.balance)}
-                                  </div>
+                                  <Label htmlFor="useBalance" className="font-medium">
+                                    Use available balance
+                                  </Label>
+                                  <p className="text-sm text-emerald-600">
+                                    ${formatNumber(ownerBalance.amount)} available
+                                  </p>
                                 </div>
+                              </div>
+                            </Card>
+                          )}
+
+                          {/* Amount Input */}
+                          <div className="space-y-2">
+                            <Label htmlFor="paymentAmount" className="text-sm font-medium">
+                              Payment Amount {paymentFormData.useExistingBalance && '(Including Balance)'}
+                            </Label>
+                            <div className="flex gap-4 items-center">
+                              <div className="flex-1">
                                 <Input
+                                  id="paymentAmount"
                                   type="number"
                                   step="0.01"
-                                  min="0"
-                                  value={paymentFormData.allocatedTrucks.find(
-                                    (a) => a.truckId === truck.id
-                                  )?.amount || ''}
-                                  onChange={(e) => handleAllocationChange(e, truck.id)}
-                                  className="w-32"
+                                  value={paymentFormData.amount}
+                                  onChange={(e) => setPaymentFormData(prev => ({
+                                    ...prev,
+                                    amount: parseFloat(e.target.value) || 0,
+                                    allocatedTrucks: []
+                                  }))}
+                                  className="text-lg"
+                                  placeholder="Enter amount"
                                 />
                               </div>
-                            );
-                          })}
-                      </div>
-                    </div>
+                            </div>
+                          </div>
 
-                    {/* Note Input */}
-                    <div className="space-y-2">
-                      <Label htmlFor="note" className="text-base font-medium">Note</Label>
-                      <Input
-                        id="note"
-                        value={paymentFormData.note}
-                        onChange={(e) => setPaymentFormData(prev => ({ ...prev, note: e.target.value }))}
-                        placeholder="Add a note for this payment"
-                      />
+                          {/* Payment Summary */}
+                          <div className="mt-4 p-3 bg-muted rounded-lg">
+                            <div className="text-sm space-y-1">
+                              <div className="flex justify-between">
+                                <span>Available:</span>
+                                <span>${formatNumber(getTotalAvailable())}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span>Allocated:</span>
+                                <span>${formatNumber(
+                                  paymentFormData.allocatedTrucks.reduce((sum, t) => sum + t.amount, 0)
+                                )}</span>
+                              </div>
+                              <div className="flex justify-between font-medium">
+                                <span>Remaining:</span>
+                                <span className={cn(
+                                  calculateRemainingAmount(getTotalAvailable(), paymentFormData.allocatedTrucks) > 0 
+                                    ? "text-orange-500" 
+                                    : "text-emerald-600"
+                                )}>
+                                  ${formatNumber(calculateRemainingAmount(
+                                    getTotalAvailable(),
+                                    paymentFormData.allocatedTrucks
+                                  ))}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Note Input */}
+                          <div className="mt-4 space-y-2">
+                            <Label htmlFor="note" className="text-sm font-medium">Note</Label>
+                            <Input
+                              id="note"
+                              value={paymentFormData.note}
+                              onChange={(e) => setPaymentFormData(prev => ({ ...prev, note: e.target.value }))}
+                              placeholder="Add a note for this payment"
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Right column - Truck Allocations */}
+                      <div className="space-y-4">
+                        <div className="rounded-lg border p-4">
+                          <div className="flex justify-between items-center mb-4">
+                            <h3 className="text-sm font-medium">Allocate to Trucks</h3>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                const totalAvailable = getTotalAvailable();
+                                const allocations = calculateOptimalAllocation(
+                                  totalAvailable,
+                                  workDetails.filter(t => t.loaded),
+                                  truckPayments
+                                );
+                                setPaymentFormData(prev => ({ ...prev, allocatedTrucks: allocations }));
+                              }}
+                            >
+                              Auto Allocate
+                            </Button>
+                          </div>
+
+                          <div className="space-y-2 max-h-[400px] overflow-y-auto rounded-lg border bg-card p-4">
+                            {workDetails
+                              .filter((t) => t.loaded && getTruckAllocations(t, truckPayments).balance > 0)
+                              .map((truck) => {
+                                const truckAllocation = getTruckAllocations(truck, truckPayments);
+                                return (
+                                  <div key={truck.id} 
+                                    className="flex items-center gap-4 p-3 border rounded-lg hover:bg-muted/50 transition-colors"
+                                  >
+                                    <Checkbox
+                                      checked={!!paymentFormData.allocatedTrucks.find(
+                                        (a) => a.truckId === truck.id
+                                      )}
+                                      onCheckedChange={(checked) => handleTruckSelection(!!checked, truck)}
+                                    />
+                                    <div className="flex-1">
+                                      <div className="font-medium">{truck.truck_number}</div>
+                                      <div className="text-sm text-muted-foreground">
+                                        Balance: ${formatNumber(truckAllocation.balance)}
+                                      </div>
+                                    </div>
+                                    <Input
+                                      type="number"
+                                      step="0.01"
+                                      min="0"
+                                      value={paymentFormData.allocatedTrucks.find(
+                                        (a) => a.truckId === truck.id
+                                      )?.amount || ''}
+                                      onChange={(e) => handleAllocationChange(e, truck.id)}
+                                      className="w-28"
+                                    />
+                                  </div>
+                                );
+                              })}
+                          </div>
+                        </div>
+                      </div>
                     </div>
 
                     {/* Action Buttons */}
-                    <div className="flex justify-end gap-2 pt-4">
+                    <div className="flex justify-end gap-2 pt-4 border-t">
                       <Button type="button" variant="outline" onClick={() => setIsPaymentModalOpen(false)}>
                         Cancel
                       </Button>
