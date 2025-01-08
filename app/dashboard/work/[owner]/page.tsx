@@ -19,7 +19,7 @@ import type { WorkDetail, TruckPayment, OwnerBalance } from "@/types"
 import { motion, AnimatePresence } from 'framer-motion'
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { useSession } from "next-auth/react"
-import { ArrowLeft, Download, Receipt, Wallet2, PlusCircle, X, FileSpreadsheet } from 'lucide-react' // Add X and FileSpreadsheet icon to imports
+import { ArrowLeft, Download, Receipt, Wallet2, PlusCircle, X, FileSpreadsheet, RefreshCw } from 'lucide-react' // Add X and FileSpreadsheet icon to imports
 import { ThemeToggle } from "@/components/ui/molecules/theme-toggle" // Add ThemeToggle import
 import { Skeleton } from "@/components/ui/skeleton"
 import jsPDF from 'jspdf'
@@ -30,7 +30,9 @@ import {
   getTruckAllocations, 
   calculateOptimalAllocation, 
   validatePaymentForm,
-  updatePaymentStatuses 
+  updatePaymentStatuses,
+  fixTruckPaymentStatus, // Add fixTruckPaymentStatus import
+  syncTruckPaymentStatus // Add syncTruckPaymentStatus import
 } from "@/lib/payment-utils";
 
 // Add interfaces at the top
@@ -761,6 +763,56 @@ export default function OwnerDetailsPage() {
     }
   };
 
+  // Update the handleFixTruckStatus function
+  const handleFixTruckStatus = async (truckId: string) => {
+    try {
+      const truck = workDetails.find(t => t.id === truckId);
+      if (!truck) return;
+  
+      const updates = await syncTruckPaymentStatus(database, truck, truckPayments);
+      await update(ref(database), updates);
+  
+      toast({
+        title: "Status Updated",
+        description: `Payment status synchronized for truck ${truck.truck_number}`,
+      });
+    } catch (error) {
+      console.error('Fix error:', error);
+      toast({
+        title: "Error",
+        description: "Failed to sync payment status",
+        variant: "destructive"
+      });
+    }
+  };
+  
+  // Update handleFixAllStatuses to use syncTruckPaymentStatus
+  const handleFixAllStatuses = async () => {
+    try {
+      const allUpdates: { [path: string]: any } = {};
+      
+      for (const truck of workDetails.filter(t => t.loaded)) {
+        const updates = await syncTruckPaymentStatus(database, truck, truckPayments);
+        Object.assign(allUpdates, updates);
+      }
+  
+      await update(ref(database), allUpdates);
+  
+      toast({
+        title: "Status Updated",
+        description: "All payment statuses synchronized",
+      });
+    } catch (error) {
+      console.error('Fix error:', error);
+      toast({
+        title: "Error",
+        description: "Failed to sync payment statuses",
+        variant: "destructive"
+      });
+    }
+  };
+  
+
   return (
     <div className="min-h-screen">
       {/* Animate header */}
@@ -1015,7 +1067,17 @@ export default function OwnerDetailsPage() {
             {/* Loaded Trucks Table */}
             <motion.div variants={slideUp}>
               <Card className="p-3 sm:p-6">
-                <h2 className="text-lg sm:text-xl font-semibold mb-3 sm:mb-4">Loaded Trucks</h2>
+                <div className="flex justify-between items-center mb-3 sm:mb-4">
+                  <h2 className="text-lg sm:text-xl font-semibold">Loaded Trucks</h2>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleFixAllStatuses}
+                    className="text-xs"
+                  >
+                    Fix All Statuses
+                  </Button>
+                </div>
                 <div className="overflow-x-auto -mx-3 sm:mx-0">
                   <div className="min-w-[800px] sm:min-w-0"> {/* Force minimum width on mobile */}
                     <table className="w-full">
@@ -1044,13 +1106,24 @@ export default function OwnerDetailsPage() {
                               <td className="p-2">${formatNumber(totalAllocated)}</td>
                               <td className="p-2">${formatNumber(Math.abs(balance))}</td>
                               <td className="p-2">
-                                {balance <= 0 ? (
-                                  <span className="text-green-600">Paid</span>
-                                ) : truck.paymentPending ? (
-                                  <span className="text-orange-500">Pending</span>
-                                ) : (
-                                  <span className="text-red-600">Due</span>
-                                )}
+                                <div className="flex items-center gap-2">
+                                  <span className={
+                                    balance <= 0 ? "text-green-600" : 
+                                    truck.paymentPending ? "text-orange-500" : 
+                                    "text-red-600"
+                                  }>
+                                    {balance <= 0 ? "Paid" : truck.paymentPending ? "Pending" : "Due"}
+                                  </span>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => handleFixTruckStatus(truck.id)}
+                                    className="h-6 w-6 p-0"
+                                    title="Fix payment status"
+                                  >
+                                    <RefreshCw className="h-3 w-3" />
+                                  </Button>
+                                </div>
                               </td>
                             </tr>
                           );

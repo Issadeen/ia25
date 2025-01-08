@@ -17,6 +17,7 @@ export interface WorkDetail {
   released?: boolean;
   paymentPending?: boolean;
   amountPaid?: number;
+  paymentStatus?: 'paid' | 'partial' | 'unpaid';
 }
 
 export interface TruckPayment {

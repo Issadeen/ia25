@@ -9,7 +9,7 @@ import { useEffect, useState } from "react"
 import { useSession } from "next-auth/react"
 import { useRouter } from "next/navigation"
 // Add Triangle to imports
-import { ArrowLeft, Plus, Trash2, FileText, Loader2, Edit, Check, X, Copy, Triangle, Download, FileSpreadsheet, History, Receipt } from 'lucide-react'
+import { ArrowLeft, Plus, Trash2, FileText, Loader2, Edit, Check, X, Copy, Triangle, Download, FileSpreadsheet, History, Receipt, RefreshCw } from 'lucide-react'
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card } from "@/components/ui/card"
@@ -26,6 +26,7 @@ import autoTable from 'jspdf-autotable'
 import * as XLSX from 'xlsx' // Add this import for Excel export
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
+import { syncTruckPaymentStatus } from "@/lib/payment-utils";
 
 // Add new interfaces
 interface Payment {
@@ -1256,6 +1257,26 @@ const handleBalanceUseChange = (checked: boolean) => {
   }));
 };
 
+// Add this function to your component
+const handleSyncStatus = async (truck: WorkDetail) => {
+  try {
+    const updates = await syncTruckPaymentStatus(database, truck, truckPayments);
+    await update(ref(database), updates);
+    
+    toast({
+      title: "Status Synced",
+      description: `Payment status synchronized for truck ${truck.truck_number}`,
+    });
+  } catch (error) {
+    console.error('Sync error:', error);
+    toast({
+      title: "Error",
+      description: "Failed to sync payment status",
+      variant: "destructive"
+    });
+  }
+};
+
   return (
     <div className="min-h-screen">
       <header className="fixed top-0 left-0 w-full border-b z-50 bg-gradient-to-r from-emerald-900/10 via-blue-900/10 to-blue-900/10 backdrop-blur-xl">
@@ -1640,6 +1661,15 @@ const handleBalanceUseChange = (checked: boolean) => {
                             onClick={() => handleDelete(detail.id)}
                           >
                             <Trash2 className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleSyncStatus(detail)}
+                            className="h-6 w-6 p-0"
+                            title="Sync payment status"
+                          >
+                            <RefreshCw className="h-3 w-3" />
                           </Button>
                         </div>
                       </td>
