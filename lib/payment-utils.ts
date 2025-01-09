@@ -84,7 +84,7 @@ export const validatePaymentForm = (
   return (
     amount > 0 && // Must have some amount to allocate
     totalAllocated > 0 && // Must allocate some amount
-    Math.abs(amount - totalAllocated) < 0.01 && // Must allocate full amount
+    totalAllocated <= amount && // Total allocation must not exceed available amount
     allocations.length > 0 // Must select at least one truck
   );
 };

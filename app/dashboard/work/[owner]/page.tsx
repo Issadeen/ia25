@@ -142,6 +142,9 @@ export default function OwnerDetailsPage() {
     balanceToUse: 0
   })
 
+  // Ensure isSaving state is present
+  const [isSaving, setIsSaving] = useState(false);
+
   // Fetch data when component mounts
   useEffect(() => {
     const fetchOwnerData = async () => {
@@ -259,33 +262,29 @@ export default function OwnerDetailsPage() {
     e.preventDefault();
     if (!owner) return;
   
+    setIsSaving(true); // Start saving
+  
     try {
       const paymentRef = push(ref(database, `payments/${owner}`));
       const paymentKey = paymentRef.key!;
       const timestamp = new Date().toISOString();
       const updates: { [path: string]: any } = {};
   
-      // Calculate total allocation amount
+      // Validate total allocation
       const totalAllocation = toFixed2(
         paymentFormData.allocatedTrucks.reduce((sum, t) => sum + t.amount, 0)
       );
   
-      // Validate using shared utility
-      if (!validatePaymentForm(getTotalAvailable(), paymentFormData.allocatedTrucks)) {
-        throw new Error("Invalid payment allocation");
-      }
-  
       // Handle balance usage
       let remainingAmount = paymentFormData.amount;
-      if (paymentFormData.useExistingBalance) {
+      if (paymentFormData.useExistingBalance && ownerBalance) {
         const balanceToUse = Math.min(
           paymentFormData.balanceToUse,
-          ownerBalance?.amount || 0,
+          ownerBalance.amount,
           totalAllocation
         );
   
         if (balanceToUse > 0) {
-          // Record balance usage
           const balanceUsageRef = push(ref(database, `balance_usage/${owner}`));
           updates[`balance_usage/${owner}/${balanceUsageRef.key}`] = {
             amount: balanceToUse,
@@ -297,7 +296,7 @@ export default function OwnerDetailsPage() {
           };
   
           // Update owner balance
-          const newBalance = toFixed2((ownerBalance?.amount || 0) - balanceToUse);
+          const newBalance = toFixed2(ownerBalance.amount - balanceToUse);
           updates[`owner_balances/${owner}`] = {
             amount: newBalance,
             lastUpdated: timestamp
@@ -307,43 +306,45 @@ export default function OwnerDetailsPage() {
         }
       }
   
-      // Record the new payment if there's a new cash payment
-      if (remainingAmount > 0) {
-        updates[`payments/${owner}/${paymentKey}`] = {
-          amount: remainingAmount,
-          timestamp,
-          allocatedTrucks: paymentFormData.allocatedTrucks,
-          note: paymentFormData.note,
-          type: 'cash_payment'
-        };
-      }
+      // Record the payment
+      updates[`payments/${owner}/${paymentKey}`] = {
+        amount: remainingAmount,
+        timestamp,
+        allocatedTrucks: paymentFormData.allocatedTrucks,
+        note: paymentFormData.note,
+        type: 'cash_payment'
+      };
   
-      // Update truck payments using shared logic
+      // Update truck payments
       for (const allocation of paymentFormData.allocatedTrucks) {
-        const truckPaymentRef = push(ref(database, `truckPayments/${allocation.truckId}`));
-        updates[`truckPayments/${allocation.truckId}/${truckPaymentRef.key}`] = {
+        const truckRef = push(ref(database, `truckPayments/${allocation.truckId}`));
+        updates[`truckPayments/${allocation.truckId}/${truckRef.key}`] = {
           amount: allocation.amount,
           timestamp,
           paymentId: paymentKey,
           note: paymentFormData.note
         };
   
+        // Update truck status
         const truck = workDetails.find(t => t.id === allocation.truckId);
         if (truck) {
-          await updatePaymentStatuses(updates, truck, allocation, truckPayments);
+          const { balance } = getTruckAllocations(truck, truckPayments);
+          const newBalance = toFixed2(balance - allocation.amount);
+          
+          updates[`work_details/${allocation.truckId}/paymentStatus`] = newBalance <= 0 ? 'paid' : 'partial';
+          updates[`work_details/${allocation.truckId}/paymentPending`] = newBalance > 0;
+          updates[`work_details/${allocation.truckId}/paid`] = newBalance <= 0;
         }
       }
   
-      // Commit all updates
+      // Apply all updates atomically
       await update(ref(database), updates);
   
-      // Show success message
       toast({
-        title: "Payment Added",
+        title: "Payment Processed",
         description: `Successfully processed payment of $${formatNumber(totalAllocation)}`,
       });
   
-      // Close modal and refresh data
       setIsPaymentModalOpen(false);
       await fetchOwnerBalances();
   
@@ -354,6 +355,8 @@ export default function OwnerDetailsPage() {
         description: error instanceof Error ? error.message : "Failed to process payment",
         variant: "destructive"
       });
+    } finally {
+      setIsSaving(false);
     }
   };
   
@@ -1414,15 +1417,17 @@ export default function OwnerDetailsPage() {
                       <Button type="button" variant="outline" onClick={() => setIsPaymentModalOpen(false)}>
                         Cancel
                       </Button>
-                      <Button
+                      <Button 
                         type="submit"
                         disabled={
-                          paymentFormData.amount <= 0 ||
-                          paymentFormData.allocatedTrucks.length === 0 ||
-                          calculateRemainingAmount(paymentFormData.amount, paymentFormData.allocatedTrucks) === paymentFormData.amount
+                          isSaving ||
+                          paymentFormData.amount <= 0 || 
+                          calculateRemainingAmount(paymentFormData.amount, paymentFormData.allocatedTrucks) === paymentFormData.amount ||
+                          paymentFormData.allocatedTrucks.length === 0
                         }
+                        className="w-full md:w-auto"
                       >
-                        Save Payment
+                        {isSaving ? "Saving..." : "Save Payment"}
                       </Button>
                     </div>
                   </form>
@@ -1489,3 +1494,4 @@ export default function OwnerDetailsPage() {
     </div>
   );
 }
+
