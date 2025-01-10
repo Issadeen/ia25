@@ -217,16 +217,20 @@ export default function WorkManagementPage() {
       if (detail.status === "queued" && !detail.loaded) stats.pendingOrders++;
       if (detail.product.trim().toUpperCase() === "AGO") stats.agoOrders++;
       if (detail.product.trim().toUpperCase() === "PMS") stats.pmsOrders++;
+      
+      // Update status counting logic
       if (detail.status === "queued") stats.queuedOrders++;
+      else if (detail.status === "completed") stats.queuedOrders++; // Count completed as queued
       else stats.unqueuedOrders++;
 
+      // Update owner summary with the same logic
       if (!ownerSummaryData[detail.owner]) {
         ownerSummaryData[detail.owner] = {
           totalOrders: 1,
           agoOrders: detail.product.trim().toUpperCase() === "AGO" ? 1 : 0,
           pmsOrders: detail.product.trim().toUpperCase() === "PMS" ? 1 : 0,
-          queuedOrders: detail.status === "queued" ? 1 : 0,
-          unqueuedOrders: detail.status !== "queued" ? 1 : 0,
+          queuedOrders: (detail.status === "queued" || detail.status === "completed") ? 1 : 0,
+          unqueuedOrders: (detail.status !== "queued" && detail.status !== "completed") ? 1 : 0,
           loadedOrders: detail.loaded ? 1 : 0,
           pendingOrders: detail.status === "queued" && !detail.loaded ? 1 : 0,
           products: { [detail.product]: 1 },
@@ -238,7 +242,7 @@ export default function WorkManagementPage() {
         ownerData.totalOrders++;
         if (detail.product.trim().toUpperCase() === "AGO") ownerData.agoOrders++;
         if (detail.product.trim().toUpperCase() === "PMS") ownerData.pmsOrders++;
-        if (detail.status === "queued") ownerData.queuedOrders++;
+        if (detail.status === "queued" || detail.status === "completed") ownerData.queuedOrders++;
         else ownerData.unqueuedOrders++;
         if (detail.loaded) {
           ownerData.loadedOrders++;
@@ -1816,4 +1820,5 @@ const handleSyncStatus = async (truck: WorkDetail) => {
     </div>
   )
 }
+
 
