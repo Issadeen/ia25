@@ -127,12 +127,15 @@ export default function WorkPage() {
                 <Moon className="h-5 w-5" />
               )}
             </Button>
-            <Avatar className="h-8 w-8 ring-2 ring-pink-500/50 ring-offset-2 ring-offset-background shadow-lg shadow-pink-500/10 transition-shadow hover:ring-pink-500/75">
+            <Avatar 
+              className="h-8 w-8 ring-2 ring-emerald-500/50 ring-offset-2 ring-offset-background transition-shadow hover:ring-emerald-500/75 cursor-pointer"
+              onClick={() => router.push('/dashboard')}
+            >
               <AvatarImage 
                 src={session?.user?.image || profilePicUrl || ''} 
-                alt="Profile"
+                alt={session?.user?.name || 'User Profile'}
               />
-              <AvatarFallback className="bg-pink-100 text-pink-700">
+              <AvatarFallback className="bg-emerald-100 text-emerald-700">
                 {session?.user?.email?.[0]?.toUpperCase() || 'U'}
               </AvatarFallback>
             </Avatar>

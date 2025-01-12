@@ -555,10 +555,13 @@ export default function ReportsPage() {
                 </Button>
               )}
               <ThemeToggle />
-              <Avatar className="h-8 w-8 ring-2 ring-emerald-500/50 ring-offset-2 ring-offset-background transition-shadow hover:ring-emerald-500/75">
+              <Avatar 
+                className="h-8 w-8 ring-2 ring-emerald-500/50 ring-offset-2 ring-offset-background transition-shadow hover:ring-emerald-500/75 cursor-pointer"
+                onClick={() => router.push('/dashboard')}
+              >
                 <AvatarImage 
                   src={session?.user?.image || lastUploadedImage || ''} 
-                  alt="Profile"
+                  alt={session?.user?.name || 'User Profile'}
                 />
                 <AvatarFallback className="bg-emerald-100 text-emerald-700">
                   {session?.user?.email?.[0]?.toUpperCase() || 'U'}

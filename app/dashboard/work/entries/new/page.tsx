@@ -189,10 +189,16 @@ const AddEntriesPage: React.FC = () => {
                 <Moon className="h-5 w-5" />
               )}
             </Button>
-            <Avatar className="h-8 w-8">
-              <AvatarImage src={avatarSrc} />
-              <AvatarFallback>
-                {session?.user?.name?.[0] || "U"}
+            <Avatar 
+              className="h-8 w-8 ring-2 ring-emerald-500/50 ring-offset-2 ring-offset-background transition-shadow hover:ring-emerald-500/75 cursor-pointer"
+              onClick={() => router.push('/dashboard')}
+            >
+              <AvatarImage 
+                src={avatarSrc} 
+                alt={session?.user?.name || 'User Profile'}
+              />
+              <AvatarFallback className="bg-emerald-100 text-emerald-700">
+                {session?.user?.name?.[0] || session?.user?.email?.[0] || "U"}
               </AvatarFallback>
             </Avatar>
           </div>
