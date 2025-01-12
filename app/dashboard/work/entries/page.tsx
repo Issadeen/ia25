@@ -101,6 +101,21 @@ interface SelectedEntryWithVolume {
   allocatedVolume: number;
 }
 
+// Add to your existing interfaces
+interface Summary {
+  productDestination: string;
+  remainingQuantity: number;
+  estimatedTrucks: number;
+  motherEntries: { 
+    number: string; 
+    remainingQuantity: number;
+    timestamp: number; // Add timestamp
+    creationDate: string; // Add this
+    ageInDays: number;    // Add this
+    usageCount: number;   // Add this
+  }[];
+}
+
 export default function EntriesPage() {
   // Add to existing state declarations
   const searchParams = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '');
@@ -140,17 +155,6 @@ export default function EntriesPage() {
   const [originalData, setOriginalData] = useState<{[key: string]: Entry}>({})
   const [showSummary, setShowSummary] = useState(false)
   const [showUsage, setShowUsage] = useState(false)
-  interface Summary {
-    productDestination: string;
-    remainingQuantity: number;
-    estimatedTrucks: number;
-    motherEntries: { 
-      number: string; 
-      remainingQuantity: number;
-      timestamp: number; // Add timestamp
-    }[];
-  }
-
   const [summaryData, setSummaryData] = useState<Summary[]>([])
   interface UsageEntry {
     key: string;  // Add this line
@@ -1163,6 +1167,25 @@ export default function EntriesPage() {
   }
   
 
+  // Add new helper function for date formatting
+  const formatDate = (timestamp: number) => {
+    const date = new Date(timestamp);
+    const now = new Date();
+    const diffTime = Math.abs(now.getTime() - date.getTime());
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    
+    return {
+      formatted: date.toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      }),
+      ageInDays: diffDays
+    };
+  };
+
   const getSummary = async () => {
     const db = getDatabase()
     const tr800Ref = dbRef(db, 'tr800')
@@ -1189,7 +1212,10 @@ export default function EntriesPage() {
             summary[key].motherEntries.push({
               number: data.number,
               remainingQuantity: data.remainingQuantity,
-              timestamp: data.timestamp // Add timestamp for sorting
+              timestamp: data.timestamp, // Add timestamp for sorting
+              creationDate: formatDate(data.timestamp).formatted, // Add this
+              ageInDays: formatDate(data.timestamp).ageInDays,    // Add this
+              usageCount: 0   // Add this
             })
           }
         })
@@ -1616,7 +1642,7 @@ const renderStockInfo = () => {
                 ⚠️ Warning: Insufficient quantities for pending orders
               </div>
               <div className="text-sm text-red-500 dark:text-red-400 mt-1">
-                Some destinations have more pending orders than available stock. Highlighted rows need attention.
+                Some destinations have more pending orders than available Entries. Highlighted rows need attention.
               </div>
             </motion.div>
           )}
@@ -1663,13 +1689,41 @@ const renderStockInfo = () => {
                           <TableCell>{item.estimatedTrucks.toFixed(2)}</TableCell>
                           <TableCell>
                             {item.motherEntries.map((entry, entryIndex) => (
-                              <div key={entryIndex} className="relative flex items-center group">
-                                <span className="absolute -left-6 top-1/2 -translate-y-1/2 w-5 h-5 flex items-center justify-center text-xs text-emerald-600 dark:text-emerald-400 font-medium opacity-70">
+                              <div key={entryIndex} className="relative flex items-center group mb-2">
+                                <span 
+                                  className={`absolute -left-6 top-1/2 -translate-y-1/2 w-5 h-5 flex items-center 
+                                             justify-center text-xs font-medium ${
+                                    entry.ageInDays > 30 ? 'text-red-500' :
+                                    entry.ageInDays > 15 ? 'text-yellow-500' :
+                                    'text-emerald-500'
+                                  }`}
+                                >
                                   #{entryIndex + 1}
                                 </span>
-                                <span className="group-hover:bg-emerald-50 dark:group-hover:bg-emerald-900/20 px-2 py-1 rounded transition-colors">
-                                  {entry.number} ({entry.remainingQuantity.toLocaleString()})
-                                </span>
+                                <div className="flex flex-col w-full">
+                                  <div className="flex justify-between items-center group-hover:bg-emerald-50 
+                                                dark:group-hover:bg-emerald-900/20 px-2 py-1 rounded transition-colors">
+                                    <span className="font-medium">
+                                      {entry.number} ({entry.remainingQuantity.toLocaleString()})
+                                    </span>
+                                    <span className={`text-xs px-2 py-0.5 rounded-full ${
+                                      entry.ageInDays > 30 ? 'bg-red-100 text-red-700 dark:bg-red-900/20 dark:text-red-400' :
+                                      entry.ageInDays > 15 ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/20 dark:text-yellow-400' :
+                                      'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400'
+                                    }`}>
+                                      {entry.ageInDays}d old
+                                    </span>
+                                  </div>
+                                  <div className="text-xs text-muted-foreground px-2 space-y-1">
+                                    <div>Created: {entry.creationDate}</div>
+                                    <div>Usage Count: {entry.usageCount} allocations</div>
+                                    {entry.ageInDays > 30 && (
+                                      <div className="text-red-500 dark:text-red-400">
+                                        ⚠️ Aging entry - needs attention
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
                               </div>
                             ))}
                           </TableCell>
