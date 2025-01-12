@@ -1184,10 +1184,16 @@ export default function EntriesPage() {
             summary[key].remainingQuantity += data.remainingQuantity
             summary[key].motherEntries.push({
               number: data.number,
-              remainingQuantity: data.remainingQuantity
+              remainingQuantity: data.remainingQuantity,
+              timestamp: data.timestamp // Add timestamp for sorting
             })
           }
         })
+
+        // Sort mother entries by FIFO before setting state
+        Object.values(summary).forEach(group => {
+          group.motherEntries = group.motherEntries.sort((a: { timestamp: number }, b: { timestamp: number }) => a.timestamp - b.timestamp);
+        });
 
         // Filter and format summary array
         const summaryArray = Object.entries(summary)
@@ -1652,9 +1658,16 @@ const renderStockInfo = () => {
                           <TableCell>{item.remainingQuantity.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</TableCell>
                           <TableCell>{item.estimatedTrucks.toFixed(2)}</TableCell>
                           <TableCell>
-                            {item.motherEntries.map(entry => 
-                              `${entry.number} (${entry.remainingQuantity.toLocaleString()})`
-                            ).join(', ')}
+                            {item.motherEntries.map((entry, entryIndex) => (
+                              <div key={entryIndex} className="relative flex items-center group">
+                                <span className="absolute -left-6 top-1/2 -translate-y-1/2 w-5 h-5 flex items-center justify-center text-xs text-emerald-600 dark:text-emerald-400 font-medium opacity-70">
+                                  #{entryIndex + 1}
+                                </span>
+                                <span className="group-hover:bg-emerald-50 dark:group-hover:bg-emerald-900/20 px-2 py-1 rounded transition-colors">
+                                  {entry.number} ({entry.remainingQuantity.toLocaleString()})
+                                </span>
+                              </div>
+                            ))}
                           </TableCell>
                         </TableRow>
                       )

@@ -18,6 +18,8 @@ export interface WorkDetail {
   paymentPending?: boolean;
   amountPaid?: number;
   paymentStatus?: 'paid' | 'partial' | 'unpaid';
+  gatePassGenerated?: boolean;
+  gatePassGeneratedAt?: string;
 }
 
 export interface TruckPayment {

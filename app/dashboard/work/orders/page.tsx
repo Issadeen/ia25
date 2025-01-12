@@ -27,6 +27,7 @@ import * as XLSX from 'xlsx' // Add this import for Excel export
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
 import { syncTruckPaymentStatus } from "@/lib/payment-utils";
+import { cn } from '@/lib/utils'
 
 // Add new interfaces
 interface Payment {
@@ -62,6 +63,8 @@ interface WorkDetail {
   createdAt?: string;
   released?: boolean;    // New field to track release status
   paymentPending?: boolean;  // New field to track pending payments
+  gatePassGenerated?: boolean; // New field to track gate pass generation
+  gatePassGeneratedAt?: string; // New field to track gate pass generation time
 }
 
 interface SummaryStats {
@@ -195,6 +198,25 @@ export default function WorkManagementPage() {
   // Add to existing state declarations
   const [profileClickCount, setProfileClickCount] = useState(0);
   const [showUnloadedGP, setShowUnloadedGP] = useState(false);
+
+  // Add new state for hiding completed orders
+  const [showCompleted, setShowCompleted] = useState(false);
+  const [titleClickCount, setTitleClickCount] = useState(0);
+
+  // Add click handler for the title
+  const handleTitleClick = () => {
+    const newCount = titleClickCount + 1;
+    if (newCount === 3) {
+      setShowCompleted(!showCompleted);
+      setTitleClickCount(0);
+      toast({
+        title: showCompleted ? "Showing Active Orders Only" : "Showing All Orders",
+        description: showCompleted ? "Triple click title to show all orders" : "Triple click title to hide completed orders",
+      });
+    } else {
+      setTitleClickCount(newCount);
+    }
+  };
 
   // 2. Define functions before useEffect hooks
   const updateSummaryData = (data: WorkDetail[]) => {
@@ -1041,34 +1063,58 @@ const calculateOwnerTotals = (owner: string | null) => {
     })
   }
 
-  const getFilteredWorkDetails = () => {
-    return getSortedWorkDetails().filter(detail => {
-      const matchesOwner = ownerFilter ? detail.owner.toLowerCase().includes(ownerFilter.toLowerCase()) : true
-      const matchesProduct = productFilter !== "ALL" ? detail.product === productFilter : true
-      const matchesStatus = statusFilter !== "ALL" ? detail.status === statusFilter : true
-      const matchesDepot = depotFilter ? detail.depot.toLowerCase().includes(depotFilter.toLowerCase()) : true
-      const matchesDestination = destinationFilter ? detail.destination.toLowerCase().includes(destinationFilter.toLowerCase()) : true
-      const matchesSearch = searchTerm
-        ? detail.owner.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          detail.truck_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          detail.orderno.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          detail.product.toLowerCase().includes(searchTerm.toLowerCase()) || // Added product search
-          detail.destination.toLowerCase().includes(searchTerm.toLowerCase()) // Added destination search
-        : true
-      return matchesOwner && matchesProduct && matchesStatus && matchesDepot && matchesDestination && matchesSearch
-    })
-  }
+  // Modify getFilteredWorkDetails to include the completed filter
+const getFilteredWorkDetails = () => {
+  return getSortedWorkDetails().filter(detail => {
+    // First check if we should show this completed order
+    if (!showCompleted && detail.released) {
+      return false;
+    }
+
+    const matchesOwner = ownerFilter ? detail.owner.toLowerCase().includes(ownerFilter.toLowerCase()) : true;
+    const matchesProduct = productFilter !== "ALL" ? detail.product === productFilter : true;
+    const matchesStatus = statusFilter !== "ALL" ? detail.status === statusFilter : true;
+    const matchesDepot = depotFilter ? detail.depot.toLowerCase().includes(depotFilter.toLowerCase()) : true;
+    const matchesDestination = destinationFilter ? detail.destination.toLowerCase().includes(destinationFilter.toLowerCase()) : true;
+    const matchesSearch = searchTerm
+      ? detail.owner.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        detail.truck_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        detail.orderno.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        detail.product.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        detail.destination.toLowerCase().includes(searchTerm.toLowerCase())
+      : true;
+    return matchesOwner && matchesProduct && matchesStatus && matchesDepot && matchesDestination && matchesSearch;
+  });
+};
 
   // Update handleGenerateGatePass to show warning for unloaded trucks
-const handleGenerateGatePass = (detail: WorkDetail) => {
-  if (!detail.loaded) {
-    const shouldProceed = window.confirm(
+const handleGenerateGatePass = async (detail: WorkDetail) => {
+  let shouldProceed = true;
+
+  if (detail.gatePassGenerated) {
+    shouldProceed = window.confirm(
+      "⚠️ WARNING: Gate pass has already been generated!\n\n" +
+      `First generated on: ${new Date(detail.gatePassGeneratedAt || '').toLocaleString()}\n` +
+      "Do you want to generate another copy?"
+    );
+  } else if (!detail.loaded) {
+    shouldProceed = window.confirm(
       "⚠️ WARNING: Generating gate pass for unloaded truck!\n\n" +
       "This should only be done in special circumstances.\n" +
       "Are you sure you want to continue?"
     );
-    if (!shouldProceed) return;
   }
+  
+  if (!shouldProceed) return;
+  
+  const updates: { [key: string]: any } = {
+    [`work_details/${detail.id}/gatePassGenerated`]: true,
+    [`work_details/${detail.id}/gatePassGeneratedAt`]: detail.gatePassGenerated 
+      ? detail.gatePassGeneratedAt 
+      : new Date().toISOString()
+  };
+  
+  await update(ref(database), updates);
   
   const params = new URLSearchParams({
     orderNo: detail.orderno,
@@ -1261,7 +1307,7 @@ const handleBalanceUseChange = (checked: boolean) => {
   }));
 };
 
-// Add this function to your component
+  // Add this function to your component
 const handleSyncStatus = async (truck: WorkDetail) => {
   try {
     const updates = await syncTruckPaymentStatus(database, truck, truckPayments);
@@ -1296,8 +1342,11 @@ const handleSyncStatus = async (truck: WorkDetail) => {
               >
                 <ArrowLeft className="h-5 w-5" />
               </Button>
-              <h1 className="text-xl font-semibold bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">
-                Work Management
+              <h1 
+                className="text-xl font-semibold bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent cursor-pointer select-none"
+                onClick={handleTitleClick}
+              >
+                Work Management {showCompleted ? "(All Orders)" : "(Active Only)"}
               </h1>
             </div>
             {/* Right side */} 
@@ -1640,12 +1689,18 @@ const handleSyncStatus = async (truck: WorkDetail) => {
                           ) : (
                             <div className="flex gap-2">
                               <Button
-                                variant="default"
+                                variant={detail.gatePassGenerated ? "secondary" : "outline"}
                                 size="sm"
                                 onClick={() => handleGenerateGatePass(detail)}
-                                disabled={!detail.loaded}
+                                className={cn(
+                                  "relative",
+                                  detail.gatePassGenerated && "bg-amber-100 hover:bg-amber-200 text-amber-700"
+                                )}
                               >
-                                GP
+                                {detail.gatePassGenerated ? "BG" : "GP"}
+                                {detail.gatePassGenerated && (
+                                  <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-amber-500" />
+                                )}
                               </Button>
                               {detail.paymentPending && (
                                 <Button
