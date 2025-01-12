@@ -16,7 +16,8 @@ import {
   Loader2,
   ClipboardList,
   ChevronDown, 
-  ChevronUp
+  ChevronUp,
+  Search // Add this
 } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -49,6 +50,7 @@ import { smartAllocation } from '@/lib/smartAllocation'
 import { confirmDialog } from "@/components/ui/confirm-dialog" // Add this line
 import { reminderService } from '@/lib/reminders' // Add this line
 import { StockItem } from '@/types/stock';
+import { Entry } from "@/types/entries"
 
 // Add new constants at the top of the file
 const WARNING_TIMEOUT = 9 * 60 * 1000; // 9 minutes
@@ -252,6 +254,9 @@ export default function EntriesPage() {
   // Add to existing state declarations
   const [selectedEntriesWithVolumes, setSelectedEntriesWithVolumes] = useState<SelectedEntryWithVolume[]>([]);
   const [remainingRequired, setRemainingRequired] = useState<number>(0);
+
+  // Add near other state declarations
+  const [summarySearch, setSummarySearch] = useState('');
 
   // 2. Other hooks
   const { data: session, status } = useSession()
@@ -490,11 +495,20 @@ export default function EntriesPage() {
           destGroup.totalQuantity += quantityInCubicMeters // Sum in m³
         })
   
+      // Filter out product groups with totalQuantity > 0
+      const filteredProductGroups = Object.fromEntries(
+        Object.entries(productGroups).filter(([_, groups]) => 
+          groups.some(group => group.totalQuantity > 0)
+        )
+      )
+  
       // Convert to array and sort
-      const sortedOrders = Object.entries(productGroups)
+      const sortedOrders = Object.entries(filteredProductGroups)
         .sort(([a], [b]) => b.localeCompare(a)) // AGO before PMS
         .flatMap(([_, groups]) => 
-          groups.sort((a, b) => a.destination.localeCompare(b.destination))
+          groups
+            .filter(group => group.totalQuantity > 0) // Exclude groups with 0 balance
+            .sort((a, b) => a.destination.localeCompare(b.destination))
         )
   
       setPendingOrders(sortedOrders)
@@ -991,43 +1005,51 @@ export default function EntriesPage() {
       const updates: { [key: string]: any } = {}
       const tempOriginalData: { [key: string]: Entry } = {}
       const allocations: Entry[] = []
-  
+
       // If SSD allocation with permit entry
       if (destination.toLowerCase() === 'ssd' && entryUsedInPermit) {
-        // First, try to allocate from the permit entry
-        const permitEntrySnapshot = await get(dbRef(db, `tr800/${entryUsedInPermit}`))
+        const permitEntrySnapshot = await get(dbRef(db, `tr800/${entryUsedInPermit}`));
         if (!permitEntrySnapshot.exists()) {
-          throw new Error("Selected permit entry not found")
+          throw new Error("Selected permit entry not found");
         }
   
-        const permitEntry = { key: permitEntrySnapshot.key, ...permitEntrySnapshot.val() }
-        const permitAllocation = Math.min(permitEntry.remainingQuantity, remainingToAllocate)
+        const permitEntry = { key: permitEntrySnapshot.key, ...permitEntrySnapshot.val() };
         
-        if (permitAllocation > 0) {
-          tempOriginalData[permitEntry.key] = { ...permitEntry }
-          
-          const updatedPermitEntry = {
-            ...permitEntry,
-            remainingQuantity: permitEntry.remainingQuantity - permitAllocation
-          }
-          
-          updates[`tr800/${permitEntry.key}`] = updatedPermitEntry
-          
-          allocations.push({
-            key: permitEntry.key,
-            motherEntry: permitEntry.number,
-            initialQuantity: permitEntry.initialQuantity,
-            remainingQuantity: updatedPermitEntry.remainingQuantity,
-            truckNumber,
-            destination,
-            subtractedQuantity: permitAllocation,
-            number: permitEntry.number,
-            product,
-            product_destination: `${product}-${destination}`,
-            timestamp: Date.now()
-          })
-          
-          remainingToAllocate -= permitAllocation
+        // Get all available entries for FIFO check
+        const tr800Snapshot = await get(dbRef(db, 'tr800'));
+        if (!tr800Snapshot.exists()) {
+          throw new Error("No entries found");
+        }
+  
+        const availableEntries = Object.entries(tr800Snapshot.val())
+          .map(([key, value]: [string, any]) => ({
+            key,
+            ...value
+          }))
+          .filter(entry => 
+            entry.product.toLowerCase() === product.toLowerCase() &&
+            entry.destination.toLowerCase() === 'ssd' &&
+            entry.remainingQuantity > 0
+          )
+          .sort((a, b) => a.timestamp - b.timestamp); // FIFO ordering
+  
+        // Try special SSD allocation first
+        const ssdAllocationSuccess = await handleSsdAllocation(
+          permitEntry,
+          requiredQuantity,
+          availableEntries,
+          updates,
+          tempOriginalData,
+          allocations,
+          truckNumber, // Pass truckNumber
+          product      // Pass product
+        );
+  
+        // If special allocation failed, fall back to normal permit entry allocation
+        if (!ssdAllocationSuccess) {
+          // Original permit entry allocation logic
+          const permitAllocation = Math.min(permitEntry.remainingQuantity, remainingToAllocate);
+          // ...existing permit allocation code...
         }
       }
   
@@ -1186,78 +1208,88 @@ export default function EntriesPage() {
     };
   };
 
-  const getSummary = async () => {
-    const db = getDatabase()
-    const tr800Ref = dbRef(db, 'tr800')
-    try {
-      const snapshot = await get(tr800Ref)
-      if (snapshot.exists()) {
-        let summary: { [key: string]: any } = {}
-        
-        snapshot.forEach((childSnapshot) => {
-          const data = childSnapshot.val()
-          // Format key as "product - destination" (both lowercase)
-          const key = `${data.product.toLowerCase()} - ${data.destination.toLowerCase()}`
-          
-          if (!summary[key]) {
-            summary[key] = {
-              remainingQuantity: 0,
-              estimatedTrucks: 0,
-              motherEntries: []
-            }
-          }
-          
-          if (data.remainingQuantity > 0) {
-            summary[key].remainingQuantity += data.remainingQuantity
-            summary[key].motherEntries.push({
-              number: data.number,
-              remainingQuantity: data.remainingQuantity,
-              timestamp: data.timestamp, // Add timestamp for sorting
-              creationDate: formatDate(data.timestamp).formatted, // Add this
-              ageInDays: formatDate(data.timestamp).ageInDays,    // Add this
-              usageCount: 0   // Add this
-            })
+  // Update the getSummary function:
+const getSummary = async () => {
+  const db = getDatabase()
+  const tr800Ref = dbRef(db, 'tr800')
+  try {
+    // First get truck entries to calculate usage counts
+    const truckEntriesSnapshot = await get(dbRef(db, 'truckEntries'))
+    const usageCounts: { [key: string]: number } = {}
+
+    // Calculate usage counts from truck entries
+    if (truckEntriesSnapshot.exists()) {
+      truckEntriesSnapshot.forEach(truck => {
+        const entries = truck.val()
+        Object.values(entries).forEach((entry: any) => {
+          if (entry.entryNumber) {
+            usageCounts[entry.entryNumber] = (usageCounts[entry.entryNumber] || 0) + 1
           }
         })
-
-        // Sort mother entries by FIFO before setting state
-        Object.values(summary).forEach(group => {
-          group.motherEntries = group.motherEntries.sort((a: { timestamp: number }, b: { timestamp: number }) => a.timestamp - b.timestamp);
-        });
-
-        // Filter and format summary array
-        const summaryArray = Object.entries(summary)
-          .filter(([_, value]) => value.remainingQuantity > 0)
-          .map(([key, value]) => ({
-            productDestination: key,
-            ...value,
-            estimatedTrucks: value.remainingQuantity / (key.includes('ago') ? 36000 : 40000)
-          }))
-          // Sort first by product (ago before pms) then by destination
-          .sort((a, b) => {
-            const [aProduct] = a.productDestination.split(' - ')
-            const [bProduct] = b.productDestination.split(' - ')
-            if (aProduct !== bProduct) {
-              return aProduct.localeCompare(bProduct)
-            }
-            return a.productDestination.localeCompare(b.productDestination)
-          })
-
-        setSummaryData(summaryArray)
-        setShowSummary(true)
-        setShowUsage(false)
-        
-        // After setting summary data, fetch pending orders
-        await fetchPendingOrders()
-      }
-    } catch (error) {
-      toast({
-        title: "Error",
-        description: "Failed to fetch summary",
-        variant: "destructive"
       })
     }
+
+    // Get TR800 entries and build summary
+    const snapshot = await get(tr800Ref)
+    if (snapshot.exists()) {
+      const summaryMap: { [key: string]: any } = {}
+      
+      snapshot.forEach((childSnapshot) => {
+        const data = childSnapshot.val()
+        if (!data) return
+        
+        const key = `${data.product.toLowerCase()} - ${data.destination.toLowerCase()}`
+        
+        if (!summaryMap[key]) {
+          summaryMap[key] = {
+            productDestination: key,
+            remainingQuantity: 0,
+            estimatedTrucks: 0,
+            motherEntries: []
+          }
+        }
+        
+        if (data.remainingQuantity > 0) {
+          summaryMap[key].remainingQuantity += data.remainingQuantity
+          summaryMap[key].motherEntries.push({
+            number: data.number,
+            remainingQuantity: data.remainingQuantity,
+            timestamp: data.timestamp,
+            creationDate: formatDate(data.timestamp).formatted,
+            ageInDays: formatDate(data.timestamp).ageInDays,
+            usageCount: usageCounts[data.number] || 0
+          })
+        }
+      })
+
+      // Calculate estimated trucks for each summary
+      Object.values(summaryMap).forEach(summary => {
+        const product = summary.productDestination.split(' - ')[0]
+        const capacity = product.toLowerCase() === 'ago' ? 36000 : 40000
+        summary.estimatedTrucks = Math.floor(summary.remainingQuantity / capacity)
+      })
+
+      // Convert map to array and sort
+      const summaryArray = Object.values(summaryMap)
+        .sort((a, b) => b.remainingQuantity - a.remainingQuantity)
+
+      // Filter out summaries with remainingQuantity > 0
+      const filteredSummaryArray = summaryArray.filter(summary => summary.remainingQuantity > 0)
+
+      setSummaryData(filteredSummaryArray)
+      setShowSummary(true)
+      setShowUsage(false)
+      setShowManualAllocation(false)
+    }
+  } catch (error) {
+    console.error('Summary error:', error)
+    toast({
+      title: "Error",
+      description: "Failed to fetch summary data",
+      variant: "destructive"
+    })
   }
+}
 
   const getUsage = async () => {
     const db = getDatabase()
@@ -1591,6 +1623,17 @@ const renderStockInfo = () => {
               Quantity Summary
             </h2>
             <div className="flex flex-col sm:flex-row gap-2">
+              {/* Add search input */}
+              <div className="relative w-full sm:w-64">
+                <Input
+                  placeholder="Search entries..."
+                  value={summarySearch}
+                  onChange={(e) => setSummarySearch(e.target.value)}
+                  className="pl-8"
+                />
+                <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              </div>
+              {/* Existing buttons */}
               <Button 
                 variant="outline" 
                 onClick={() => setShowPendingOrders(!showPendingOrders)}
@@ -1660,76 +1703,93 @@ const renderStockInfo = () => {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {summaryData.map((item, index) => {
-                      // Split and format product-destination
-                      const [product, destination] = item.productDestination.split(' - ')
-                      const warningKey = `${product}-${destination}`.toUpperCase();
-                      const warning = quantityWarnings[warningKey];
-                      
-                      return (
-                        <TableRow 
-                          key={index}
-                          className={`
-                            border-b border-emerald-500/10 
-                            hover:bg-emerald-50/50 dark:hover:bg-emerald-900/20
-                            ${warning ? 'bg-red-50/50 dark:bg-red-900/20' : ''}
-                            transition-colors duration-200
-                          `}
-                        >
-                          <TableCell className="font-medium">
-                            {`${product.toUpperCase()} - ${destination.toUpperCase()}`}
-                            {warning && (
-                              <div className="mt-1 text-sm text-red-600 dark:text-red-400">
-                                ⚠️ Shortage of {warning.shortage.toFixed(2)} trucks
-                                ({((warning.pendingQuantity - warning.availableQuantity) / 1000).toFixed(2)}k liters)
-                              </div>
-                            )}
-                          </TableCell>
-                          <TableCell>{item.remainingQuantity.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</TableCell>
-                          <TableCell>{item.estimatedTrucks.toFixed(2)}</TableCell>
-                          <TableCell>
-                            {item.motherEntries.map((entry, entryIndex) => (
-                              <div key={entryIndex} className="relative flex items-center group mb-2">
-                                <span 
-                                  className={`absolute -left-6 top-1/2 -translate-y-1/2 w-5 h-5 flex items-center 
-                                             justify-center text-xs font-medium ${
-                                    entry.ageInDays > 30 ? 'text-red-500' :
-                                    entry.ageInDays > 15 ? 'text-yellow-500' :
-                                    'text-emerald-500'
-                                  }`}
-                                >
-                                  #{entryIndex + 1}
-                                </span>
-                                <div className="flex flex-col w-full">
-                                  <div className="flex justify-between items-center group-hover:bg-emerald-50 
-                                                dark:group-hover:bg-emerald-900/20 px-2 py-1 rounded transition-colors">
-                                    <span className="font-medium">
-                                      {entry.number} ({entry.remainingQuantity.toLocaleString()})
-                                    </span>
-                                    <span className={`text-xs px-2 py-0.5 rounded-full ${
-                                      entry.ageInDays > 30 ? 'bg-red-100 text-red-700 dark:bg-red-900/20 dark:text-red-400' :
-                                      entry.ageInDays > 15 ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/20 dark:text-yellow-400' :
-                                      'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400'
-                                    }`}>
-                                      {entry.ageInDays}d old
-                                    </span>
-                                  </div>
-                                  <div className="text-xs text-muted-foreground px-2 space-y-1">
-                                    <div>Created: {entry.creationDate}</div>
-                                    <div>Usage Count: {entry.usageCount} allocations</div>
-                                    {entry.ageInDays > 30 && (
-                                      <div className="text-red-500 dark:text-red-400">
-                                        ⚠️ Aging entry - needs attention
-                                      </div>
-                                    )}
+                    {summaryData
+                      .filter(item => {
+                        if (!summarySearch) return true;
+                        const searchTerm = summarySearch.toLowerCase();
+                        return (
+                          item.productDestination.toLowerCase().includes(searchTerm) ||
+                          item.motherEntries.some(entry => 
+                            entry.number.toLowerCase().includes(searchTerm)
+                          )
+                        );
+                      })
+                      .map((item, index) => {
+                        // Split and format product-destination
+                        const [product, destination] = item.productDestination.split(' - ')
+                        const warningKey = `${product}-${destination}`.toUpperCase();
+                        const warning = quantityWarnings[warningKey];
+                        
+                        return (
+                          <TableRow 
+                            key={index}
+                            className={`
+                              border-b border-emerald-500/10 
+                              hover:bg-emerald-50/50 dark:hover:bg-emerald-900/20
+                              ${warning ? 'bg-red-50/50 dark:bg-red-900/20' : ''}
+                              transition-colors duration-200
+                            `}
+                          >
+                            <TableCell className="font-medium">
+                              {highlightText(
+                                `${product.toUpperCase()} - ${destination.toUpperCase()}`,
+                                summarySearch
+                              )}
+                              {warning && (
+                                <div className="mt-1 text-sm text-red-600 dark:text-red-400">
+                                  ⚠️ Shortage of {warning.shortage.toFixed(2)} trucks
+                                  ({((warning.pendingQuantity - warning.availableQuantity) / 1000).toFixed(2)}k liters)
+                                </div>
+                              )}
+                            </TableCell>
+                            <TableCell>{item.remainingQuantity.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</TableCell>
+                            <TableCell>{item.estimatedTrucks.toFixed(2)}</TableCell>
+                            <TableCell>
+                              {item.motherEntries.map((entry, entryIndex) => (
+                                <div key={entryIndex} className="relative flex items-center group mb-2">
+                                  <span 
+                                    className={`absolute -left-6 top-1/2 -translate-y-1/2 w-5 h-5 flex items-center 
+                                               justify-center text-xs font-medium ${
+                                      entry.ageInDays > 30 ? 'text-red-500' :
+                                      entry.ageInDays > 15 ? 'text-yellow-500' :
+                                      'text-emerald-500'
+                                    }`}
+                                  >
+                                    #{entryIndex + 1}
+                                  </span>
+                                  <div className="flex flex-col w-full">
+                                    <div className="flex justify-between items-center group-hover:bg-emerald-50 
+                                                  dark:group-hover:bg-emerald-900/20 px-2 py-1 rounded transition-colors">
+                                      <span className="font-medium">
+                                        {highlightText(
+                                          `${entry.number} (${entry.remainingQuantity.toLocaleString()})`,
+                                          summarySearch
+                                        )}
+                                      </span>
+                                      <span className={`text-xs px-2 py-0.5 rounded-full ${
+                                        entry.ageInDays > 30 ? 'bg-red-100 text-red-700 dark:bg-red-900/20 dark:text-red-400' :
+                                        entry.ageInDays > 15 ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/20 dark:text-yellow-400' :
+                                        'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400'
+                                      }`}>
+                                        {entry.ageInDays}d old
+                                      </span>
+                                    </div>
+                                    <div className="text-xs text-muted-foreground px-2 space-y-1">
+                                      <div>Created: {entry.creationDate}</div>
+                                      <div>Usage Count: {entry.usageCount} allocations</div>
+                                      {entry.ageInDays > 30 && (
+                                        <div className="text-red-500 dark:text-red-400">
+                                          ⚠️ Aging entry - needs attention
+                                        </div>
+                                      )}
+                                    </div>
                                   </div>
                                 </div>
-                              </div>
-                            ))}
-                          </TableCell>
-                        </TableRow>
-                      )
-                    })}
+                              ))}
+                            </TableCell>
+                          </TableRow>
+                        )
+                      })}
                   </TableBody>
                 </Table>
               </CardContent>
@@ -2587,10 +2647,25 @@ const renderStockInfo = () => {
             sm:flex
           `}>
             <Button 
-              onClick={() => {
-                getSummary()
-                setCurrentView('summary')
-                setShowMobileMenu(false)
+              onClick={async () => {  // Make the handler async
+                try {
+                  setIsLoading(true);
+                  await getSummary();  // Wait for getSummary to complete
+                  setShowSummary(true);
+                  setShowUsage(false);
+                  setShowManualAllocation(false);
+                  setCurrentView('summary');
+                  setShowMobileMenu(false);
+                } catch (error) {
+                  console.error('Error loading summary:', error);
+                  toast({
+                    title: "Error",
+                    description: "Failed to load summary data",
+                    variant: "destructive"
+                  });
+                } finally {
+                  setIsLoading(false);
+                }
               }} 
               variant="outline" 
               className={`flex items-center justify-center gap-2 w-full sm:w-auto ${currentView === 'summary' ? 'bg-primary text-primary-foreground' : ''}`}
@@ -2699,3 +2774,78 @@ const renderStockInfo = () => {
     </div>
   )
 }
+
+// Add this helper function before getEntries
+const handleSsdAllocation = async (
+  permitEntry: Entry,
+  requiredQuantity: number,
+  availableEntries: Entry[],
+  updates: { [key: string]: any },
+  tempOriginalData: { [key: string]: Entry },
+  allocations: Entry[],
+  truckNumber: string, // Add truckNumber
+  product: string      // Add product
+) => {
+  // If permit entry is not the first in FIFO order
+  const fifoEntry = availableEntries[0];
+  if (fifoEntry && fifoEntry.key !== permitEntry.key) {
+    // Allocate 1000 from permit entry first
+    const permitAllocation = Math.min(1000, permitEntry.remainingQuantity, requiredQuantity);
+    
+    if (permitAllocation > 0) {
+      tempOriginalData[permitEntry.key] = { ...permitEntry };
+      
+      const updatedPermitEntry = {
+        ...permitEntry,
+        remainingQuantity: permitEntry.remainingQuantity - permitAllocation
+      };
+      
+      updates[`tr800/${permitEntry.key}`] = updatedPermitEntry;
+      
+      allocations.push({
+        key: permitEntry.key,
+        motherEntry: permitEntry.number,
+        initialQuantity: permitEntry.initialQuantity,
+        remainingQuantity: updatedPermitEntry.remainingQuantity,
+        truckNumber,
+        destination: 'ssd',
+        subtractedQuantity: permitAllocation,
+        number: permitEntry.number,
+        product,
+        product_destination: `${product}-ssd`,
+        timestamp: Date.now()
+      });
+      
+      // Allocate remaining from FIFO entry
+      const remainingRequired = requiredQuantity - permitAllocation;
+      if (remainingRequired > 0 && fifoEntry.remainingQuantity >= remainingRequired) {
+        tempOriginalData[fifoEntry.key] = { ...fifoEntry };
+        
+        const updatedFifoEntry = {
+          ...fifoEntry,
+          remainingQuantity: fifoEntry.remainingQuantity - remainingRequired
+        };
+        
+        updates[`tr800/${fifoEntry.key}`] = updatedFifoEntry;
+        
+        allocations.push({
+          key: fifoEntry.key,
+          motherEntry: fifoEntry.number,
+          initialQuantity: fifoEntry.initialQuantity,
+          remainingQuantity: updatedFifoEntry.remainingQuantity,
+          truckNumber,
+          destination: 'ssd',
+          subtractedQuantity: remainingRequired,
+          number: fifoEntry.number,
+          product,
+          product_destination: `${product}-ssd`,
+          timestamp: Date.now()
+        });
+        
+        return true; // Allocation successful
+      }
+    }
+  }
+  return false; // Could not allocate using this method
+};
+
