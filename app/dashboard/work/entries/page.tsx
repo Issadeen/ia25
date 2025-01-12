@@ -144,7 +144,11 @@ export default function EntriesPage() {
     productDestination: string;
     remainingQuantity: number;
     estimatedTrucks: number;
-    motherEntries: { number: string; remainingQuantity: number }[];
+    motherEntries: { 
+      number: string; 
+      remainingQuantity: number;
+      timestamp: number; // Add timestamp
+    }[];
   }
 
   const [summaryData, setSummaryData] = useState<Summary[]>([])
