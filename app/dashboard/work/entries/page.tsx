@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 import { useSession, signOut } from "next-auth/react"
 import { useRouter } from "next/navigation"
 import { useTheme } from "next-themes"
@@ -56,22 +56,6 @@ import { Entry } from "@/types/entries"
 const WARNING_TIMEOUT = 9 * 60 * 1000; // 9 minutes
 const LOGOUT_TIMEOUT = 10 * 60 * 1000; // 10 minutes
 
-// Update the highlightText function
-function highlightText(text: string, filter: string) {
-  if (!filter) return text;
-  // Convert text to string explicitly if it might not be a string
-  const textStr = String(text);
-  const regex = new RegExp(`(${filter})`, 'gi');
-  const parts = textStr.split(regex);
-  return parts.map((part, i) => 
-    regex.test(part) ? (
-      <span key={i} className="bg-yellow-200 dark:bg-yellow-900 rounded px-1">
-        {part}
-      </span>
-    ) : part
-  );
-}
-
 // Add new interface for pending orders
 interface PendingOrderSummary {
   product: string;
@@ -119,6 +103,21 @@ interface Summary {
 }
 
 export default function EntriesPage() {
+  // Add highlightText inside the component
+  const highlightText = useCallback((text: string, filter: string) => {
+    if (!filter) return text;
+    const textStr = String(text);
+    const regex = new RegExp(`(${filter})`, 'gi');
+    const parts = textStr.split(regex);
+    return parts.map((part, i) => 
+      regex.test(part) ? (
+        <span key={i} className="bg-yellow-200 dark:bg-yellow-900 rounded px-1">
+          {part}
+        </span>
+      ) : part
+    );
+  }, []);
+
   // Add to existing state declarations
   const searchParams = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '');
 
@@ -313,7 +312,7 @@ export default function EntriesPage() {
   }
 
   // Add this function with other helper functions
-  const verifyWorkIdAgainstDb = async (inputWorkId: string) => {
+  const verifyWorkIdAgainstDb = useCallback(async (inputWorkId: string): Promise<boolean> => {
     const db = getDatabase();
     const usersRef = dbRef(db, 'users');
     
@@ -338,7 +337,7 @@ export default function EntriesPage() {
       })
       return false;
     }
-  }
+  }, [toast]);
 
   // Update the verifyWorkId function
   const verifyWorkId = async (e: React.FormEvent) => {
@@ -1269,6 +1268,7 @@ const getSummary = async () => {
         summary.estimatedTrucks = Math.floor(summary.remainingQuantity / capacity)
       })
 
+      // Convert map to array and sort
       // Convert map to array and sort
       const summaryArray = Object.values(summaryMap)
         .sort((a, b) => b.remainingQuantity - a.remainingQuantity)
@@ -2712,67 +2712,67 @@ const renderStockInfo = () => {
           {showScrollTop && (
             <motion.button
               initial={{ opacity: 0, scale: 0.8 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.8 }}
-              onClick={scrollToTop}
-              className="fixed bottom-4 right-4 p-2 rounded-full bg-emerald-500/90 text-white shadow-lg hover:bg-emerald-600/90 transition-colors z-50"
-              whileHover={{ scale: 1.1 }}
-              whileTap={{ scale: 0.9 }}
-            >
-              <ArrowUp className="h-6 w-6" />
-              <span className="sr-only">Scroll to top</span>
-            </motion.button>
-          )}
-        </AnimatePresence>
-      </main>
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.8 }}
+                onClick={scrollToTop}
+                className="fixed bottom-4 right-4 p-2 rounded-full bg-emerald-500/90 text-white shadow-lg hover:bg-emerald-600/90 transition-colors z-50"
+                whileHover={{ scale: 1.1 }}
+                whileTap={{ scale: 0.9 }}
+              >
+                <ArrowUp className="h-6 w-6" />
+                <span className="sr-only">Scroll to top</span>
+              </motion.button>
+            )}
+          </AnimatePresence>
+        </main>
 
-      <Dialog open={workIdDialogOpen} onOpenChange={setWorkIdDialogOpen}>
-        <DialogContent className="sm:max-w-[425px] mx-2 sm:mx-auto">
-          <DialogHeader>
-            <DialogTitle>Verify Work ID</DialogTitle>
-            <DialogDescription>
-              Please enter your Work ID to confirm the changes.
-            </DialogDescription>
-          </DialogHeader>
-          <form onSubmit={verifyWorkId}>
-            <div className="mt-4">
-              <Label htmlFor="workId">Work ID</Label>
-              <Input
-                id="workId"
-                value={workId}
-                onChange={(e) => setWorkId(e.target.value)}
-                required
-              />
-            </div>
+        <Dialog open={workIdDialogOpen} onOpenChange={setWorkIdDialogOpen}>
+          <DialogContent className="sm:max-w-[425px] mx-2 sm:mx-auto">
+            <DialogHeader>
+              <DialogTitle>Verify Work ID</DialogTitle>
+              <DialogDescription>
+                Please enter your Work ID to confirm the changes.
+              </DialogDescription>
+            </DialogHeader>
+            <form onSubmit={verifyWorkId}>
+              <div className="mt-4">
+                <Label htmlFor="workId">Work ID</Label>
+                <Input
+                  id="workId"
+                  value={workId}
+                  onChange={(e) => setWorkId(e.target.value)}
+                  required
+                />
+              </div>
+              <div className="mt-6 flex justify-end gap-2">
+                <Button variant="outline" onClick={() => setWorkIdDialogOpen(false)}>
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={isVerifying}>
+                  {isVerifying ? <Loader2 className="h-4 w-4 animate-spin" /> : "Verify"}
+                </Button>
+              </div>
+            </form>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={showWarningModal} onOpenChange={setShowWarningModal}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Session Expiring Soon</DialogTitle>
+              <DialogDescription>
+                {warningMessage}
+              </DialogDescription>
+            </DialogHeader>
             <div className="mt-6 flex justify-end gap-2">
-              <Button variant="outline" onClick={() => setWorkIdDialogOpen(false)}>
-                Cancel
-              </Button>
-              <Button type="submit" disabled={isVerifying}>
-                {isVerifying ? <Loader2 className="h-4 w-4 animate-spin" /> : "Verify"}
+              <Button variant="outline" onClick={() => setShowWarningModal(false)}>
+                Dismiss
               </Button>
             </div>
-          </form>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={showWarningModal} onOpenChange={setShowWarningModal}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Session Expiring Soon</DialogTitle>
-            <DialogDescription>
-              {warningMessage}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="mt-6 flex justify-end gap-2">
-            <Button variant="outline" onClick={() => setShowWarningModal(false)}>
-              Dismiss
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-    </div>
-  )
+          </DialogContent>
+        </Dialog>
+      </div>
+    )
 }
 
 // Add this helper function before getEntries
