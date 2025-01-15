@@ -67,6 +67,7 @@ interface WorkDetail {
   gatePassGeneratedAt?: string; // New field to track gate pass generation time
 }
 
+// Update the SummaryStats interface
 interface SummaryStats {
   totalOrders: number;
   queuedOrders: number;
@@ -75,6 +76,8 @@ interface SummaryStats {
   pmsOrders: number;
   loadedOrders: number;
   pendingOrders: number;
+  pendingAgoOrders: number;  // Add this
+  pendingPmsOrders: number;  // Add this
 }
 
 interface OwnerSummary {
@@ -141,6 +144,12 @@ const filterVariants = {
   }
 }
 
+// Update header height calculation - add this CSS at the top of your file after the imports
+const HEADER_HEIGHT = {
+  mobile: '7rem', // 112px - accounts for both header rows
+  desktop: '4rem'  // 64px - single row header
+};
+
 export default function WorkManagementPage() {
   // 1. Declare all hooks at the top level, before any conditional logic
   const { data: session, status } = useSession()
@@ -157,7 +166,9 @@ export default function WorkManagementPage() {
     agoOrders: 0,
     pmsOrders: 0,
     loadedOrders: 0,
-    pendingOrders: 0
+    pendingOrders: 0,
+    pendingAgoOrders: 0,  // Add this
+    pendingPmsOrders: 0  // Add this
   })
   const [ownerSummary, setOwnerSummary] = useState<OwnerSummary>({})
   const [editingTruckId, setEditingTruckId] = useState<string | null>(null)
@@ -203,6 +214,9 @@ export default function WorkManagementPage() {
   const [showCompleted, setShowCompleted] = useState(false);
   const [titleClickCount, setTitleClickCount] = useState(0);
 
+  // Add new state
+  const [showUnpaidSummary, setShowUnpaidSummary] = useState(false);
+
   // Add click handler for the title
   const handleTitleClick = () => {
     const newCount = titleClickCount + 1;
@@ -227,7 +241,9 @@ export default function WorkManagementPage() {
       agoOrders: 0,
       pmsOrders: 0,
       loadedOrders: 0,
-      pendingOrders: 0
+      pendingOrders: 0,
+      pendingAgoOrders: 0,  // Add this
+      pendingPmsOrders: 0  // Add this
     };
     
     const ownerSummaryData: OwnerSummary = {};
@@ -244,6 +260,12 @@ export default function WorkManagementPage() {
       if (detail.status === "queued") stats.queuedOrders++;
       else if (detail.status === "completed") stats.queuedOrders++; // Count completed as queued
       else stats.unqueuedOrders++;
+
+      // Add pending product counts
+      if (detail.status === "queued" && !detail.loaded) {
+        if (detail.product.trim().toUpperCase() === "AGO") stats.pendingAgoOrders++;
+        if (detail.product.trim().toUpperCase() === "PMS") stats.pendingPmsOrders++;
+      }
 
       // Update owner summary with the same logic
       if (!ownerSummaryData[detail.owner]) {
@@ -900,6 +922,7 @@ const calculateOwnerTotals = (owner: string | null) => {
           const allocatedTrucks = payment.allocatedTrucks?.map((allocation: any) => {
             const truck = workDetails.find(t => t.id === allocation.truckId)
             return truck ? `${truck.truck_number} ($${formatNumber(allocation.amount)})` : ''
+  
           }).filter(Boolean).join(', ') || 'Unallocated'
   
           return [new Date(payment.timestamp).toLocaleDateString(), `$${formatNumber(payment.amountPaid)}`, allocatedTrucks, payment.note || '-']
@@ -1094,12 +1117,6 @@ const handleGenerateGatePass = async (detail: WorkDetail) => {
   if (detail.gatePassGenerated) {
     shouldProceed = window.confirm(
       "⚠️ WARNING: Gate pass has already been generated!\n\n" +
-      `First generated on: ${new Date(detail.gatePassGeneratedAt || '').toLocaleString()}\n` +
-      "Do you want to generate another copy?"
-    );
-  } else if (!detail.loaded) {
-    shouldProceed = window.confirm(
-      "⚠️ WARNING: Generating gate pass for unloaded truck!\n\n" +
       "This should only be done in special circumstances.\n" +
       "Are you sure you want to continue?"
     );
@@ -1327,58 +1344,116 @@ const handleSyncStatus = async (truck: WorkDetail) => {
   }
 };
 
+// Add new helper function
+const getUnpaidSummary = () => {
+  const summary = workDetails
+    .filter(detail => detail.loaded && !detail.paid)
+    .reduce((acc, detail) => {
+      const owner = detail.owner;
+      const { balance } = getTruckAllocations(detail);
+      
+      if (!acc[owner]) {
+        acc[owner] = {
+          trucks: [],
+          totalAmount: 0,
+          agoCount: 0,
+          pmsCount: 0
+        };
+      }
+      
+      acc[owner].trucks.push({
+        truck_number: detail.truck_number,
+        amount: balance,
+        product: detail.product
+      });
+      acc[owner].totalAmount += balance;
+      if (detail.product === 'AGO') acc[owner].agoCount++;
+      if (detail.product === 'PMS') acc[owner].pmsCount++;
+      
+      return acc;
+    }, {} as { [key: string]: { 
+      trucks: { truck_number: string; amount: number; product: string }[],
+      totalAmount: number,
+      agoCount: number,
+      pmsCount: number
+    }});
+
+  return summary;
+};
+
   return (
     <div className="min-h-screen">
       <header className="fixed top-0 left-0 w-full border-b z-50 bg-gradient-to-r from-emerald-900/10 via-blue-900/10 to-blue-900/10 backdrop-blur-xl">
         <div className="w-full">
-          <div className="max-w-7xl mx-auto px-4 py-3 flex justify-between items-center">
-            {/* Left side */} 
-            <div className="flex items-center gap-4">
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => router.push('/dashboard/work')}
-                className="text-emerald-700 hover:text-emerald-800 hover:bg-emerald-100"
-              >
-                <ArrowLeft className="h-5 w-5" />
-              </Button>
-              <h1 
-                className="text-xl font-semibold bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent cursor-pointer select-none"
-                onClick={handleTitleClick}
-              >
-                Work Management {showCompleted ? "(All Orders)" : "(Active Only)"}
-              </h1>
-            </div>
-            {/* Right side */} 
-            <div className="flex items-center gap-4">
-              <motion.div
-                className="relative"
-                whileHover={{ width: 'auto' }}
-                initial={{ width: 40 }}
-                style={{ overflow: 'hidden' }}
-              >
+          <div className="max-w-7xl mx-auto px-2 py-2">
+            {/* Main header row */}
+            <div className="flex items-center justify-between">
+              {/* Left side - essential controls */}
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => router.push('/dashboard/work')}
+                  className="h-8 w-8"
+                >
+                  <ArrowLeft className="h-4 w-4" />
+                </Button>
+                <h1 
+                  className="text-sm font-semibold bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent truncate max-w-[150px] sm:max-w-none sm:text-base"
+                  onClick={handleTitleClick}
+                >
+                  Work Management
+                </h1>
+              </div>
+
+              {/* Right side - actions */}
+              <div className="flex items-center gap-2">
+                {/* Only show on desktop */}
                 <Button
                   variant="outline"
-                  onClick={() => setIsAddModalOpen(true)}
-                  className="whitespace-nowrap hover:bg-emerald-100 hover:text-emerald-700"
+                  size="sm"
+                  onClick={() => setShowUnpaidSummary(true)}
+                  className="hidden sm:flex text-xs items-center"
                 >
-                  <Plus className="h-4 w-4 mr-2" />
-                  Add New
+                  Unpaid Summary
                 </Button>
-              </motion.div>
-              <ThemeToggle />
-              <Avatar 
-                className="h-8 w-8 ring-2 ring-pink-500/50 ring-offset-2 ring-offset-background shadow-lg shadow-pink-500/10 transition-shadow hover:ring-pink-500/75 cursor-pointer"
-                onClick={handleProfileClick}
+
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={() => setIsAddModalOpen(true)}
+                  className="h-8 w-8"
+                >
+                  <Plus className="h-4 w-4" />
+                </Button>
+
+                <ThemeToggle />
+                
+                <Avatar 
+                  className="h-8 w-8 ring-1 ring-pink-500/50"
+                  onClick={handleProfileClick}
+                >
+                  <AvatarImage 
+                    src={session?.user?.image || lastUploadedImage || ''} 
+                    alt="Profile"
+                  />
+                  <AvatarFallback className="text-xs">
+                    {session?.user?.email?.[0]?.toUpperCase() || 'U'}
+                  </AvatarFallback>
+                </Avatar>
+              </div>
+            </div>
+
+            {/* Secondary row for mobile only - shows up below main header */}
+            <div className="flex mt-2 sm:hidden">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowUnpaidSummary(true)}
+                className="text-xs w-full"
               >
-                <AvatarImage 
-                  src={session?.user?.image || lastUploadedImage || ''} 
-                  alt="Profile"
-                />
-                <AvatarFallback className="bg-pink-100 text-pink-700">
-                  {session?.user?.email?.[0]?.toUpperCase() || 'U'}
-                </AvatarFallback>
-              </Avatar>
+                View Unpaid Summary
+              </Button>
             </div>
           </div>
         </div>
@@ -1394,432 +1469,442 @@ const handleSyncStatus = async (truck: WorkDetail) => {
         }
       `}</style>
 
-      <main className="max-w-7xl mx-auto px-4 pt-24 pb-8">
-        {/* Search and Toggle Filters on the same line */} 
-        <div className="flex flex-col items-center sm:flex-row sm:justify-center sm:space-x-4 mb-4">
-          <Input
-            placeholder="Search by owner, truck number, or order number..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="max-w-xl w-full sm:w-1/2"
-          />
-          <Button
-            variant="secondary"
-            onClick={() => setShowFilters(prev => !prev)}
-            className="mt-2 sm:mt-0"
-          >
-            {showFilters ? "Hide Filters" : "Show Filters"}
-          </Button>
-        </div>
-
-        {/* Conditionally Rendered Filter Controls with reduced sizes */} 
-        <AnimatePresence>
-          {showFilters && (
-            <motion.div
-              variants={filterVariants}
-              initial="hidden"
-              animate="visible"
-              exit="hidden"
-              className="flex flex-wrap justify-center mb-8 gap-2"
+      <main className="max-w-7xl mx-auto px-2 sm:px-4 pt-28 sm:pt-24 pb-6 sm:pb-8">
+        <div className="space-y-4">
+          {/* Search and Toggle Filters on the same line */} 
+          <div className="flex flex-col items-center sm:flex-row sm:justify-center sm:space-x-4 gap-2 sm:gap-0">
+            <Input
+              placeholder="Search by owner, truck number, or order number..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="max-w-xl w-full sm:w-1/2"
+            />
+            <Button
+              variant="secondary"
+              onClick={() => setShowFilters(prev => !prev)}
+              className="w-full sm:w-auto"
             >
-              {/* Owner Filter */} 
-              <Input
-                placeholder="Filter by Owner"
-                value={ownerFilter}
-                onChange={(e) => setOwnerFilter(e.target.value)}
-                className="max-w-xs w-full sm:w-auto"
-              />
-              {/* Product Filter */} 
-              <div className="max-w-xs w-full sm:w-auto">
-                <Select
-                  value={productFilter}
-                  onValueChange={(value) => setProductFilter(value)}
-                >
-                <SelectTrigger>
-                  <SelectValue placeholder="Filter by Product" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="ALL">All</SelectItem>
-                  <SelectItem value="AGO">AGO</SelectItem>
-                  <SelectItem value="PMS">PMS</SelectItem> {/* Fixed missing closing tag */} 
-                </SelectContent>
-                </Select>
-              </div>
-              {/* Status Filter */} 
-              <Select
-                value={statusFilter}
-                onValueChange={(value) => setStatusFilter(value)}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Filter by Status" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="ALL">All</SelectItem>
-                  <SelectItem value="queued">Queued</SelectItem>
-                  <SelectItem value="not queued">Not Queued</SelectItem>
-                </SelectContent>
-              </Select>
-              {/* Depot Filter */} 
-              <Input
-                placeholder="Filter by Depot"
-                value={depotFilter}
-                onChange={(e) => setDepotFilter(e.target.value)}
-                className="max-w-xs w-full sm:w-auto"
-              />
-              {/* Destination Filter */} 
-              <Input
-                placeholder="Filter by Destination"
-                value={destinationFilter}
-                onChange={(e) => setDestinationFilter(e.target.value)}
-                className="max-w-xs w-full sm:w-auto"
-              />
-              {/* Clear Filters Button */} 
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setOwnerFilter("")
-                  setProductFilter("ALL")
-                  setStatusFilter("ALL")
-                  setDepotFilter("")
-                  setDestinationFilter("")
-                  // Removed setSearchTerm("") to keep the search box intact
-                }}
-                className="max-w-xs w-full sm:w-auto"
-              >
-                Clear Filters
-              </Button>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* Download PDF Button */} 
-        <div className="flex justify-end mb-4">
-          <div className="flex gap-2">
-            <Button variant="outline" onClick={handleDownloadPDF}>
-              <Download className="mr-2 h-4 w-4" />
-              PDF
-            </Button>
-            <Button variant="outline" onClick={handleExportToExcel}>
-              <FileSpreadsheet className="mr-2 h-4 w-4" />
-              Excel
+              {showFilters ? "Hide Filters" : "Show Filters"}
             </Button>
           </div>
-        </div>
 
-        {isLoading ? (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="flex justify-center items-center h-64"
-          >
-            <Loader2 className="h-8 w-8 animate-spin" />
-          </motion.div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full border-collapse bg-card text-card-foreground">
-              <thead>
-                <tr className="border-b">
-                  <th className="p-3 text-left font-medium bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">Owner</th>
-                  <th className="p-3 text-left font-medium bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">Product</th>
-                  <th className="p-3 text-left font-medium bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">Truck Number</th>
-                  <th className="p-3 text-left font-medium bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">Quantity</th>
-                  <th className="p-3 text-left font-medium bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">Status</th>
-                  <th className="p-3 text-left font-medium bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">Order No</th>
-                  <th className="p-3 text-left font-medium bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">Depot</th>
-                  <th className="p-3 text-left font-medium bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">Destination</th>
-                  <th className="p-3 text-left font-medium bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">Actions</th>
-                </tr>
-              </thead>
-              <AnimatePresence>
-                <tbody>
-                  {getFilteredWorkDetails().map((detail, index) => (
-                    <motion.tr
-                      key={detail.id}
-                      variants={tableRowVariants}
-                      initial="hidden"
-                      animate="visible"
-                      transition={{ delay: index * 0.05 }}
-                      className={`border-b hover:bg-muted/50 ${
-                        detail.loaded ? 'opacity-50 bg-muted/20' : ''
-                      } ${
-                        detail.id === lastAddedId ? 'highlight-new-record' : ''
-                      }`}
-                    >
-                      <td className="p-3">{detail.owner}</td>
-                      <td className="p-3">{detail.product}</td>
-                      <td className="p-3">
-                        <div className="flex items-center gap-2">
-                          {editingTruckId === detail.id ? (
-                            <Input
-                              value={detail.truck_number}
-                              onChange={(e) => handleTruckNumberChange(detail.id, e.target.value, detail.truck_number)}
-                              className="w-32"
-                            />
-                          ) : (
-                            <span>{detail.truck_number}</span>
-                          )}
-                          {!detail.loaded && (
-                            editingTruckId === detail.id ? (
-                              <>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => handleTruckNumberChange(detail.id, detail.truck_number, detail.truck_number)}
-                                >
-                                  <Check className="h-4 w-4" />
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => setEditingTruckId(null)}
-                                >
-                                  <X className="h-4 w-4" />
-                                </Button>
-                              </>
-                            ) : (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => setEditingTruckId(detail.id)}
-                              >
-                                <Edit className="h-4 w-4" />
-                              </Button>
-                            )
-                          )}
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => {
-                              setSelectedTruckHistory(detail)
-                              setShowTruckHistory(true)
-                            }}
-                          >
-                            <History className="h-4 w-4" />
-                          </Button>
-                        </div>
-                        {detail.previous_trucks && detail.previous_trucks.length > 0 && (
-                          <small className="text-muted-foreground">
-                            Previous: {detail.previous_trucks[detail.previous_trucks.length - 1]}
-                          </small>
-                        )}
-                      </td>
-                      <td className="p-3">{detail.quantity}</td>
-                      <td className="p-3">
-                        <Button
-                          variant={detail.status === "queued" ? "default" : "secondary"}
-                          size="sm"
-                          className={detail.status === "queued" ? "bg-emerald-600 hover:bg-emerald-700" : ""}
-                          disabled={detail.loaded}
-                          onClick={() => handleStatusChange(detail.id, detail.status)}
+          {/* Conditionally Rendered Filter Controls with reduced sizes */} 
+          <AnimatePresence>
+            {showFilters && (
+              <motion.div
+                variants={filterVariants}
+                initial="hidden"
+                animate="visible"
+                exit="hidden"
+                className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 w-full max-w-4xl mx-auto"
+              >
+                {/* Owner Filter */} 
+                <Input
+                  placeholder="Filter by Owner"
+                  value={ownerFilter}
+                  onChange={(e) => setOwnerFilter(e.target.value)}
+                  className="max-w-xs w-full sm:w-auto"
+                />
+                {/* Product Filter */} 
+                <div className="max-w-xs w-full sm:w-auto">
+                  <Select
+                    value={productFilter}
+                    onValueChange={(value) => setProductFilter(value)}
+                  >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Filter by Product" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ALL">All</SelectItem>
+                    <SelectItem value="AGO">AGO</SelectItem>
+                    <SelectItem value="PMS">PMS</SelectItem> {/* Fixed missing closing tag */} 
+                  </SelectContent>
+                  </Select>
+                </div>
+                {/* Status Filter */} 
+                <Select
+                  value={statusFilter}
+                  onValueChange={(value) => setStatusFilter(value)}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Filter by Status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ALL">All</SelectItem>
+                    <SelectItem value="queued">Queued</SelectItem>
+                    <SelectItem value="not queued">Not Queued</SelectItem>
+                  </SelectContent>
+                </Select>
+                {/* Depot Filter */} 
+                <Input
+                  placeholder="Filter by Depot"
+                  value={depotFilter}
+                  onChange={(e) => setDepotFilter(e.target.value)}
+                  className="max-w-xs w-full sm:w-auto"
+                />
+                {/* Destination Filter */} 
+                <Input
+                  placeholder="Filter by Destination"
+                  value={destinationFilter}
+                  onChange={(e) => setDestinationFilter(e.target.value)}
+                  className="max-w-xs w-full sm:w-auto"
+                />
+                {/* Clear Filters Button */} 
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setOwnerFilter("")
+                    setProductFilter("ALL")
+                    setStatusFilter("ALL")
+                    setDepotFilter("")
+                    setDestinationFilter("")
+                    // Removed setSearchTerm("") to keep the search box intact
+                  }}
+                  className="max-w-xs w-full sm:w-auto"
+                >
+                  Clear Filters
+                </Button>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Download PDF Button */} 
+          <div className="flex justify-end mb-4">
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={handleDownloadPDF}>
+                <Download className="mr-2 h-4 w-4" />
+                PDF
+              </Button>
+              <Button variant="outline" onClick={handleExportToExcel}>
+                <FileSpreadsheet className="mr-2 h-4 w-4" />
+                Excel
+              </Button>
+            </div>
+          </div>
+
+          {isLoading ? (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="flex justify-center items-center h-64"
+            >
+              <Loader2 className="h-8 w-8 animate-spin" />
+            </motion.div>
+          ) : (
+            <div className="overflow-x-auto -mx-4 sm:mx-0">
+              <div className="min-w-[800px] p-4 sm:p-0">
+                <table className="w-full text-sm sm:text-base">
+                  <thead>
+                    <tr className="border-b">
+                      <th className="p-3 text-left font-medium bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">Owner</th>
+                      <th className="p-3 text-left font-medium bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">Product</th>
+                      <th className="p-3 text-left font-medium bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">Truck Number</th>
+                      <th className="p-3 text-left font-medium bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">Quantity</th>
+                      <th className="p-3 text-left font-medium bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">Status</th>
+                      <th className="p-3 text-left font-medium bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">Order No</th>
+                      <th className="p-3 text-left font-medium bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">Depot</th>
+                      <th className="p-3 text-left font-medium bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">Destination</th>
+                      <th className="p-3 text-left font-medium bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">Actions</th>
+                    </tr>
+                  </thead>
+                  <AnimatePresence>
+                    <tbody>
+                      {getFilteredWorkDetails().map((detail, index) => (
+                        <motion.tr
+                          key={detail.id}
+                          variants={tableRowVariants}
+                          initial="hidden"
+                          animate="visible"
+                          transition={{ delay: index * 0.05 }}
+                          className={`border-b hover:bg-muted/50 ${
+                            detail.loaded ? 'opacity-50 bg-muted/20' : ''
+                          } ${
+                            detail.id === lastAddedId ? 'highlight-new-record' : ''
+                          }`}
                         >
-                          {detail.status}
-                        </Button>
-                      </td>
-                      <td className="p-3">{detail.orderno}</td>
-                      <td className="p-3">{detail.depot}</td>
-                      <td className="p-3">{detail.destination}</td>
-                      <td className="p-3">
-                        <div className="flex gap-2">
-                          {!detail.loaded ? (
-                            <div className="flex gap-2">
-                              <Button 
-                                variant="default"
-                                size="sm"
-                                onClick={() => handleLoadedStatus(detail.id)}
-                              >
-                                Loaded?
-                              </Button>
-                              {showUnloadedGP && (
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={() => handleGenerateGatePass(detail)}
-                                >
-                                  GP
-                                </Button>
-                              )}
-                            </div>
-                          ) : !detail.released ? (
-                            <div className="flex gap-2">
-                              {isTruckPaymentAllocated(detail.id) ? (
-                                <Button
-                                  variant="default"
-                                  size="sm"
-                                  onClick={async () => {
-                                    if (confirm('Confirm release of truck?')) {
-                                      await update(ref(database, `work_details/${detail.id}`), {
-                                        released: true,
-                                        paid: true,
-                                        paymentPending: false
-                                      });
-                                      toast({
-                                        title: "Released",
-                                        description: "Truck has been released",
-                                      });
-                                    }
-                                  }}
-                                >
-                                  Release
-                                </Button>
+                          <td className="p-2 sm:p-3">{detail.owner}</td>
+                          <td className="p-2 sm:p-3">{detail.product}</td>
+                          <td className="p-2 sm:p-3">
+                            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2">
+                              {editingTruckId === detail.id ? (
+                                <Input
+                                  value={detail.truck_number}
+                                  onChange={(e) => handleTruckNumberChange(detail.id, e.target.value, detail.truck_number)}
+                                  className="w-32"
+                                />
                               ) : (
-                                <div className="flex items-center gap-1">
+                                <span>{detail.truck_number}</span>
+                              )}
+                              {!detail.loaded && (
+                                editingTruckId === detail.id ? (
+                                  <>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => handleTruckNumberChange(detail.id, detail.truck_number, detail.truck_number)}
+                                    >
+                                      <Check className="h-4 w-4" />
+                                    </Button>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => setEditingTruckId(null)}
+                                    >
+                                      <X className="h-4 w-4" />
+                                    </Button>
+                                  </>
+                                ) : (
                                   <Button
                                     variant="ghost"
                                     size="sm"
-                                    onClick={() => {
-                                      toast({
-                                        title: "Payment Required",
-                                        description: "Please allocate payment from owner details",
-                                      });
-                                    }}
+                                    onClick={() => setEditingTruckId(detail.id)}
                                   >
-                                    Payment Required
+                                    <Edit className="h-4 w-4" />
                                   </Button>
+                                )
+                              )}
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => {
+                                  setSelectedTruckHistory(detail)
+                                  setShowTruckHistory(true)
+                                }}
+                              >
+                                <History className="h-4 w-4" />
+                              </Button>
+                            </div>
+                            {detail.previous_trucks && detail.previous_trucks.length > 0 && (
+                              <small className="text-muted-foreground">
+                                Previous: {detail.previous_trucks[detail.previous_trucks.length - 1]}
+                              </small>
+                            )}
+                          </td>
+                          <td className="p-2 sm:p-3">{detail.quantity}</td>
+                          <td className="p-2 sm:p-3">
+                            <Button
+                              variant={detail.status === "queued" ? "default" : "secondary"}
+                              size="sm"
+                              className={detail.status === "queued" ? "bg-emerald-600 hover:bg-emerald-700" : ""}
+                              disabled={detail.loaded}
+                              onClick={() => handleStatusChange(detail.id, detail.status)}
+                            >
+                              {detail.status}
+                            </Button>
+                          </td>
+                          <td className="p-2 sm:p-3">{detail.orderno}</td>
+                          <td className="p-2 sm:p-3">{detail.depot}</td>
+                          <td className="p-2 sm:p-3">{detail.destination}</td>
+                          <td className="p-2 sm:p-3">
+                            <div className="flex flex-col sm:flex-row gap-2">
+                              {!detail.loaded ? (
+                                <div className="flex gap-2">
+                                  <Button 
+                                    variant="default"
+                                    size="sm"
+                                    onClick={() => handleLoadedStatus(detail.id)}
+                                  >
+                                    Loaded?
+                                  </Button>
+                                  {showUnloadedGP && (
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => handleGenerateGatePass(detail)}
+                                    >
+                                      GP
+                                    </Button>
+                                  )}
+                                </div>
+                              ) : !detail.released ? (
+                                <div className="flex gap-2">
+                                  {isTruckPaymentAllocated(detail.id) ? (
+                                    <Button
+                                      variant="default"
+                                      size="sm"
+                                      onClick={async () => {
+                                        if (confirm('Confirm release of truck?')) {
+                                          await update(ref(database, `work_details/${detail.id}`), {
+                                            released: true,
+                                            paid: true,
+                                            paymentPending: false
+                                          });
+                                          toast({
+                                            title: "Released",
+                                            description: "Truck has been released",
+                                          });
+                                        }
+                                      }}
+                                    >
+                                      Release
+                                    </Button>
+                                  ) : (
+                                    <div className="flex items-center gap-1">
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() => {
+                                          toast({
+                                            title: "Payment Required",
+                                            description: "Please allocate payment from owner details",
+                                          });
+                                        }}
+                                      >
+                                        Payment Required
+                                      </Button>
+                                      <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-8 w-8 text-red-500 hover:text-red-700"
+                                        onClick={() => handleForceRelease(detail)}
+                                      >
+                                        <Triangle className="h-4 w-4" />
+                                      </Button>
+                                    </div>
+                                  )}
+                                </div>
+                              ) : (
+                                <div className="flex gap-2">
                                   <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="h-8 w-8 text-red-500 hover:text-red-700"
-                                    onClick={() => handleForceRelease(detail)}
+                                    variant={detail.gatePassGenerated ? "secondary" : "outline"}
+                                    size="sm"
+                                    onClick={() => handleGenerateGatePass(detail)}
+                                    className={cn(
+                                      "relative",
+                                      detail.gatePassGenerated && "bg-amber-100 hover:bg-amber-200 text-amber-700"
+                                    )}
                                   >
-                                    <Triangle className="h-4 w-4" />
+                                    {detail.gatePassGenerated ? "BG" : "GP"}
+                                    {detail.gatePassGenerated && (
+                                      <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-amber-500" />
+                                    )}
                                   </Button>
+                                  {detail.paymentPending && (
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => handleOwnerInfo(detail.owner)}
+                                      className="text-red-500"
+                                    >
+                                      Payment Pending
+                                    </Button>
+                                  )}
                                 </div>
                               )}
-                            </div>
-                          ) : (
-                            <div className="flex gap-2">
                               <Button
-                                variant={detail.gatePassGenerated ? "secondary" : "outline"}
+                                variant="destructive"
                                 size="sm"
-                                onClick={() => handleGenerateGatePass(detail)}
-                                className={cn(
-                                  "relative",
-                                  detail.gatePassGenerated && "bg-amber-100 hover:bg-amber-200 text-amber-700"
-                                )}
+                                onClick={() => handleDelete(detail.id)}
                               >
-                                {detail.gatePassGenerated ? "BG" : "GP"}
-                                {detail.gatePassGenerated && (
-                                  <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-amber-500" />
-                                )}
+                                <Trash2 className="h-4 w-4" />
                               </Button>
-                              {detail.paymentPending && (
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => handleOwnerInfo(detail.owner)}
-                                  className="text-red-500"
-                                >
-                                  Payment Pending
-                                </Button>
-                              )}
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleSyncStatus(detail)}
+                                className="h-6 w-6 p-0"
+                                title="Sync payment status"
+                              >
+                                <RefreshCw className="h-3 w-3" />
+                              </Button>
                             </div>
-                          )}
-                          <Button
-                            variant="destructive"
+                          </td>
+                        </motion.tr>
+                      ))}
+                    </tbody>
+                  </AnimatePresence>
+                </table>
+              </div>
+            </div>
+          )}
+
+          <div className="mt-8 space-y-8">
+            {/* Summary Stats */}
+            <motion.div
+              variants={cardVariants}
+              initial="hidden"
+              animate="visible"
+            >
+              <Card className="p-6">
+                <div className="flex justify-between items-center">
+                  <h2 className="text-xl font-semibold mb-4 bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">Summary</h2>
+                  <Button variant="ghost" onClick={handleCopySummary}>
+                    <Copy className="h-5 w-5" />
+                  </Button>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 sm:gap-4">
+                  <div className="space-y-2">
+                    <div>Total Orders: {summaryStats.totalOrders}</div>
+                    <div>Queued Orders: {summaryStats.queuedOrders}</div>
+                    <div>Unqueued Orders: {summaryStats.unqueuedOrders}</div>
+                  </div>
+                  <div className="space-y-2">
+                    <div>Loaded Orders: {summaryStats.loadedOrders}</div>
+                    <div className="flex flex-col">
+                      <span>Pending Orders: {summaryStats.pendingOrders}</span>
+                      <div className="ml-4 text-sm text-muted-foreground">
+                        <div>AGO: {summaryStats.pendingAgoOrders}</div>
+                        <div>PMS: {summaryStats.pendingPmsOrders}</div>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <div>AGO Orders: {summaryStats.agoOrders}</div>
+                    <div>PMS Orders: {summaryStats.pmsOrders}</div>
+                  </div>
+                </div>
+              </Card>
+            </motion.div>
+
+            {/* Owner Summary */} 
+            <motion.div
+              variants={cardVariants}
+              initial="hidden"
+              animate="visible"
+              transition={{ delay: 0.2 }}
+            >
+              <Card className="p-6">
+                <div className="flex justify-between items-center">
+                  <h2 className="text-xl font-semibold mb-4 bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">Owner Summary</h2>
+                  <Button variant="ghost" onClick={handleCopySummary}>
+                    <Copy className="h-5 w-5" />
+                  </Button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {Object.entries(ownerSummary).map(([owner, data], index) => (
+                    <motion.div
+                      key={`owner-${owner}`}
+                      variants={cardVariants}
+                      initial="hidden"
+                      animate="visible"
+                      transition={{ delay: index * 0.1 }}
+                    >
+                      <Card className="p-4">
+                        <div className="flex justify-between items-start">
+                          <h3 className="text-lg font-semibold mb-2 bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">{owner}</h3>
+                          <Button 
+                            variant="ghost" 
                             size="sm"
-                            onClick={() => handleDelete(detail.id)}
+                            onClick={() => handleOwnerInfo(owner)}
                           >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleSyncStatus(detail)}
-                            className="h-6 w-6 p-0"
-                            title="Sync payment status"
-                          >
-                            <RefreshCw className="h-3 w-3" />
+                            Info
                           </Button>
                         </div>
-                      </td>
-                    </motion.tr>
+                        <div className="space-y-1">
+                          <div>Total Orders: {data.totalOrders}</div>
+                          <div>Queued Orders: {data.queuedOrders}</div>
+                          <div>Loaded Orders: {data.loadedOrders}</div>
+                          <div>Pending Orders: {data.pendingOrders}</div>
+                          <div>AGO Orders: {data.agoOrders}</div>
+                          <div>PMS Orders: {data.pmsOrders}</div>
+                        </div>
+                      </Card>
+                    </motion.div>
                   ))}
-                </tbody>
-              </AnimatePresence>
-            </table>
+                </div>
+              </Card>
+            </motion.div>
           </div>
-        )}
-
-        <div className="mt-8 space-y-8">
-          {/* Summary Stats */} 
-          <motion.div
-            variants={cardVariants}
-            initial="hidden"
-            animate="visible"
-          >
-            <Card className="p-6">
-              <div className="flex justify-between items-center">
-                <h2 className="text-xl font-semibold mb-4 bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">Summary</h2>
-                <Button variant="ghost" onClick={handleCopySummary}>
-                  <Copy className="h-5 w-5" />
-                </Button>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="space-y-2">
-                  <div>Total Orders: {summaryStats.totalOrders}</div>
-                  <div>Queued Orders: {summaryStats.queuedOrders}</div>
-                  <div>Unqueued Orders: {summaryStats.unqueuedOrders}</div>
-                </div>
-                <div className="space-y-2">
-                  <div>Loaded Orders: {summaryStats.loadedOrders}</div>
-                  <div>Pending Orders: {summaryStats.pendingOrders}</div>
-                </div>
-                <div className="space-y-2">
-                  <div>AGO Orders: {summaryStats.agoOrders}</div>
-                  <div>PMS Orders: {summaryStats.pmsOrders}</div>
-                </div>
-              </div>
-            </Card>
-          </motion.div>
-
-          {/* Owner Summary */} 
-          <motion.div
-            variants={cardVariants}
-            initial="hidden"
-            animate="visible"
-            transition={{ delay: 0.2 }}
-          >
-            <Card className="p-6">
-              <div className="flex justify-between items-center">
-                <h2 className="text-xl font-semibold mb-4 bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">Owner Summary</h2>
-                <Button variant="ghost" onClick={handleCopySummary}>
-                  <Copy className="h-5 w-5" />
-                </Button>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {Object.entries(ownerSummary).map(([owner, data], index) => (
-                  <motion.div
-                    key={owner}
-                    variants={cardVariants}
-                    initial="hidden"
-                    animate="visible"
-                    transition={{ delay: index * 0.1 }}
-                  >
-                    <Card key={owner} className="p-4">
-                      <div className="flex justify-between items-start">
-                        <h3 className="text-lg font-semibold mb-2 bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">{owner}</h3>
-                        <Button 
-                          variant="ghost" 
-                          size="sm"
-                          onClick={() => handleOwnerInfo(owner)}
-                        >
-                          Info
-                        </Button>
-                      </div>
-                      <div className="space-y-1">
-                        <div>Total Orders: {data.totalOrders}</div>
-                        <div>Queued Orders: {data.queuedOrders}</div>
-                        <div>Loaded Orders: {data.loadedOrders}</div>
-                        <div>Pending Orders: {data.pendingOrders}</div>
-                        <div>AGO Orders: {data.agoOrders}</div>
-                        <div>PMS Orders: {data.pmsOrders}</div>
-                      </div>
-                    </Card>
-                  </motion.div>
-                ))}
-              </div>
-            </Card>
-          </motion.div>
         </div>
       </main>
 
@@ -1869,6 +1954,83 @@ const handleSyncStatus = async (truck: WorkDetail) => {
                 </span>
               </div>
             ))}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Unpaid Summary Dialog */}
+      <Dialog open={showUnpaidSummary} onOpenChange={setShowUnpaidSummary}>
+        <DialogContent className="sm:max-w-4xl w-[95vw] max-h-[90vh] p-4 overflow-hidden">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-semibold">Unpaid Trucks Summary</DialogTitle>
+          </DialogHeader>
+          <div className="overflow-y-auto max-h-[calc(80vh-100px)] pr-2">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {Object.entries(getUnpaidSummary()).map(([owner, data]) => (
+                <Card key={owner} className="p-3 sm:p-4 shadow-sm">
+                  {/* Owner Header */}
+                  <div className="flex flex-col sm:flex-row justify-between items-start gap-2 mb-3 pb-2 border-b">
+                    <div className="w-full">
+                      <h3 className="font-semibold text-base">{owner}</h3>
+                      <div className="flex flex-col sm:flex-row sm:items-center gap-2 mt-1">
+                        <p className="text-sm font-medium text-muted-foreground whitespace-nowrap">
+                          Total Due: ${formatNumber(data.totalAmount)}
+                        </p>
+                        <div className="flex gap-2 text-xs">
+                          <span className="px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 whitespace-nowrap">
+                            AGO: {data.agoCount}
+                          </span>
+                          <span className="px-1.5 py-0.5 rounded bg-green-100 text-green-700 whitespace-nowrap">
+                            PMS: {data.pmsCount}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setShowUnpaidSummary(false);
+                        router.push(`/dashboard/work/${encodeURIComponent(owner)}`);
+                      }}
+                      className="w-full sm:w-auto whitespace-nowrap"
+                    >
+                      View Details
+                    </Button>
+                  </div>
+
+                  {/* Trucks List */}
+                  <div className="space-y-2">
+                    {data.trucks.map(truck => (
+                      <div 
+                        key={truck.truck_number}
+                        className="flex flex-col sm:flex-row sm:items-center justify-between p-2 border rounded-lg hover:bg-muted/50 transition-colors gap-2"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium">{truck.truck_number}</span>
+                          <span className={cn(
+                            "px-1.5 py-0.5 rounded text-xs font-medium whitespace-nowrap",
+                            truck.product === 'AGO' 
+                              ? "bg-blue-100 text-blue-700" 
+                              : "bg-green-100 text-green-700"
+                          )}>
+                            {truck.product}
+                          </span>
+                        </div>
+                        <span className="text-red-600 font-medium">
+                          ${formatNumber(truck.amount)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Summary Footer */}
+                  <div className="mt-3 pt-2 border-t text-sm text-muted-foreground">
+                    {data.trucks.length} unpaid truck{data.trucks.length !== 1 ? 's' : ''}
+                  </div>
+                </Card>
+              ))}
+            </div>
           </div>
         </DialogContent>
       </Dialog>
