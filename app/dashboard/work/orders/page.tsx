@@ -1708,11 +1708,18 @@ const getUnpaidSummary = () => {
                                   </Button>
                                   {showUnloadedGP && (
                                     <Button
-                                      variant="outline"
+                                      variant={detail.gatePassGenerated ? "secondary" : "outline"}
                                       size="sm"
                                       onClick={() => handleGenerateGatePass(detail)}
+                                      className={cn(
+                                        "relative",
+                                        detail.gatePassGenerated && "bg-amber-100 hover:bg-amber-200 text-amber-700"
+                                      )}
                                     >
-                                      GP
+                                      {detail.gatePassGenerated ? "BG" : "GP"}
+                                      {detail.gatePassGenerated && (
+                                        <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-amber-500" />
+                                      )}
                                     </Button>
                                   )}
                                 </div>
