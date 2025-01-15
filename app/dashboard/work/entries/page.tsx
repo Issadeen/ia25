@@ -1394,54 +1394,46 @@ const getSummary = async () => {
     try {
       const updates: { [key: string]: any } = {}
   
-      // Get the truck number from the first entry
+      // Get the truck number and destination from the first entry
       const truckNumber = entriesData[0]?.truckNumber
-      if (!truckNumber) {
-        throw new Error("No truck number found")
+      const destination = entriesData[0]?.destination
+      if (!truckNumber || !destination) {
+        throw new Error("No truck number or destination found")
       }
   
-      // Restore original TR800 data, ensuring all required fields are present
+      // Restore original TR800 data
       for (const key in originalData) {
-        const data = originalData[key]
-        // Only include fields that exist in the original data
-        updates[`tr800/${key}`] = {
-          number: data.number,
-          initialQuantity: data.initialQuantity,
-          remainingQuantity: data.remainingQuantity,
-          product: data.product,
-          destination: data.destination,
-          product_destination: data.product_destination,
-          timestamp: data.timestamp,
-          // Only include status if it exists in original data
-          ...(data.status && { status: data.status })
-        }
+        updates[`tr800/${key}`] = originalData[key]
       }
   
-      // Remove truck entries
-      const sanitizedTruckNumber = truckNumber.replace(/\//g, '-')
-      const truckRef = dbRef(db, `truckEntries/${sanitizedTruckNumber}`)
-      const truckSnapshot = await get(truckRef)
+      // Build the truck entry key correctly
+      const truckEntryKey = `${truckNumber.replace(/\//g, '-')}-${destination}${entriesData[0].product}`.toUpperCase()
   
-      if (truckSnapshot.exists()) {
+      // Get all truck entries for this key
+      const truckEntriesRef = dbRef(db, `truckEntries/${truckEntryKey}`)
+      const truckEntriesSnapshot = await get(truckEntriesRef)
+  
+      if (truckEntriesSnapshot.exists()) {
+        // Get all mother entry numbers that were used in this allocation
         const motherEntries = entriesData.map(entry => entry.motherEntry)
-        
-        truckSnapshot.forEach(childSnapshot => {
+  
+        // Find and remove matching truck entries
+        truckEntriesSnapshot.forEach((childSnapshot) => {
           const entryData = childSnapshot.val()
           if (motherEntries.includes(entryData.entryNumber)) {
-            updates[`truckEntries/${sanitizedTruckNumber}/${childSnapshot.key}`] = null
+            updates[`truckEntries/${truckEntryKey}/${childSnapshot.key}`] = null
           }
         })
       }
   
-      // Find and remove corresponding allocation report
+      // Find and remove the corresponding allocation report
       const reportsRef = dbRef(db, 'allocation_reports')
       const reportsSnapshot = await get(reportsRef)
       
       if (reportsSnapshot.exists()) {
         const currentTimestamp = Date.now()
-        const fiveMinutesAgo = currentTimestamp - (5 * 60 * 1000) // 5 minutes window
+        const fiveMinutesAgo = currentTimestamp - (5 * 60 * 1000)
         
-        // Find the most recent matching report
         reportsSnapshot.forEach((reportSnapshot) => {
           const report = reportSnapshot.val()
           const reportDate = new Date(report.allocationDate).getTime()
@@ -1451,7 +1443,6 @@ const getSummary = async () => {
             reportDate > fiveMinutesAgo &&
             reportDate <= currentTimestamp
           ) {
-            // Add report to be removed in updates
             updates[`allocation_reports/${reportSnapshot.key}`] = null
           }
         })
@@ -1462,14 +1453,14 @@ const getSummary = async () => {
   
       toast({
         title: "Success",
-        description: "Successfully undid the allocation and removed the report"
+        description: "Successfully undid the allocation"
       })
   
       // Reset states
       setOriginalData({})
       setEntriesData([])
       
-      // Refresh usage data if showing
+      // Refresh usage data immediately if showing
       if (showUsage) {
         await getUsage()
       }
@@ -1483,6 +1474,7 @@ const getSummary = async () => {
       })
     }
   }
+  
 
   // Add Manual Allocation function
   const manualAllocate = async () => {
