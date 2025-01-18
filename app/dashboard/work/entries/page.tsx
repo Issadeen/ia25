@@ -17,7 +17,8 @@ import {
   ClipboardList,
   ChevronDown, 
   ChevronUp,
-  Search // Add this
+  Search, // Add this
+  Bell // Add this
 } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -46,7 +47,6 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { validateAllocation } from '@/lib/validation'
-import { smartAllocation } from '@/lib/smartAllocation'
 import { confirmDialog } from "@/components/ui/confirm-dialog" // Add this line
 import { reminderService } from '@/lib/reminders' // Add this line
 import { StockItem } from '@/types/stock';
@@ -100,6 +100,35 @@ interface Summary {
     ageInDays: number;    // Add this
     usageCount: number;   // Add this
   }[];
+}
+
+// Add new interfaces
+interface ThresholdConfig {
+  product: string;
+  destination: string;
+  warning: number;
+  critical: number;
+}
+
+interface AlertHistory {
+  id: string;
+  timestamp: number;
+  product: string;
+  destination: string;
+  quantity: number;
+  threshold: number;
+  level: 'warning' | 'critical';
+  acknowledged: boolean;
+}
+
+// Add new interfaces
+interface Notification {
+  id: string;
+  title: string;
+  message: string;
+  type: 'success' | 'error' | 'warning' | 'info';
+  timestamp: number;
+  read: boolean;
 }
 
 export default function EntriesPage() {
@@ -165,6 +194,7 @@ export default function EntriesPage() {
     product: string;
     destination: string;
     usedBy: { truckNumber: string; quantity: number }[];
+    timestamp: number;
   }
 
   const [usageData, setUsageData] = useState<UsageEntry[]>([])
@@ -257,6 +287,34 @@ export default function EntriesPage() {
   // Add near other state declarations
   const [summarySearch, setSummarySearch] = useState('');
 
+  // Add new state for advanced filtering
+  const [advancedFilters, setAdvancedFilters] = useState({
+    dateRange: {
+      from: '',
+      to: ''
+    },
+    minQuantity: '',
+    maxQuantity: '',
+    sortBy: 'date' // 'date', 'quantity', 'usage'
+  })
+
+  // Add to existing state declarations
+  const [thresholds, setThresholds] = useState<ThresholdConfig[]>([
+    { product: 'ago', destination: 'ssd', warning: 100000, critical: 50000 },
+    { product: 'ago', destination: 'local', warning: 50000, critical: 25000 },
+    { product: 'pms', destination: 'ssd', warning: 120000, critical: 70000 },
+    { product: 'pms', destination: 'local', warning: 70000, critical: 35000 },
+  ]);
+
+  const [alertHistory, setAlertHistory] = useState<AlertHistory[]>([]);
+  const [showLowQuantityAlert, setShowLowQuantityAlert] = useState(false);
+  const [currentAlert, setCurrentAlert] = useState<AlertHistory | null>(null);
+
+  // Add to existing state declarations
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
+
   // 2. Other hooks
   const { data: session, status } = useSession()
   const router = useRouter()
@@ -294,21 +352,22 @@ export default function EntriesPage() {
 
   const restoreLastForm = () => {
     if (!lastFormState.truckNumber) {
-      toast({
-        title: "No Previous Entry",
-        description: "There is no previous entry to restore",
-        variant: "destructive"
-      })
+      addNotification(
+        "No Previous Entry",
+        "There is no previous entry to restore",
+        "error"
+      )
       return
     }
     setTruckNumber(lastFormState.truckNumber)
     setDestination(lastFormState.destination)
     setProduct(lastFormState.product)
     setAt20Quantity(lastFormState.at20Quantity)
-    toast({
-      title: "Form Restored",
-      description: "Previous entry has been restored"
-    })
+    addNotification(
+      "Form Restored",
+      "Previous entry has been restored",
+      "success"
+    )
   }
 
   // Add this function with other helper functions
@@ -330,14 +389,14 @@ export default function EntriesPage() {
       
       return isValid;
     } catch (error) {
-      toast({
-        title: "Error",
-        description: "Failed to verify work ID against database",
-        variant: "destructive"
-      })
+      addNotification(
+        "Error",
+        "Failed to verify work ID against database",
+        "error"
+      )
       return false;
     }
-  }, [toast]);
+  }, []);
 
   // Update the verifyWorkId function
   const verifyWorkId = async (e: React.FormEvent) => {
@@ -346,11 +405,11 @@ export default function EntriesPage() {
     
     try {
       if (!workId) {
-        toast({
-          title: "Error",
-          description: "Please enter a Work ID",
-          variant: "destructive"
-        })
+        addNotification(
+          "Error",
+          "Please enter a Work ID",
+          "error"
+        )
         return
       }
   
@@ -363,11 +422,11 @@ export default function EntriesPage() {
         if (pendingEdit && pendingEdit.entryId && pendingEdit.newValue) {
           const newValue = parseFloat(pendingEdit.newValue)
           if (isNaN(newValue) || newValue < 0) {
-            toast({
-              title: "Invalid Value",
-              description: "Please enter a valid quantity",
-              variant: "destructive"
-            })
+            addNotification(
+              "Invalid Value",
+              "Please enter a valid quantity",
+              "error"
+            )
             return
           }
           
@@ -378,24 +437,25 @@ export default function EntriesPage() {
           setPendingEdit(null)
           setEditMode(null)
           
-          toast({
-            title: "Success",
-            description: "Quantity updated successfully"
-          })
+          addNotification(
+            "Success",
+            "Quantity updated successfully",
+            "success"
+          )
         }
       } else {
-        toast({
-          title: "Invalid Work ID",
-          description: "Work ID not found. Please check and try again.",
-          variant: "destructive"
-        })
+        addNotification(
+          "Invalid Work ID",
+          "Work ID not found. Please check and try again.",
+          "error"
+        )
       }
     } catch (error) {
-      toast({
-        title: "Error",
-        description: "Failed to verify work ID. Please try again.",
-        variant: "destructive"
-      })
+      addNotification(
+        "Error",
+        "Failed to verify work ID. Please try again.",
+        "error"
+      )
     } finally {
       setIsVerifying(false)
     }
@@ -428,19 +488,48 @@ export default function EntriesPage() {
         )
       )
   
-      toast({
-        title: "Success",
-        description: "Quantity updated successfully"
-      })
+      addNotification(
+        "Success",
+        "Quantity updated successfully",
+        "success"
+      )
       setEditMode(null)
     } catch (error) {
-      toast({
-        title: "Error",
-        description: "Failed to update quantity",
-        variant: "destructive"
-      })
+      addNotification(
+        "Error",
+        "Failed to update quantity",
+        "error"
+      )
     }
   }
+
+  // Add this helper function
+  const addNotification = (
+    title: string,
+    message: string,
+    type: 'success' | 'error' | 'warning' | 'info' = 'info'
+  ) => {
+    const newNotification: Notification = {
+      id: Date.now().toString(),
+      title,
+      message,
+      type,
+      timestamp: Date.now(),
+      read: false
+    };
+    
+    setNotifications(prev => [newNotification, ...prev].slice(0, 50)); // Keep last 50 notifications
+    setUnreadCount(prev => prev + 1);
+    
+    // Still show critical errors as toasts
+    if (type === 'error') {
+      toast({
+        title,
+        description: message,
+        variant: "destructive"
+      });
+    }
+  };
 
   // Update fetchPendingOrders function to better group the data
   const fetchPendingOrders = async () => {
@@ -512,11 +601,11 @@ export default function EntriesPage() {
   
       setPendingOrders(sortedOrders)
     } catch (error) {
-      toast({
-        title: "Error",
-        description: "Failed to fetch pending orders",
-        variant: "destructive"
-      })
+      addNotification(
+        "Error",
+        "Failed to fetch pending orders",
+        "error"
+      )
     } finally {
       setIsPendingLoading(false)
     }
@@ -543,31 +632,32 @@ export default function EntriesPage() {
         
         // Show toast with filtered results
         if (entries.length > 0) {
-          toast({
-            title: "Available Permit Entries",
-            description: `Found ${entries.length} entries for ${product.toUpperCase()} to SSD`
-          })
+          addNotification(
+            "Available Permit Entries",
+            `Found ${entries.length} entries for ${product.toUpperCase()} to SSD`,
+            "info"
+          )
         } else {
-          toast({
-            title: "No Entries Available",
-            description: `No entries found for ${product.toUpperCase()} to SSD`,
-            variant: "destructive"
-          })
+          addNotification(
+            "No Entries Available",
+            `No entries found for ${product.toUpperCase()} to SSD`,
+            "error"
+          )
         }
       } else {
         setAvailablePermitEntries([])
-        toast({
-          title: "No Entries Found",
-          description: `No entries found for product ${product.toUpperCase()}`,
-          variant: "destructive"
-        })
+        addNotification(
+          "No Entries Found",
+          `No entries found for product ${product.toUpperCase()}`,
+          "error"
+        )
       }
     } catch (error) {
-      toast({
-        title: "Error",
-        description: "Failed to fetch entries for permits",
-        variant: "destructive"
-      })
+      addNotification(
+        "Error",
+        "Failed to fetch entries for permits",
+        "error"
+      )
     }
   }
 
@@ -582,11 +672,11 @@ export default function EntriesPage() {
       }
     } catch (error) {
       console.error('Error fetching stocks:', error);
-      toast({
-        title: "Error",
-        description: "Failed to fetch stock information",
-        variant: "destructive"
-      });
+      addNotification(
+        "Error",
+        "Failed to fetch stock information",
+        "error"
+      );
     }
   };
 
@@ -599,19 +689,20 @@ export default function EntriesPage() {
         quantity
       });
       
-      toast({
-        title: "Success",
-        description: `Updated ${product.toUpperCase()} stock to ${quantity.toLocaleString()} liters`,
-      });
+      addNotification(
+        "Success",
+        `Updated ${product.toUpperCase()} stock to ${quantity.toLocaleString()} liters`,
+        "success"
+      );
       
       // Refresh stocks
       fetchStocks();
     } catch (error) {
-      toast({
-        title: "Error",
-        description: "Failed to update stock quantity",
-        variant: "destructive"
-      });
+      addNotification(
+        "Error",
+        "Failed to update stock quantity",
+        "error"
+      );
     }
   };
 
@@ -635,41 +726,37 @@ export default function EntriesPage() {
   
         setAvailableEntries(entries)
         
-        // Show toast if entries are found
+        // Update toast implementation to use conditional logic
         if (entries.length > 0) {
-          toast({
-            title: "Entries Found",
-            description: `Found ${entries.length} available entries for ${product.toUpperCase()} to ${destination.toUpperCase()}`
-
-          })
+          addNotification(
+            "Entries Found",
+            `Found ${entries.length} available entries for ${product.toUpperCase()} to ${destination.toUpperCase()}`,
+            "info"
+          )
         } else {
-          toast({
-            title: "No Entries Available",
-            description: `No entries found for ${product.toUpperCase()} to ${destination.toUpperCase()}`,
-            variant: "destructive"
-          })
+          addNotification(
+            "No Entries Available",
+            `No entries found for ${product.toUpperCase()} to ${destination.toUpperCase()}`,
+            "error"
+          )
         }
       }
     } catch (error) {
-      toast({
-        title: "Error",
-        description: "Failed to fetch available entries",
-        variant: "destructive"
-      })
+      addNotification(
+        "Error",
+        "Failed to fetch available entries",
+        "error"
+      )
     }
   }
 
-  // 5. Effects
   useEffect(() => {
-    setMounted(true)
-    
-    // Get URL parameters and set form values
-    if (mounted) {
-      const truckNum = searchParams.get('truckNumber');
-      const prod = searchParams.get('product');
-      const dest = searchParams.get('destination');
-      const qty = searchParams.get('at20Quantity');
-
+    if (typeof window !== 'undefined') {
+      setMounted(true)
+      const truckNum = searchParams.get('truck')
+      const prod = searchParams.get('product')
+      const dest = searchParams.get('destination')
+      const qty = searchParams.get('quantity')
       if (truckNum) setTruckNumber(truckNum);
       if (prod) setProduct(prod.toLowerCase());
       if (dest) setDestination(dest.toLowerCase());
@@ -809,11 +896,11 @@ export default function EntriesPage() {
       const nextReminder = await reminderService.getNextReminder(userId);
       
       if (nextReminder) {
-        toast({
-          title: "Reminder",
-          description: nextReminder.message,
-          duration: 10000,
-        });
+        addNotification(
+          "Reminder",
+          nextReminder.message,
+          "info"
+        );
         await reminderService.markReminderShown(nextReminder.id, userId);
       }
     };
@@ -823,7 +910,7 @@ export default function EntriesPage() {
     const interval = setInterval(checkReminders, 15 * 60 * 1000);
 
     return () => clearInterval(interval);
-  }, [session?.user?.email, toast]);
+  }, [session?.user?.email]);
 
   // Add to your useEffect for initial load
   useEffect(() => {
@@ -931,202 +1018,158 @@ export default function EntriesPage() {
 
   // 6. Event handlers
   const getEntries = async () => {
-    // Add validation
-    const validationResult = validateAllocation.destinationRules(
-      destination,
-      parseFloat(at20Quantity),
-      product
-    )
-
-    if (!validationResult.valid) {
-      toast({
-        title: "Validation Error",
-        description: validationResult.message,
-        variant: "destructive"
-      })
-      return
-    }
-
-    // Get smart suggestions
-    const suggestions = smartAllocation.suggestEntries(
-      availableEntries,
-      parseFloat(at20Quantity)
-    )
-
-    // Check for potential issues
-    const predictedIssues = smartAllocation.predictIssues(
-      availableEntries,
-      parseFloat(at20Quantity)
-    )
-
-    if (predictedIssues.length > 0) {
-      const confirmed = await confirmDialog({
-        title: "Potential Issues Detected",
-        description: predictedIssues.map(i => i.message).join('\n'),
-        confirmText: "Proceed Anyway",
-        cancelText: "Review Issues"
-      })
-
-      if (!confirmed) return
-    }
-
+    // Basic validation
     if (!truckNumber || !destination || !product || !at20Quantity) {
-      toast({
-        title: "Validation Error",
-        description: "Please fill all fields",
-        variant: "destructive"
-      })
-      return
+      addNotification(
+        "Validation Error",
+        "Please fill all fields",
+        "error"
+      );
+      return;
     }
   
-    setLastFormState({
-      truckNumber,
-      destination,
-      product,
-      at20Quantity
-    })
-  
-    if (destination.toLowerCase() === 'ssd' && !entryUsedInPermit) {
-      toast({
-        title: "Permit Entry Required",
-        description: "Please select an entry used in the permit",
-        variant: "destructive"
-      })
-      return
+    // Validate permit entry for SSD
+    if (destination.toLowerCase() === 'ssd') {
+      if (!entryUsedInPermit) {
+        addNotification(
+          "Permit Entry Required",
+          "Please select an entry used in the permit",
+          "error"
+        );
+        return;
+      }
     }
   
-    setIsLoading(true)
-    const db = getDatabase()
+    setIsLoading(true);
+    const db = getDatabase();
   
     try {
-      const requiredQuantity = parseFloat(at20Quantity)
-      let remainingToAllocate = requiredQuantity
-      const updates: { [key: string]: any } = {}
-      const tempOriginalData: { [key: string]: Entry } = {}
-      const allocations: Entry[] = []
-
-      // If SSD allocation with permit entry
-      if (destination.toLowerCase() === 'ssd' && entryUsedInPermit) {
+      const requiredQuantity = parseFloat(at20Quantity);
+      const updates: { [key: string]: any } = {};
+      const tempOriginalData: { [key: string]: Entry } = {};
+      const allocations: Entry[] = [];
+  
+      if (destination.toLowerCase() === 'ssd') {
+        // Handle SSD allocation
         const permitEntrySnapshot = await get(dbRef(db, `tr800/${entryUsedInPermit}`));
         if (!permitEntrySnapshot.exists()) {
           throw new Error("Selected permit entry not found");
         }
-  
+      
         const permitEntry = { key: permitEntrySnapshot.key, ...permitEntrySnapshot.val() };
+        let remainingToAllocate = requiredQuantity;
+      
+        // First use permit entry
+        tempOriginalData[permitEntry.key] = { ...permitEntry };
+        const permitAllocation = Math.min(permitEntry.remainingQuantity, remainingToAllocate);
         
-        // Get all available entries for FIFO check
-        const tr800Snapshot = await get(dbRef(db, 'tr800'));
-        if (!tr800Snapshot.exists()) {
-          throw new Error("No entries found");
-        }
-  
-        const availableEntries = Object.entries(tr800Snapshot.val())
-          .map(([key, value]: [string, any]) => ({
-            key,
-            ...value
-          }))
-          .filter(entry => 
-            entry.product.toLowerCase() === product.toLowerCase() &&
-            entry.destination.toLowerCase() === 'ssd' &&
-            entry.remainingQuantity > 0
-          )
-          .sort((a, b) => a.timestamp - b.timestamp); // FIFO ordering
-  
-        // Try special SSD allocation first
-        const ssdAllocationSuccess = await handleSsdAllocation(
-          permitEntry,
-          requiredQuantity,
-          availableEntries,
-          updates,
-          tempOriginalData,
-          allocations,
-          truckNumber, // Pass truckNumber
-          product      // Pass product
-        );
-  
-        // If special allocation failed, fall back to normal permit entry allocation
-        if (!ssdAllocationSuccess) {
-          // Original permit entry allocation logic
-          const permitAllocation = Math.min(permitEntry.remainingQuantity, remainingToAllocate);
-          // ...existing permit allocation code...
-        }
-      }
-  
-      // If we still need more quantity, get from other entries using FIFO
-      if (remainingToAllocate > 0) {
-        const tr800Snapshot = await get(dbRef(db, 'tr800'))
-        if (!tr800Snapshot.exists()) {
-          throw new Error("No entries found")
-        }
-  
-        const availableEntries = Object.entries(tr800Snapshot.val())
-          .map(([key, value]: [string, any]) => ({
-            key,
-            ...value
-          }))
-          .filter(entry => 
-            entry.product.toLowerCase() === product.toLowerCase() &&
-            entry.destination.toLowerCase() === destination.toLowerCase() &&
-            entry.remainingQuantity > 0 &&
-            (!entryUsedInPermit || entry.key !== entryUsedInPermit) // Exclude already used permit entry
-          )
-          .sort((a, b) => a.timestamp - b.timestamp) // FIFO ordering
-  
-        if (availableEntries.length === 0 && remainingToAllocate > 0) {
-          throw new Error(`Insufficient quantity available. Still need ${remainingToAllocate.toFixed(2)} liters`)
-        }
-  
-        // Allocate remaining quantity from available entries
-        for (const entry of availableEntries) {
-          if (remainingToAllocate <= 0) break
-  
-          const toAllocate = Math.min(entry.remainingQuantity, remainingToAllocate)
+        const updatedPermitEntry = {
+          ...permitEntry,
+          remainingQuantity: permitEntry.remainingQuantity - permitAllocation
+        };
+        
+        updates[`tr800/${permitEntry.key}`] = updatedPermitEntry;
+        
+        allocations.push({
+          key: permitEntry.key,
+          motherEntry: permitEntry.number,
+          initialQuantity: permitEntry.initialQuantity,
+          remainingQuantity: updatedPermitEntry.remainingQuantity,
+          truckNumber,
+          destination: 'ssd',
+          subtractedQuantity: permitAllocation,
+          number: permitEntry.number,
+          product,
+          product_destination: `${product}-ssd`,
+          timestamp: Date.now()
+        });
+      
+        remainingToAllocate -= permitAllocation;
+      
+        // If we still need more quantity, use FIFO entries
+        if (remainingToAllocate > 0) {
+          // Get all available entries except the permit entry
+          const fifoEntries = availableEntries.filter(entry => entry.key !== permitEntry.key);
           
-          tempOriginalData[entry.key] = { ...entry }
-          
-          const updatedEntry = {
-            ...entry,
-            remainingQuantity: entry.remainingQuantity - toAllocate
+          for (const entry of fifoEntries) {
+            if (remainingToAllocate <= 0) break;
+      
+            const toAllocate = Math.min(entry.remainingQuantity, remainingToAllocate);
+            
+            tempOriginalData[entry.key] = { ...entry };
+            
+            const updatedEntry = {
+              ...entry,
+              remainingQuantity: entry.remainingQuantity - toAllocate
+            };
+            
+            updates[`tr800/${entry.key}`] = updatedEntry;
+            
+            allocations.push({
+              key: entry.key,
+              motherEntry: entry.number,
+              initialQuantity: entry.initialQuantity,
+              remainingQuantity: updatedEntry.remainingQuantity,
+              truckNumber,
+              destination: 'ssd',
+              subtractedQuantity: toAllocate,
+              number: entry.number,
+              product,
+              product_destination: `${product}-ssd`,
+              timestamp: Date.now()
+            });
+            
+            remainingToAllocate -= toAllocate;
           }
-          
-          updates[`tr800/${entry.key}`] = updatedEntry
-          
-          allocations.push({
-            key: entry.key,
-            motherEntry: entry.number,
-            initialQuantity: entry.initialQuantity,
-            remainingQuantity: updatedEntry.remainingQuantity,
-            truckNumber,
-            destination,
-            subtractedQuantity: toAllocate,
-            number: entry.number,
-            product,
-            product_destination: `${product}-${destination}`,
-            timestamp: Date.now()
-          })
-          
-          remainingToAllocate -= toAllocate
+      
+          if (remainingToAllocate > 0) {
+            throw new Error(`Insufficient quantity available. Used permit entry (${permitAllocation.toLocaleString()} liters) and FIFO entries but still need ${remainingToAllocate.toFixed(2)} liters`);
+          }
         }
+      } else {
+        // Handle non-SSD allocation using single entry
+        const entry = availableEntries[0]; // Use first available entry
+        if (!entry || entry.remainingQuantity < requiredQuantity) {
+          throw new Error(`Insufficient quantity available in selected entry. Need: ${requiredQuantity.toLocaleString()} liters`);
+        }
+  
+        tempOriginalData[entry.key] = { ...entry };
+        
+        const updatedEntry = {
+          ...entry,
+          remainingQuantity: entry.remainingQuantity - requiredQuantity
+        };
+        
+        updates[`tr800/${entry.key}`] = updatedEntry;
+        
+        allocations.push({
+          key: entry.key,
+          motherEntry: entry.number,
+          initialQuantity: entry.initialQuantity,
+          remainingQuantity: updatedEntry.remainingQuantity,
+          truckNumber,
+          destination,
+          subtractedQuantity: requiredQuantity,
+          number: entry.number,
+          product,
+          product_destination: `${product}-${destination}`,
+          timestamp: Date.now()
+        });
       }
   
-      if (remainingToAllocate > 0) {
-        throw new Error(`Insufficient quantity available. Still need ${remainingToAllocate.toFixed(2)} liters`)
-      }
+      // Create truck entry
+      const truckEntryKey = `${truckNumber.replace(/\//g, '-')}-${destination}${product}`.toUpperCase();
   
-      // Create the truck entry key correctly - combine only truck number and product
-      const truckEntryKey = `${truckNumber.replace(/\//g, '-')}-${destination}${product}`.toUpperCase()
-  
-      // Save truck entries with correct structure
+      // Save truck entries
       for (const allocation of allocations) {
         const truckEntryData = {
           entryNumber: allocation.motherEntry,
           subtractedQuantity: allocation.subtractedQuantity,
           timestamp: Date.now()
-        }
+        };
         
-        // Generate a unique key for each entry under the truck
-        const newTruckEntryRef = push(dbRef(db, `truckEntries/${truckEntryKey}`))
-        updates[`truckEntries/${truckEntryKey}/${newTruckEntryRef.key}`] = truckEntryData
+        const newTruckEntryRef = push(dbRef(db, `truckEntries/${truckEntryKey}`));
+        updates[`truckEntries/${truckEntryKey}/${newTruckEntryRef.key}`] = truckEntryData;
       }
   
       // Get owner information using once() instead of get() with query
@@ -1168,25 +1211,25 @@ export default function EntriesPage() {
       setOriginalData(tempOriginalData)
       setEntriesData(allocations)
   
-      toast({
-        title: "Success",
-        description: `Allocated ${requiredQuantity.toLocaleString()} liters using ${allocations.length} entries`
-      })
+      addNotification(
+        "Success",
+        `Allocated ${requiredQuantity.toLocaleString()} liters using ${allocations.length} entries`,
+        "success"
+      )
   
       clearForm()
   
     } catch (error) {
       console.error('Allocation error:', error)
-      toast({
-        title: "Allocation Failed",
-        description: error instanceof Error ? error.message : "Failed to process allocation",
-        variant: "destructive"
-      })
+      addNotification(
+        "Allocation Failed",
+        error instanceof Error ? error.message : "Failed to process allocation",
+        "error"
+      )
     } finally {
       setIsLoading(false)
     }
   }
-  
 
   // Add new helper function for date formatting
   const formatDate = (timestamp: number) => {
@@ -1283,11 +1326,11 @@ const getSummary = async () => {
     }
   } catch (error) {
     console.error('Summary error:', error)
-    toast({
-      title: "Error",
-      description: "Failed to fetch summary data",
-      variant: "destructive"
-    })
+    addNotification(
+      "Error",
+      "Failed to fetch summary data",
+      "error"
+    )
   }
 }
 
@@ -1298,11 +1341,11 @@ const getSummary = async () => {
       const tr800Snapshot = await get(dbRef(db, 'tr800'))
       
       if (!tr800Snapshot.exists()) {
-        toast({
-          title: "No Data",
-          description: "No TR800 entries found",
-          variant: "destructive"
-        })
+        addNotification(
+          "No Data",
+          "No TR800 entries found",
+          "error"
+        )
         return
       }
   
@@ -1314,7 +1357,7 @@ const getSummary = async () => {
         truckEntriesSnapshot = null
       }
   
-      const entries: UsageEntry[] = []
+      let entries: UsageEntry[] = []
       const truckUsageMap: { [key: string]: { truckNumber: string; quantity: number }[] } = {}
   
       // Process truck entries if they exist
@@ -1349,21 +1392,49 @@ const getSummary = async () => {
             remainingQuantity: data.remainingQuantity || 0,
             product: data.product || '',
             destination: data.destination || '',
-            usedBy: truckUsageMap[data.number] || []
+            usedBy: truckUsageMap[data.number] || [],
+            timestamp: data.timestamp || Date.now()
           })
         }
       })
-  
+
+      // Apply advanced filters
+      const filteredEntries = entries.filter(entry => {
+        if (advancedFilters.minQuantity && entry.remainingQuantity < parseFloat(advancedFilters.minQuantity)) return false;
+        if (advancedFilters.maxQuantity && entry.remainingQuantity > parseFloat(advancedFilters.maxQuantity)) return false;
+        if (advancedFilters.dateRange.from || advancedFilters.dateRange.to) {
+          const entryDate = new Date(entry.timestamp);
+          if (advancedFilters.dateRange.from && entryDate < new Date(advancedFilters.dateRange.from)) return false;
+          if (advancedFilters.dateRange.to && entryDate > new Date(advancedFilters.dateRange.to)) return false;
+        }
+        return true;
+      });
+      entries = filteredEntries;
+    
+      // Apply sorting
+      entries.sort((a, b) => {
+        switch(advancedFilters.sortBy) {
+          case 'date':
+            return b.timestamp - a.timestamp;
+          case 'quantity':
+            return b.remainingQuantity - a.remainingQuantity;
+          case 'usage':
+            return b.usedBy.length - a.usedBy.length;
+          default:
+            return 0;
+        }
+      });
+
       setUsageData(entries)
       setShowUsage(true)
       setShowSummary(false)
   
     } catch (error) {
-      toast({
-        title: "Error",
-        description: "Failed to fetch usage data. Please try again.",
-        variant: "destructive"
-      })
+      addNotification(
+        "Error",
+        "Failed to fetch usage data. Please try again.",
+        "error"
+      )
     }
   }
 
@@ -1382,11 +1453,11 @@ const getSummary = async () => {
   // Add to the existing event handlers
   const undoAllocation = async () => {
     if (!Object.keys(originalData).length) {
-      toast({
-        title: "No Changes to Undo",
-        description: "There are no recent allocations to undo.",
-        variant: "destructive"
-      })
+      addNotification(
+        "No Changes to Undo",
+        "There are no recent allocations to undo.",
+        "error"
+      )
       return
     }
   
@@ -1451,10 +1522,11 @@ const getSummary = async () => {
       // Apply all updates in a single transaction
       await update(dbRef(db), updates)
   
-      toast({
-        title: "Success",
-        description: "Successfully undid the allocation"
-      })
+      addNotification(
+        "Success",
+        "Successfully undid the allocation",
+        "success"
+      )
   
       // Reset states
       setOriginalData({})
@@ -1467,11 +1539,11 @@ const getSummary = async () => {
   
     } catch (error) {
       console.error('Undo error:', error)
-      toast({
-        title: "Error",
-        description: "Failed to undo allocation. Please try again.",
-        variant: "destructive"
-      })
+      addNotification(
+        "Error",
+        "Failed to undo allocation. Please try again.",
+        "error"
+      )
     }
   }
   
@@ -2382,11 +2454,11 @@ const renderStockInfo = () => {
                   onChange={(e) => {
                     const value = parseFloat(e.target.value || '0');
                     if (value > entry.remainingQuantity) {
-                      toast({
-                        title: "Invalid Volume",
-                        description: `Cannot exceed available quantity of ${entry.remainingQuantity.toLocaleString()} liters`,
-                        variant: "destructive"
-                      });
+                      addNotification(
+                        "Invalid Volume",
+                        `Cannot exceed available quantity of ${entry.remainingQuantity.toLocaleString()} liters`,
+                        "error"
+                      );
                       return;
                     }
                     
@@ -2414,11 +2486,11 @@ const renderStockInfo = () => {
   const handleManualAllocation = async () => {
     try {
       if (!truckNumber || !destination || !product || !at20Quantity || selectedEntriesWithVolumes.length === 0) {
-        toast({
-          title: "Validation Error",
-          description: "Please fill all fields and allocate volumes",
-          variant: "destructive"
-        });
+        addNotification(
+          "Validation Error",
+          "Please fill all fields and allocate volumes",
+          "error"
+        );
         return;
       }
   
@@ -2426,11 +2498,11 @@ const renderStockInfo = () => {
       const required = parseFloat(at20Quantity);
   
       if (totalAllocated !== required) {
-        toast({
-          title: "Volume Mismatch",
-          description: `Total allocated volume (${totalAllocated.toLocaleString()}) must equal required volume (${required.toLocaleString()})`,
-          variant: "destructive"
-        });
+        addNotification(
+          "Volume Mismatch",
+          `Total allocated volume (${totalAllocated.toLocaleString()}) must equal required volume (${required.toLocaleString()})`,
+          "error"
+        );
         return;
       }
   
@@ -2516,10 +2588,11 @@ const renderStockInfo = () => {
       setOriginalData(tempOriginalData);
       setEntriesData(allocations);
       
-      toast({
-        title: "Success",
-        description: `Allocated ${at20Quantity} liters using ${allocations.length} entries`
-      });
+      addNotification(
+        "Success",
+        `Allocated ${at20Quantity} liters using ${allocations.length} entries`,
+        "success"
+      );
       
       // Clear form and close manual allocation
       clearForm();
@@ -2527,11 +2600,11 @@ const renderStockInfo = () => {
       setShowManualAllocation(false);
       
     } catch (error) {
-      toast({
-        title: "Error",
-        description: "Failed to process manual allocation",
-        variant: "destructive"
-      });
+      addNotification(
+        "Error",
+        "Failed to process manual allocation",
+        "error"
+      );
     } finally {
       setIsLoading(false);
     }
@@ -2573,6 +2646,87 @@ const renderStockInfo = () => {
                   <Moon className="h-4 w-4 sm:h-5 sm:w-5" />
                 }
               </Button>
+              
+              {/* Add notification bell here */}
+              <div className="relative">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowNotifications(!showNotifications)}
+                  className="text-muted-foreground hover:text-foreground p-1 sm:p-2"
+                >
+                  <Bell className="h-4 w-4 sm:h-5 sm:w-5" />
+                  {unreadCount > 0 && (
+                    <span className="absolute -top-1 -right-1 h-4 w-4 text-xs bg-red-500 text-white rounded-full flex items-center justify-center">
+                      {unreadCount}
+                    </span>
+                  )}
+                </Button>
+                
+                {/* Notification panel */}
+                {showNotifications && (
+                  <div className="absolute right-0 mt-2 w-80 bg-background border rounded-lg shadow-lg py-2 z-50">
+                    <div className="px-4 py-2 border-b flex justify-between items-center">
+                      <h3 className="font-semibold">Notifications</h3>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+                          setUnreadCount(0);
+                        }}
+                      >
+                        Mark all read
+                      </Button>
+                    </div>
+                    <div className="max-h-96 overflow-y-auto">
+                      {notifications.length === 0 ? (
+                        <div className="px-4 py-3 text-sm text-muted-foreground">
+                          No notifications
+                        </div>
+                      ) : (
+                        notifications.map(notification => (
+                          <div
+                            key={notification.id}
+                            className={`px-4 py-3 border-b last:border-0 ${
+                              !notification.read ? 'bg-muted/50' : ''
+                            }`}
+                            onClick={() => {
+                              if (!notification.read) {
+                                setNotifications(prev =>
+                                  prev.map(n =>
+                                    n.id === notification.id ? { ...n, read: true } : n
+                                  )
+                                );
+                                setUnreadCount(prev => Math.max(0, prev - 1));
+                              }
+                            }}
+                          >
+                            <div className="flex items-start gap-3">
+                              <div className={`w-2 h-2 mt-2 rounded-full ${
+                                notification.type === 'error' ? 'bg-red-500' :
+                                notification.type === 'warning' ? 'bg-yellow-500' :
+                                notification.type === 'success' ? 'bg-green-500' :
+                                'bg-blue-500'
+                              }`} />
+                              <div>
+                                <div className="font-medium text-sm">{notification.title}</div>
+                                <div className="text-sm text-muted-foreground">
+                                  {notification.message}
+                                </div>
+                                <div className="text-xs text-muted-foreground mt-1">
+                                  {new Date(notification.timestamp).toLocaleTimeString()}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+              
               <div className="relative group">
                 <Avatar 
                   className="h-7 w-7 sm:h-10 sm:w-10 ring-2 ring-emerald-500/50 ring-offset-2 ring-offset-background transition-shadow hover:ring-emerald-500/75 cursor-pointer"
@@ -2653,11 +2807,11 @@ const renderStockInfo = () => {
                   setShowMobileMenu(false);
                 } catch (error) {
                   console.error('Error loading summary:', error);
-                  toast({
-                    title: "Error",
-                    description: "Failed to load summary data",
-                    variant: "destructive"
-                  });
+                  addNotification(
+                    "Error",
+                    "Failed to load summary data",
+                    "error"
+                  );
                 } finally {
                   setIsLoading(false);
                 }
@@ -2769,78 +2923,4 @@ const renderStockInfo = () => {
       </div>
     )
 }
-
-// Add this helper function before getEntries
-const handleSsdAllocation = async (
-  permitEntry: Entry,
-  requiredQuantity: number,
-  availableEntries: Entry[],
-  updates: { [key: string]: any },
-  tempOriginalData: { [key: string]: Entry },
-  allocations: Entry[],
-  truckNumber: string, // Add truckNumber
-  product: string      // Add product
-) => {
-  // If permit entry is not the first in FIFO order
-  const fifoEntry = availableEntries[0];
-  if (fifoEntry && fifoEntry.key !== permitEntry.key) {
-    // Allocate 1000 from permit entry first
-    const permitAllocation = Math.min(1000, permitEntry.remainingQuantity, requiredQuantity);
-    
-    if (permitAllocation > 0) {
-      tempOriginalData[permitEntry.key] = { ...permitEntry };
-      
-      const updatedPermitEntry = {
-        ...permitEntry,
-        remainingQuantity: permitEntry.remainingQuantity - permitAllocation
-      };
-      
-      updates[`tr800/${permitEntry.key}`] = updatedPermitEntry;
-      
-      allocations.push({
-        key: permitEntry.key,
-        motherEntry: permitEntry.number,
-        initialQuantity: permitEntry.initialQuantity,
-        remainingQuantity: updatedPermitEntry.remainingQuantity,
-        truckNumber,
-        destination: 'ssd',
-        subtractedQuantity: permitAllocation,
-        number: permitEntry.number,
-        product,
-        product_destination: `${product}-ssd`,
-        timestamp: Date.now()
-      });
-      
-      // Allocate remaining from FIFO entry
-      const remainingRequired = requiredQuantity - permitAllocation;
-      if (remainingRequired > 0 && fifoEntry.remainingQuantity >= remainingRequired) {
-        tempOriginalData[fifoEntry.key] = { ...fifoEntry };
-        
-        const updatedFifoEntry = {
-          ...fifoEntry,
-          remainingQuantity: fifoEntry.remainingQuantity - remainingRequired
-        };
-        
-        updates[`tr800/${fifoEntry.key}`] = updatedFifoEntry;
-        
-        allocations.push({
-          key: fifoEntry.key,
-          motherEntry: fifoEntry.number,
-          initialQuantity: fifoEntry.initialQuantity,
-          remainingQuantity: updatedFifoEntry.remainingQuantity,
-          truckNumber,
-          destination: 'ssd',
-          subtractedQuantity: remainingRequired,
-          number: fifoEntry.number,
-          product,
-          product_destination: `${product}-ssd`,
-          timestamp: Date.now()
-        });
-        
-        return true; // Allocation successful
-      }
-    }
-  }
-  return false; // Could not allocate using this method
-};
 
