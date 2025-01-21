@@ -315,6 +315,9 @@ export default function EntriesPage() {
   const [showNotifications, setShowNotifications] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
 
+  // Add new state for animating the bell icon
+  const [animateBell, setAnimateBell] = useState(false)
+
   // 2. Other hooks
   const { data: session, status } = useSession()
   const router = useRouter()
@@ -521,6 +524,10 @@ export default function EntriesPage() {
     setNotifications(prev => [newNotification, ...prev].slice(0, 50)); // Keep last 50 notifications
     setUnreadCount(prev => prev + 1);
     
+    // Trigger bell animation
+    setAnimateBell(true)
+    setTimeout(() => setAnimateBell(false), 1000)
+
     // Still show critical errors as toasts
     if (type === 'error') {
       toast({
@@ -531,7 +538,12 @@ export default function EntriesPage() {
     }
   };
 
-  // Update fetchPendingOrders function to better group the data
+  // Add function to clear all notifications
+  const clearNotifications = () => {
+    setNotifications([])
+    setUnreadCount(0)
+  }
+
   const fetchPendingOrders = async () => {
     setIsPendingLoading(true)
     const db = getDatabase()
@@ -750,19 +762,42 @@ export default function EntriesPage() {
     }
   }
 
+  // Update the useEffect that handles URL parameters
   useEffect(() => {
     if (typeof window !== 'undefined') {
       setMounted(true)
-      const truckNum = searchParams.get('truck')
-      const prod = searchParams.get('product')
-      const dest = searchParams.get('destination')
-      const qty = searchParams.get('quantity')
-      if (truckNum) setTruckNumber(truckNum);
-      if (prod) setProduct(prod.toLowerCase());
-      if (dest) setDestination(dest.toLowerCase());
-      if (qty) setAt20Quantity(qty);
+      
+      // Get URL parameters
+      const params = new URLSearchParams(window.location.search)
+      const truckNum = params.get('truckNumber')
+      const prod = params.get('product')
+      const dest = params.get('destination')
+      const qty = params.get('at20Quantity')
+
+      // Set form values only if they're not already set
+      if (truckNum && !truckNumber) {
+        setTruckNumber(decodeURIComponent(truckNum))
+      }
+      if (prod && !product) {
+        setProduct(decodeURIComponent(prod.toLowerCase()))
+      }
+      if (dest && !destination) {
+        setDestination(decodeURIComponent(dest.toLowerCase()))
+      }
+      if (qty && !at20Quantity) {
+        // Convert to number and back to string to ensure proper formatting
+        const parsedQty = parseFloat(decodeURIComponent(qty))
+        if (!isNaN(parsedQty)) {
+          setAt20Quantity(parsedQty.toString())
+        }
+      }
+
+      // If we have product and destination, fetch available entries
+      if (prod && dest) {
+        fetchAvailableEntries(prod.toLowerCase(), dest.toLowerCase())
+      }
     }
-  }, [mounted, searchParams])
+  }, [mounted]) // Remove dependencies that could cause re-runs
 
   useEffect(() => {
     if (status === "unauthenticated") {
@@ -2655,7 +2690,7 @@ const renderStockInfo = () => {
                   onClick={() => setShowNotifications(!showNotifications)}
                   className="text-muted-foreground hover:text-foreground p-1 sm:p-2"
                 >
-                  <Bell className="h-4 w-4 sm:h-5 sm:w-5" />
+                  <Bell className={`h-4 w-4 sm:h-5 sm:w-5 cursor-pointer ${animateBell ? 'animate-bounce' : ''}`} />
                   {unreadCount > 0 && (
                     <span className="absolute -top-1 -right-1 h-4 w-4 text-xs bg-red-500 text-white rounded-full flex items-center justify-center">
                       {unreadCount}
