@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from "react"
 import { useSession, signOut } from "next-auth/react"
 import { useRouter } from "next/navigation"
 import { useTheme } from "next-themes"
+import * as Popover from '@radix-ui/react-popover'
 import { 
   ArrowLeft,
   ArrowUp, // Add this
@@ -2684,82 +2685,101 @@ const renderStockInfo = () => {
               
               {/* Add notification bell here */}
               <div className="relative">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setShowNotifications(!showNotifications)}
-                  className="text-muted-foreground hover:text-foreground p-1 sm:p-2"
-                >
-                  <Bell className={`h-4 w-4 sm:h-5 sm:w-5 cursor-pointer ${animateBell ? 'animate-bounce' : ''}`} />
-                  {unreadCount > 0 && (
-                    <span className="absolute -top-1 -right-1 h-4 w-4 text-xs bg-red-500 text-white rounded-full flex items-center justify-center">
-                      {unreadCount}
-                    </span>
-                  )}
-                </Button>
-                
-                {/* Notification panel */}
-                {showNotifications && (
-                  <div className="absolute right-0 mt-2 w-80 bg-background border rounded-lg shadow-lg py-2 z-50">
-                    <div className="px-4 py-2 border-b flex justify-between items-center">
-                      <h3 className="font-semibold">Notifications</h3>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => {
-                          setNotifications(prev => prev.map(n => ({ ...n, read: true })));
-                          setUnreadCount(0);
-                        }}
-                      >
-                        Mark all read
-                      </Button>
-                    </div>
-                    <div className="max-h-96 overflow-y-auto">
-                      {notifications.length === 0 ? (
-                        <div className="px-4 py-3 text-sm text-muted-foreground">
-                          No notifications
-                        </div>
-                      ) : (
-                        notifications.map(notification => (
-                          <div
-                            key={notification.id}
-                            className={`px-4 py-3 border-b last:border-0 ${
-                              !notification.read ? 'bg-muted/50' : ''
-                            }`}
+                <Popover.Root open={showNotifications} onOpenChange={setShowNotifications}>
+                  <Popover.Trigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-muted-foreground hover:text-foreground p-1 sm:p-2"
+                    >
+                      <Bell className={`h-4 w-4 sm:h-5 sm:w-5 cursor-pointer ${animateBell ? 'animate-bounce' : ''}`} />
+                      {unreadCount > 0 && (
+                        <span className="absolute -top-1 -right-1 h-4 w-4 text-xs bg-red-500 text-white rounded-full flex items-center justify-center">
+                          {unreadCount}
+                        </span>
+                      )}
+                    </Button>
+                  </Popover.Trigger>
+                  
+                  <Popover.Portal>
+                    <Popover.Content
+                      className="absolute right-0 mt-2 w-80 bg-background border rounded-lg shadow-lg py-2 z-50"
+                      align="end"
+                      sideOffset={5}
+                    >
+                      <div className="px-4 py-2 border-b flex justify-between items-center">
+                        <h3 className="font-semibold">Notifications</h3>
+                        <div className="flex gap-2">
+                          <Button
+                            variant="ghost"
+                            size="sm"
                             onClick={() => {
-                              if (!notification.read) {
-                                setNotifications(prev =>
-                                  prev.map(n =>
-                                    n.id === notification.id ? { ...n, read: true } : n
-                                  )
-                                );
-                                setUnreadCount(prev => Math.max(0, prev - 1));
-                              }
+                              setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+                              setUnreadCount(0);
                             }}
                           >
-                            <div className="flex items-start gap-3">
-                              <div className={`w-2 h-2 mt-2 rounded-full ${
-                                notification.type === 'error' ? 'bg-red-500' :
-                                notification.type === 'warning' ? 'bg-yellow-500' :
-                                notification.type === 'success' ? 'bg-green-500' :
-                                'bg-blue-500'
-                              }`} />
-                              <div>
-                                <div className="font-medium text-sm">{notification.title}</div>
-                                <div className="text-sm text-muted-foreground">
-                                  {notification.message}
-                                </div>
-                                <div className="text-xs text-muted-foreground mt-1">
-                                  {new Date(notification.timestamp).toLocaleTimeString()}
+                            Mark all read
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              clearNotifications();
+                            }}
+                            className="text-red-500 hover:text-red-600"
+                          >
+                            Clear all
+                          </Button>
+                        </div>
+                      </div>
+                      <div className="max-h-96 overflow-y-auto">
+                        {notifications.length === 0 ? (
+                          <div className="px-4 py-3 text-sm text-muted-foreground">
+                            No notifications
+                          </div>
+                        ) : (
+                          notifications.map(notification => (
+                            <div
+                              key={notification.id}
+                              className={`px-4 py-3 border-b last:border-0 ${
+                                !notification.read ? 'bg-muted/50' : ''
+                              }`}
+                              onClick={() => {
+                                if (!notification.read) {
+                                  setNotifications(prev =>
+                                    prev.map(n =>
+                                      n.id === notification.id ? { ...n, read: true } : n
+                                    )
+                                  );
+                                  setUnreadCount(prev => Math.max(0, prev - 1));
+                                }
+                              }}
+                            >
+                              <div className="flex items-start gap-3">
+                                <div className={`w-2 h-2 mt-2 rounded-full ${
+                                  notification.type === 'error' ? 'bg-red-500' :
+                                  notification.type === 'warning' ? 'bg-yellow-500' :
+                                  notification.type === 'success' ? 'bg-green-500' :
+                                  'bg-blue-500'
+                                }`} />
+                                <div>
+                                  <div className="font-medium text-sm">{notification.title}</div>
+                                  <div className="text-sm text-muted-foreground">
+                                    {notification.message}
+                                  </div>
+                                  <div className="text-xs text-muted-foreground mt-1">
+                                    {new Date(notification.timestamp).toLocaleTimeString()}
+                                  </div>
                                 </div>
                               </div>
                             </div>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  </div>
-                )}
+                          ))
+                        )}
+                      </div>
+                      <Popover.Arrow className="fill-white dark:fill-gray-900" />
+                    </Popover.Content>
+                  </Popover.Portal>
+                </Popover.Root>
               </div>
               
               <div className="relative group">
