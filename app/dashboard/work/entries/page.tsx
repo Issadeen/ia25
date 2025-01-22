@@ -2293,6 +2293,7 @@ const renderStockInfo = () => {
                 <TableHeader>
                   <TableRow className="border-b border-emerald-500/20">
                     <TableHead className="text-emerald-700 dark:text-emerald-400">Entry Number</TableHead>
+                    <TableHead className="text-emerald-700 dark:text-emerald-400">Truck Number</TableHead> {/* Add this line */}
                     <TableHead className="text-emerald-700 dark:text-emerald-400">Initial Quantity</TableHead>
                     <TableHead className="text-emerald-700 dark:text-emerald-400">Remaining</TableHead>
                     <TableHead className="text-emerald-700 dark:text-emerald-400">Subtracted Quantity</TableHead>
@@ -2303,6 +2304,7 @@ const renderStockInfo = () => {
                   {entriesData.map((entry, index) => (
                     <TableRow key={index}>
                       <TableCell>{entry.number}</TableCell>
+                      <TableCell>{entry.truckNumber}</TableCell> {/* Add this line */}
                       <TableCell>{entry.initialQuantity}</TableCell>
                       <TableCell>{entry.remainingQuantity}</TableCell>
                       <TableCell>{entry.subtractedQuantity}</TableCell>
