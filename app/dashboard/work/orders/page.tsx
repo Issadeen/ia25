@@ -17,6 +17,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { database, storage } from "@/lib/firebase"
 import { ref, onValue, update, remove, push, get, query, orderByChild, equalTo, set } from "firebase/database"
 import { ref as storageRef, getDownloadURL } from "firebase/storage"
+import { getDatabase } from "firebase/database"
 import { toast } from "@/components/ui/use-toast"
 import { AddWorkDialog } from "@/components/ui/molecules/add-work-dialog"
 import { ThemeToggle } from "@/components/ui/molecules/theme-toggle"
@@ -303,22 +304,115 @@ export default function WorkManagementPage() {
     setOwnerSummary(ownerSummaryData);
   };
 
-  const handleStatusChange = async (id: string, currentStatus: string) => {
+  // Add interface for permit entry
+  interface PermitEntry {
+      id: string;  // Make id required instead of optional
+      product: string;
+      destination: string;
+      remainingQuantity: number;
+      timestamp: number;
+      number: string;
+    }
+  
+    const preAllocatePermitEntry = async (
+      db: any,
+      truckNumber: string,
+      product: string,
+      owner: string,
+      permitId: string | undefined,
+      permitNumber: string
+    ) => {
+      if (!permitId) return;
+  
+      await update(ref(db, `tr800/${permitId}`), {
+        allocated: true,
+        allocatedTo: {
+          truck: truckNumber,
+          product: product,
+          owner: owner,
+          timestamp: new Date().toISOString()
+        }
+      });
+  
+      // Add allocation record
+      await push(ref(db, 'tr800_allocations'), {
+        permitId,
+        permitNumber,
+        truck: truckNumber,
+        product: product,
+        owner: owner,
+        timestamp: new Date().toISOString()
+      });
+    };
+  
+    const handleStatusChange = async (id: string, currentStatus: string) => {
     try {
       const newStatus = currentStatus === "queued" ? "not queued" : "queued"
-      await update(ref(database, `work_details/${id}`), { status: newStatus })
+      const detail = workDetails.find(d => d.id === id);
+      
+      if (detail && newStatus === "queued" && detail.destination.toLowerCase() === "ssd") {
+        // Pre-allocate permit entry for SSD destination
+        const db = getDatabase();
+        const tr800Ref = ref(db, 'tr800');
+        const snapshot = await get(tr800Ref);
+        
+        if (snapshot.exists()) {
+          // Find oldest suitable permit entry
+          let permitEntry: PermitEntry & { id: string } | null = null;
+          snapshot.forEach((child) => {
+            const entry = child.val();
+            if (
+              entry &&
+              typeof entry === 'object' &&
+              'product' in entry &&
+              'destination' in entry &&
+              'remainingQuantity' in entry &&
+              'timestamp' in entry
+            ) {
+              const typedEntry = entry as PermitEntry;
+              if (
+                typedEntry.product.toLowerCase() === detail.product.toLowerCase() &&
+                typedEntry.destination.toLowerCase() === 'ssd' &&
+                typedEntry.remainingQuantity > 0
+              ) {
+                if (!permitEntry || typedEntry.timestamp < permitEntry.timestamp) {
+                  permitEntry = { ...typedEntry, id: child.key! };
+                }
+              }
+            }
+          });
+    
+          if (permitEntry && 'number' in permitEntry) {
+            await preAllocatePermitEntry(
+              db,
+              detail.truck_number,
+              detail.product,
+              detail.owner,
+              permitEntry.id,
+              permitEntry.number as string
+            );
+            
+            toast({
+              title: "Permit Entry Pre-allocated",
+              description: `Pre-allocated entry ${permitEntry.number} for truck ${detail.truck_number}`,
+            });
+          }
+        }
+      }
+
+      await update(ref(database, `work_details/${id}`), { status: newStatus });
       toast({
         title: "Status Updated",
         description: `Status changed to ${newStatus}`,
-      })
-    } catch (error: unknown) {
-      console.error('Error updating loaded status:', error);
+      });
+    } catch (error) {
+      console.error('Error updating status:', error);
       toast({
         title: "Error",
         description: error instanceof Error ? error.message : "Failed to update status",
-      })
+      });
     }
-  }
+  };
 
   const handleDelete = async (id: string) => {
     if (confirm("Are you sure you want to delete this record?")) {

@@ -19,7 +19,8 @@ import {
   ChevronDown, 
   ChevronUp,
   Search, // Add this
-  Bell // Add this
+  Bell, // Add this
+  Receipt // Add this
 } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -52,6 +53,7 @@ import { confirmDialog } from "@/components/ui/confirm-dialog" // Add this line
 import { reminderService } from '@/lib/reminders' // Add this line
 import { StockItem } from '@/types/stock';
 import { Entry } from "@/types/entries"
+import { getPreAllocatedPermit, markPermitAsUsed } from '@/lib/permit-utils'; // Add this line
 
 // Add new constants at the top of the file
 const WARNING_TIMEOUT = 9 * 60 * 1000; // 9 minutes
@@ -1080,6 +1082,20 @@ export default function EntriesPage() {
     const db = getDatabase();
   
     try {
+      // Check for pre-allocated permit if destination is SSD
+      if (destination.toLowerCase() === 'ssd') {
+        const preAllocated = await getPreAllocatedPermit(db, truckNumber);
+        
+        if (preAllocated) {
+          setEntryUsedInPermit(preAllocated.permitEntryId);
+          addNotification(
+            "Pre-allocated Permit Found",
+            `Using pre-allocated permit entry ${preAllocated.permitEntryNumber}`,
+            "info"
+          );
+        }
+      }
+
       const requiredQuantity = parseFloat(at20Quantity);
       const updates: { [key: string]: any } = {};
       const tempOriginalData: { [key: string]: Entry } = {};
@@ -1242,6 +1258,19 @@ export default function EntriesPage() {
   
       // Apply all updates in one transaction
       await update(dbRef(db), updates)
+
+      // After successful allocation, if we used a pre-allocated permit, mark it as used
+      if (destination.toLowerCase() === 'ssd' && entryUsedInPermit) {
+        const preAllocated = await getPreAllocatedPermit(db, truckNumber);
+        if (preAllocated) {
+          await markPermitAsUsed(db, preAllocated.id);
+          addNotification(
+            "Permit Used",
+            `Pre-allocated permit ${preAllocated.permitEntryNumber} has been marked as used`,
+            "success"
+          );
+        }
+      }
   
       // Update local state
       setOriginalData(tempOriginalData)
@@ -2908,6 +2937,15 @@ const renderStockInfo = () => {
               <ClipboardList className="h-4 w-4" /> 
               <span>Manual Allocation</span>
             </Button>
+            <Button 
+              onClick={() => router.push('/dashboard/work/permits')}
+              variant="outline" 
+              className="flex items-center justify-center gap-2 w-full sm:w-auto"
+              size="sm"
+            >
+              <Receipt className="h-4 w-4" /> 
+              <span>View Permits</span>
+            </Button>
           </div>
         </motion.div>
 
@@ -2980,4 +3018,3 @@ const renderStockInfo = () => {
       </div>
     )
 }
-
