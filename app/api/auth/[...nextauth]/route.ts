@@ -1,25 +1,7 @@
 import NextAuth from "next-auth"
-import { AuthOptions } from 'next-auth';
+import { authOptions } from "@/lib/auth"
 
-export const authOptions: AuthOptions = {
-  providers: []
-};
-
-const handler = NextAuth({
-  ...authOptions,
-  debug: true,
-  logger: {
-    error(code, ...message) {
-      console.error(code, message)
-    },
-    warn(code, ...message) {
-      console.warn(code, message)
-    },
-    debug(code, ...message) {
-      console.debug(code, message)
-    },
-  },
-})
+const handler = NextAuth(authOptions)
 
 export { handler as GET, handler as POST }
 
