@@ -3,7 +3,7 @@ import { getDatabase } from 'firebase/database'
 import { getAuth } from 'firebase/auth'
 import { getStorage } from 'firebase/storage'
 
-const firebaseConfig = {
+export const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
   authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
   databaseURL: process.env.NEXT_PUBLIC_FIREBASE_DATABASE_URL,
@@ -14,16 +14,11 @@ const firebaseConfig = {
 }
 
 // Initialize Firebase
-const getFirebaseApp = () => {
-  try {
-    if (getApps().length) {
-      return getApp()
-    }
-    return initializeApp(firebaseConfig)
-  } catch (error) {
-    console.error('Firebase initialization error:', error)
-    throw error
+export function getFirebaseApp() {
+  if (!getApps().length) {
+    return initializeApp(firebaseConfig);
   }
+  return getApps()[0];
 }
 
 const app = getFirebaseApp()
@@ -36,7 +31,6 @@ export {
   auth,
   database,
   storage,
-  getFirebaseApp,
   getAuth as getFirebaseAuth, // Export getAuth as getFirebaseAuth
   getStorage as getFirebaseStorage, // Export getStorage as getFirebaseStorage
   getDatabase as getFirebaseDatabase // Export getDatabase as getFirebaseDatabase

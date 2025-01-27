@@ -2,6 +2,7 @@ import { NextAuthOptions } from "next-auth"
 import CredentialsProvider from "next-auth/providers/credentials"
 import { getDatabase, ref, get } from "firebase/database"
 import { app } from "./firebase"
+import GoogleProvider from 'next-auth/providers/google';
 
 interface FirebaseUser {
   email: string;
@@ -76,7 +77,11 @@ export const authOptions: NextAuthOptions = {
           return null;
         }
       }
-    })
+    }),
+    GoogleProvider({
+      clientId: process.env.GOOGLE_CLIENT_ID!,
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+    }),
   ],
   session: {
     strategy: "jwt",

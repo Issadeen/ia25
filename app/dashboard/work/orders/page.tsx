@@ -17,7 +17,6 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { database, storage } from "@/lib/firebase"
 import { ref, onValue, update, remove, push, get, query, orderByChild, equalTo, set } from "firebase/database"
 import { ref as storageRef, getDownloadURL } from "firebase/storage"
-import { getDatabase } from "firebase/database"
 import { toast } from "@/components/ui/use-toast"
 import { AddWorkDialog } from "@/components/ui/molecules/add-work-dialog"
 import { ThemeToggle } from "@/components/ui/molecules/theme-toggle"
@@ -79,6 +78,8 @@ interface SummaryStats {
   pendingOrders: number;
   pendingAgoOrders: number;  // Add this
   pendingPmsOrders: number;  // Add this
+  unqueuedAgoOrders: number;  // Add this
+  unqueuedPmsOrders: number;  // Add this
 }
 
 interface OwnerSummary {
@@ -169,7 +170,9 @@ export default function WorkManagementPage() {
     loadedOrders: 0,
     pendingOrders: 0,
     pendingAgoOrders: 0,  // Add this
-    pendingPmsOrders: 0  // Add this
+    pendingPmsOrders: 0,  // Add this
+    unqueuedAgoOrders: 0,  // Add this
+    unqueuedPmsOrders: 0   // Add this
   })
   const [ownerSummary, setOwnerSummary] = useState<OwnerSummary>({})
   const [editingTruckId, setEditingTruckId] = useState<string | null>(null)
@@ -218,6 +221,9 @@ export default function WorkManagementPage() {
   // Add new state
   const [showUnpaidSummary, setShowUnpaidSummary] = useState(false);
 
+  // Add state for highlighting
+  const [highlightUnqueued, setHighlightUnqueued] = useState(false);
+
   // Add click handler for the title
   const handleTitleClick = () => {
     const newCount = titleClickCount + 1;
@@ -244,7 +250,9 @@ export default function WorkManagementPage() {
       loadedOrders: 0,
       pendingOrders: 0,
       pendingAgoOrders: 0,  // Add this
-      pendingPmsOrders: 0  // Add this
+      pendingPmsOrders: 0,  // Add this
+      unqueuedAgoOrders: 0,  // Add this
+      unqueuedPmsOrders: 0   // Add this
     };
     
     const ownerSummaryData: OwnerSummary = {};
@@ -266,6 +274,12 @@ export default function WorkManagementPage() {
       if (detail.status === "queued" && !detail.loaded) {
         if (detail.product.trim().toUpperCase() === "AGO") stats.pendingAgoOrders++;
         if (detail.product.trim().toUpperCase() === "PMS") stats.pendingPmsOrders++;
+      }
+
+      // Add unqueued product counts
+      if (detail.status !== "queued" && detail.status !== "completed") {
+        if (detail.product.trim().toUpperCase() === "AGO") stats.unqueuedAgoOrders++;
+        if (detail.product.trim().toUpperCase() === "PMS") stats.unqueuedPmsOrders++;
       }
 
       // Update owner summary with the same logic
@@ -304,115 +318,22 @@ export default function WorkManagementPage() {
     setOwnerSummary(ownerSummaryData);
   };
 
-  // Add interface for permit entry
-  interface PermitEntry {
-      id: string;  // Make id required instead of optional
-      product: string;
-      destination: string;
-      remainingQuantity: number;
-      timestamp: number;
-      number: string;
-    }
-  
-    const preAllocatePermitEntry = async (
-      db: any,
-      truckNumber: string,
-      product: string,
-      owner: string,
-      permitId: string | undefined,
-      permitNumber: string
-    ) => {
-      if (!permitId) return;
-  
-      await update(ref(db, `tr800/${permitId}`), {
-        allocated: true,
-        allocatedTo: {
-          truck: truckNumber,
-          product: product,
-          owner: owner,
-          timestamp: new Date().toISOString()
-        }
-      });
-  
-      // Add allocation record
-      await push(ref(db, 'tr800_allocations'), {
-        permitId,
-        permitNumber,
-        truck: truckNumber,
-        product: product,
-        owner: owner,
-        timestamp: new Date().toISOString()
-      });
-    };
-  
-    const handleStatusChange = async (id: string, currentStatus: string) => {
+  const handleStatusChange = async (id: string, currentStatus: string) => {
     try {
       const newStatus = currentStatus === "queued" ? "not queued" : "queued"
-      const detail = workDetails.find(d => d.id === id);
-      
-      if (detail && newStatus === "queued" && detail.destination.toLowerCase() === "ssd") {
-        // Pre-allocate permit entry for SSD destination
-        const db = getDatabase();
-        const tr800Ref = ref(db, 'tr800');
-        const snapshot = await get(tr800Ref);
-        
-        if (snapshot.exists()) {
-          // Find oldest suitable permit entry
-          let permitEntry: PermitEntry & { id: string } | null = null;
-          snapshot.forEach((child) => {
-            const entry = child.val();
-            if (
-              entry &&
-              typeof entry === 'object' &&
-              'product' in entry &&
-              'destination' in entry &&
-              'remainingQuantity' in entry &&
-              'timestamp' in entry
-            ) {
-              const typedEntry = entry as PermitEntry;
-              if (
-                typedEntry.product.toLowerCase() === detail.product.toLowerCase() &&
-                typedEntry.destination.toLowerCase() === 'ssd' &&
-                typedEntry.remainingQuantity > 0
-              ) {
-                if (!permitEntry || typedEntry.timestamp < permitEntry.timestamp) {
-                  permitEntry = { ...typedEntry, id: child.key! };
-                }
-              }
-            }
-          });
-    
-          if (permitEntry && 'number' in permitEntry) {
-            await preAllocatePermitEntry(
-              db,
-              detail.truck_number,
-              detail.product,
-              detail.owner,
-              permitEntry.id,
-              permitEntry.number as string
-            );
-            
-            toast({
-              title: "Permit Entry Pre-allocated",
-              description: `Pre-allocated entry ${permitEntry.number} for truck ${detail.truck_number}`,
-            });
-          }
-        }
-      }
-
-      await update(ref(database, `work_details/${id}`), { status: newStatus });
+      await update(ref(database, `work_details/${id}`), { status: newStatus })
       toast({
         title: "Status Updated",
         description: `Status changed to ${newStatus}`,
-      });
-    } catch (error) {
-      console.error('Error updating status:', error);
+      })
+    } catch (error: unknown) {
+      console.error('Error updating loaded status:', error);
       toast({
         title: "Error",
         description: error instanceof Error ? error.message : "Failed to update status",
-      });
+      })
     }
-  };
+  }
 
   const handleDelete = async (id: string) => {
     if (confirm("Are you sure you want to delete this record?")) {
@@ -1438,13 +1359,20 @@ const handleSyncStatus = async (truck: WorkDetail) => {
   }
 };
 
-// Add new helper function
+// Update the getUnpaidSummary function
 const getUnpaidSummary = () => {
   const summary = workDetails
-    .filter(detail => detail.loaded && !detail.paid)
+    .filter(detail => {
+      // Only include loaded trucks with actual unpaid balances
+      const { balance } = getTruckAllocations(detail);
+      return detail.loaded && balance > 0;
+    })
     .reduce((acc, detail) => {
       const owner = detail.owner;
       const { balance } = getTruckAllocations(detail);
+      
+      // Skip if balance is 0 or negative
+      if (balance <= 0) return acc;
       
       if (!acc[owner]) {
         acc[owner] = {
@@ -1472,7 +1400,10 @@ const getUnpaidSummary = () => {
       pmsCount: number
     }});
 
-  return summary;
+  // Remove any owners with no actual unpaid amounts
+  return Object.fromEntries(
+    Object.entries(summary).filter(([_, data]) => data.totalAmount > 0)
+  );
 };
 
   return (
@@ -1710,11 +1641,12 @@ const getUnpaidSummary = () => {
                           initial="hidden"
                           animate="visible"
                           transition={{ delay: index * 0.05 }}
-                          className={`border-b hover:bg-muted/50 ${
-                            detail.loaded ? 'opacity-50 bg-muted/20' : ''
-                          } ${
-                            detail.id === lastAddedId ? 'highlight-new-record' : ''
-                          }`}
+                          className={cn(
+                            'border-b hover:bg-muted/50',
+                            detail.loaded && 'opacity-50 bg-muted/20',
+                            detail.id === lastAddedId && 'highlight-new-record',
+                            highlightUnqueued && detail.status !== "queued" && detail.status !== "completed" && 'bg-yellow-50 dark:bg-yellow-950/20'
+                          )}
                         >
                           <td className="p-2 sm:p-3">{detail.owner}</td>
                           <td className="p-2 sm:p-3">{detail.product}</td>
@@ -1937,7 +1869,22 @@ const getUnpaidSummary = () => {
                   <div className="space-y-2">
                     <div>Total Orders: {summaryStats.totalOrders}</div>
                     <div>Queued Orders: {summaryStats.queuedOrders}</div>
-                    <div>Unqueued Orders: {summaryStats.unqueuedOrders}</div>
+                    <div 
+                      className="flex flex-col cursor-pointer hover:text-emerald-600 transition-colors"
+                      onClick={() => {
+                        setHighlightUnqueued(!highlightUnqueued);
+                        toast({
+                          title: highlightUnqueued ? "Unqueued highlight removed" : "Unqueued orders highlighted",
+                          description: `AGO: ${summaryStats.unqueuedAgoOrders}, PMS: ${summaryStats.unqueuedPmsOrders}`,
+                        });
+                      }}
+                    >
+                      <span>Unqueued Orders: {summaryStats.unqueuedOrders}</span>
+                      <div className="ml-4 text-sm text-muted-foreground">
+                        <div>AGO: {summaryStats.unqueuedAgoOrders}</div>
+                        <div>PMS: {summaryStats.unqueuedPmsOrders}</div>
+                      </div>
+                    </div>
                   </div>
                   <div className="space-y-2">
                     <div>Loaded Orders: {summaryStats.loadedOrders}</div>
