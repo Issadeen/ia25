@@ -28,6 +28,7 @@ import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
 import { syncTruckPaymentStatus } from "@/lib/payment-utils";
 import { cn } from '@/lib/utils'
+import { OrderTracker } from '@/src/models/OrderTracker';
 
 // Add new interfaces
 interface Payment {
@@ -223,6 +224,50 @@ export default function WorkManagementPage() {
 
   // Add state for highlighting
   const [highlightUnqueued, setHighlightUnqueued] = useState(false);
+
+  const [orderTracker] = useState(() => new OrderTracker());
+  
+  // Add this function to calculate new orders
+  const getNewOrdersStats = () => {
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+    const newOrders = workDetails.filter(detail => {
+      const createdAt = new Date(detail.createdAt || '');
+      return createdAt > sevenDaysAgo;
+    });
+
+    return {
+      total: newOrders.length,
+      ago: newOrders.filter(order => order.product === 'AGO').length,
+      pms: newOrders.filter(order => order.product === 'PMS').length,
+      unqueued: newOrders.filter(order => order.status !== "queued" && order.status !== "completed").length,
+      loaded: newOrders.filter(order => order.loaded).length,
+      pending: newOrders.filter(order => order.status === "queued" && !order.loaded).length,
+      orders: newOrders
+    };
+  };
+
+  // Add this function to calculate new orders for each owner
+  const getNewOwnerOrdersStats = (owner: string) => {
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+    const newOrders = workDetails.filter(detail => {
+      const createdAt = new Date(detail.createdAt || '');
+      return createdAt > sevenDaysAgo && detail.owner === owner;
+    });
+
+    return {
+      total: newOrders.length,
+      ago: newOrders.filter(order => order.product === 'AGO').length,
+      pms: newOrders.filter(order => order.product === 'PMS').length,
+      unqueued: newOrders.filter(order => order.status !== "queued" && order.status !== "completed").length,
+      loaded: newOrders.filter(order => order.loaded).length,
+      pending: newOrders.filter(order => order.status === "queued" && !order.loaded).length,
+      orders: newOrders
+    };
+  };
 
   // Add click handler for the title
   const handleTitleClick = () => {
@@ -1406,6 +1451,82 @@ const getUnpaidSummary = () => {
   );
 };
 
+const renderSummaryCard = () => (
+  <Card className="p-6">
+    {/* ...existing summary card content... */}
+    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 sm:gap-4">
+      {/* ...existing summary sections... */}
+      
+      {/* Add New Orders Section */}
+      <div className="col-span-full mt-4 border-t pt-4">
+        <h3 className="text-lg font-semibold mb-2 text-emerald-600">New Orders (Last 7 Days)</h3>
+        {(() => {
+          const newStats = getNewOrdersStats();
+          return newStats.total > 0 ? (
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="bg-emerald-50 dark:bg-emerald-950/20 p-3 rounded-lg">
+                <div className="text-lg font-semibold text-emerald-600">
+                  {newStats.total}
+                </div>
+                <div className="text-sm text-muted-foreground">Total New Orders</div>
+              </div>
+              <div className="bg-blue-50 dark:bg-blue-950/20 p-3 rounded-lg">
+                <div className="text-lg font-semibold text-blue-600">
+                  {newStats.ago}
+                </div>
+                <div className="text-sm text-muted-foreground">New AGO Orders</div>
+              </div>
+              <div className="bg-teal-50 dark:bg-teal-950/20 p-3 rounded-lg">
+                <div className="text-lg font-semibold text-teal-600">
+                  {newStats.pms}
+                </div>
+                <div className="text-sm text-muted-foreground">New PMS Orders</div>
+              </div>
+              <div className="bg-gray-50 dark:bg-gray-950/20 p-3 rounded-lg">
+                <div className="text-lg font-semibold text-gray-600">
+                  {newStats.unqueued}
+                </div>
+                <div className="text-sm text-muted-foreground">New Unqueued Orders</div>
+              </div>
+              <div className="bg-green-50 dark:bg-green-950/20 p-3 rounded-lg">
+                <div className="text-lg font-semibold text-green-600">
+                  {newStats.loaded}
+                </div>
+                <div className="text-sm text-muted-foreground">New Loaded Orders</div>
+              </div>
+              <div className="bg-yellow-50 dark:bg-yellow-950/20 p-3 rounded-lg">
+                <div className="text-lg font-semibold text-yellow-600">
+                  {newStats.pending}
+                </div>
+                <div className="text-sm text-muted-foreground">New Pending Orders</div>
+              </div>
+            </div>
+          ) : (
+            <div className="text-muted-foreground">No new orders in the last 7 days</div>
+          );
+        })()}
+      </div>
+    </div>
+  </Card>
+);
+
+const isNewOrder = (createdAt?: string) => {
+  if (!createdAt) return false;
+  const sevenDaysAgo = new Date();
+  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+  return new Date(createdAt) > sevenDaysAgo;
+};
+
+// Add this function to get active owners
+const getActiveOwnerSummary = () => {
+  const filteredDetails = getFilteredWorkDetails();
+  const activeOwners = new Set(filteredDetails.map(detail => detail.owner));
+  
+  return Object.fromEntries(
+    Object.entries(ownerSummary).filter(([owner]) => activeOwners.has(owner))
+  );
+};
+
   return (
     <div className="min-h-screen">
       <header className="fixed top-0 left-0 w-full border-b z-50 bg-gradient-to-r from-emerald-900/10 via-blue-900/10 to-blue-900/10 backdrop-blur-xl">
@@ -1645,7 +1766,8 @@ const getUnpaidSummary = () => {
                             'border-b hover:bg-muted/50',
                             detail.loaded && 'opacity-50 bg-muted/20',
                             detail.id === lastAddedId && 'highlight-new-record',
-                            highlightUnqueued && detail.status !== "queued" && detail.status !== "completed" && 'bg-yellow-50 dark:bg-yellow-950/20'
+                            highlightUnqueued && detail.status !== "queued" && detail.status !== "completed" && 'bg-yellow-50 dark:bg-yellow-950/20',
+                            isNewOrder(detail.createdAt) && 'bg-emerald-50/50 dark:bg-emerald-950/20' // Add this line
                           )}
                         >
                           <td className="p-2 sm:p-3">{detail.owner}</td>
@@ -1858,50 +1980,7 @@ const getUnpaidSummary = () => {
               initial="hidden"
               animate="visible"
             >
-              <Card className="p-6">
-                <div className="flex justify-between items-center">
-                  <h2 className="text-xl font-semibold mb-4 bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">Summary</h2>
-                  <Button variant="ghost" onClick={handleCopySummary}>
-                    <Copy className="h-5 w-5" />
-                  </Button>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 sm:gap-4">
-                  <div className="space-y-2">
-                    <div>Total Orders: {summaryStats.totalOrders}</div>
-                    <div>Queued Orders: {summaryStats.queuedOrders}</div>
-                    <div 
-                      className="flex flex-col cursor-pointer hover:text-emerald-600 transition-colors"
-                      onClick={() => {
-                        setHighlightUnqueued(!highlightUnqueued);
-                        toast({
-                          title: highlightUnqueued ? "Unqueued highlight removed" : "Unqueued orders highlighted",
-                          description: `AGO: ${summaryStats.unqueuedAgoOrders}, PMS: ${summaryStats.unqueuedPmsOrders}`,
-                        });
-                      }}
-                    >
-                      <span>Unqueued Orders: {summaryStats.unqueuedOrders}</span>
-                      <div className="ml-4 text-sm text-muted-foreground">
-                        <div>AGO: {summaryStats.unqueuedAgoOrders}</div>
-                        <div>PMS: {summaryStats.unqueuedPmsOrders}</div>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <div>Loaded Orders: {summaryStats.loadedOrders}</div>
-                    <div className="flex flex-col">
-                      <span>Pending Orders: {summaryStats.pendingOrders}</span>
-                      <div className="ml-4 text-sm text-muted-foreground">
-                        <div>AGO: {summaryStats.pendingAgoOrders}</div>
-                        <div>PMS: {summaryStats.pendingPmsOrders}</div>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <div>AGO Orders: {summaryStats.agoOrders}</div>
-                    <div>PMS Orders: {summaryStats.pmsOrders}</div>
-                  </div>
-                </div>
-              </Card>
+              {renderSummaryCard()}
             </motion.div>
 
             {/* Owner Summary */} 
@@ -1913,42 +1992,59 @@ const getUnpaidSummary = () => {
             >
               <Card className="p-6">
                 <div className="flex justify-between items-center">
-                  <h2 className="text-xl font-semibold mb-4 bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">Owner Summary</h2>
+                  <h2 className="text-xl font-semibold mb-4 bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">
+                    Active Owner Summary
+                  </h2>
                   <Button variant="ghost" onClick={handleCopySummary}>
                     <Copy className="h-5 w-5" />
                   </Button>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {Object.entries(ownerSummary).map(([owner, data], index) => (
-                    <motion.div
-                      key={`owner-${owner}`}
-                      variants={cardVariants}
-                      initial="hidden"
-                      animate="visible"
-                      transition={{ delay: index * 0.1 }}
-                    >
-                      <Card className="p-4">
-                        <div className="flex justify-between items-start">
-                          <h3 className="text-lg font-semibold mb-2 bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">{owner}</h3>
-                          <Button 
-                            variant="ghost" 
-                            size="sm"
-                            onClick={() => handleOwnerInfo(owner)}
-                          >
-                            Info
-                          </Button>
-                        </div>
-                        <div className="space-y-1">
-                          <div>Total Orders: {data.totalOrders}</div>
-                          <div>Queued Orders: {data.queuedOrders}</div>
-                          <div>Loaded Orders: {data.loadedOrders}</div>
-                          <div>Pending Orders: {data.pendingOrders}</div>
-                          <div>AGO Orders: {data.agoOrders}</div>
-                          <div>PMS Orders: {data.pmsOrders}</div>
-                        </div>
-                      </Card>
-                    </motion.div>
-                  ))}
+                  {Object.entries(getActiveOwnerSummary()).map(([owner, data], index) => {
+                    const newStats = getNewOwnerOrdersStats(owner);
+                    return (
+                      <motion.div
+                        key={`owner-${owner}`}
+                        variants={cardVariants}
+                        initial="hidden"
+                        animate="visible"
+                        transition={{ delay: index * 0.1 }}
+                      >
+                        <Card className="p-4">
+                          <div className="flex justify-between items-start">
+                            <h3 className="text-lg font-semibold mb-2 bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">
+                              {owner}
+                            </h3>
+                            <Button 
+                              variant="ghost" 
+                              size="sm"
+                              onClick={() => handleOwnerInfo(owner)}
+                            >
+                              Info
+                            </Button>
+                          </div>
+                          <div className="space-y-1">
+                            <div>Total Orders: {data.totalOrders}</div>
+                            <div>Queued Orders: {data.queuedOrders}</div>
+                            <div>Loaded Orders: {data.loadedOrders}</div>
+                            <div>Pending Orders: {data.pendingOrders}</div>
+                            <div>AGO Orders: {data.agoOrders}</div>
+                            <div>PMS Orders: {data.pmsOrders}</div>
+                            
+                            {/* New Orders Summary */}
+                            {newStats.total > 0 && (
+                              <div className="mt-2 pt-2 border-t">
+                                <div className="text-sm font-medium text-emerald-600">New Orders (7 Days):</div>
+                                <div className="text-sm">Total: {newStats.total}</div>
+                                <div className="text-sm">AGO: {newStats.ago}</div>
+                                <div className="text-sm">PMS: {newStats.pms}</div>
+                              </div>
+                            )}
+                          </div>
+                        </Card>
+                      </motion.div>
+                    );
+                  })}
                 </div>
               </Card>
             </motion.div>
@@ -2002,7 +2098,7 @@ const getUnpaidSummary = () => {
                 </span>
               </div>
             ))}
-          </div>
+            </div>
         </DialogContent>
       </Dialog>
 
@@ -2050,7 +2146,7 @@ const getUnpaidSummary = () => {
                   {/* Trucks List */}
                   <div className="space-y-2">
                     {data.trucks.map(truck => (
-                      <div 
+                      <div
                         key={truck.truck_number}
                         className="flex flex-col sm:flex-row sm:items-center justify-between p-2 border rounded-lg hover:bg-muted/50 transition-colors gap-2"
                       >
@@ -2058,8 +2154,8 @@ const getUnpaidSummary = () => {
                           <span className="font-medium">{truck.truck_number}</span>
                           <span className={cn(
                             "px-1.5 py-0.5 rounded text-xs font-medium whitespace-nowrap",
-                            truck.product === 'AGO' 
-                              ? "bg-blue-100 text-blue-700" 
+                            truck.product === 'AGO'
+                              ? "bg-blue-100 text-blue-700"
                               : "bg-green-100 text-green-700"
                           )}>
                             {truck.product}

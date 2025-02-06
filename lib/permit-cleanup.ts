@@ -1,5 +1,6 @@
-import { Database, ref, get, update, query, orderByChild, equalTo } from 'firebase/database';
+import { Database, ref, get, update, query, orderByChild, equalTo, remove } from 'firebase/database';
 import type { PreAllocation, PermitEntry } from '@/types/permits';
+import type { WorkDetail } from '@/types/work';
 
 interface CleanupResult {
   duplicatesRemoved: number;
@@ -126,6 +127,55 @@ export const cleanupDuplicateAllocations = async (
   return result;
 };
 
+export const cleanupLoadedTrucks = async (db: Database) => {
+  try {
+    const [workSnapshot, preAllocationsSnapshot] = await Promise.all([
+      get(ref(db, 'work_details')),
+      get(ref(db, 'permitPreAllocations'))
+    ]);
+
+    if (!preAllocationsSnapshot.exists()) {
+      return { duplicatesRemoved: 0, consolidated: 0 };
+    }
+
+    const preAllocations = preAllocationsSnapshot.val();
+    const workDetails = workSnapshot.exists() ? workSnapshot.val() : {};
+    const updates: { [key: string]: any } = {};
+    const deletions: string[] = [];
+    let duplicatesRemoved = 0;
+    let consolidated = 0;
+
+    // First, remove pre-allocations for loaded trucks
+    for (const [allocationId, allocation] of Object.entries(preAllocations)) {
+      const truckNumber = (allocation as any).truckNumber;
+      // Find matching work detail
+      const workDetail = Object.values(workDetails).find((work: any) => 
+        work.truck_number === truckNumber && work.loaded
+      );
+
+      if (workDetail) {
+        deletions.push(`permitPreAllocations/${allocationId}`);
+        duplicatesRemoved++;
+        console.log(`Removing pre-allocation for loaded truck: ${truckNumber}`);
+      }
+    }
+
+    // Apply all updates and deletions
+    if (deletions.length > 0 || Object.keys(updates).length > 0) {
+      const finalUpdates = {
+        ...updates,
+        ...deletions.reduce((acc, path) => ({ ...acc, [path]: null }), {})
+      };
+      await update(ref(db), finalUpdates);
+    }
+
+    return { duplicatesRemoved, consolidated };
+  } catch (error) {
+    console.error('Cleanup error:', error);
+    throw error;
+  }
+};
+
 export const validateAllocations = async (db: Database): Promise<string[]> => {
   const errors: string[] = [];
   
@@ -166,4 +216,45 @@ export const validateAllocations = async (db: Database): Promise<string[]> => {
   }
 
   return errors;
+};
+
+export const validateLoadedTrucks = async (db: Database) => {
+  const errors: string[] = [];
+  
+  try {
+    const [workSnapshot, preAllocationsSnapshot] = await Promise.all([
+      get(ref(db, 'work_details')),
+      get(ref(db, 'permitPreAllocations'))
+    ]);
+
+    if (!preAllocationsSnapshot.exists()) {
+      return errors;
+    }
+
+    const preAllocations = preAllocationsSnapshot.val();
+    const workDetails = workSnapshot.exists() ? workSnapshot.val() : {};
+
+    for (const [allocationId, allocation] of Object.entries(preAllocations)) {
+      const { truckNumber, permitNumber } = allocation as any;
+      
+      // Find corresponding work detail
+      const workDetail = Object.values(workDetails).find((work: any) => 
+        work.truck_number === truckNumber
+      ) as WorkDetail | undefined;
+
+      if (!workDetail) {
+        errors.push(`Pre-allocation ${allocationId} references non-existent truck ${truckNumber}`);
+        continue;
+      }
+
+      if (workDetail.loaded) {
+        errors.push(`Pre-allocation exists for loaded truck ${truckNumber}`);
+      }
+    }
+
+    return errors;
+  } catch (error) {
+    console.error('Validation error:', error);
+    throw error;
+  }
 };

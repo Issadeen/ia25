@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { getDatabase, ref, onValue, get } from 'firebase/database'
+import { getDatabase, ref, onValue, get, update } from 'firebase/database'
 import { useSession } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
@@ -22,6 +22,7 @@ import { useToast } from '@/components/ui/use-toast'
 import { ThemeToggle } from '@/components/theme-toggle'
 import { Avatar, AvatarImage } from '@/components/ui/avatar'
 import { AvatarFallback } from '@/components/ui/avatar'
+import { cn } from '@/lib/utils'
 import { getStorage, ref as storageRef, getDownloadURL } from 'firebase/storage'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select'
 import { preAllocatePermitEntry } from '@/lib/permit-allocation'
@@ -79,6 +80,8 @@ export default function PermitsPage() {
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date())
   const [isAutoAllocating, setIsAutoAllocating] = useState(false);
   const [cleanupClickCount, setCleanupClickCount] = useState(0);
+  const [manualCleanupMode, setManualCleanupMode] = useState(false);
+  const [selectedForCleanup, setSelectedForCleanup] = useState<string[]>([]);
 
   // Add title click handler
   const handleTitleClick = () => {
@@ -616,6 +619,50 @@ const handleReset = async () => {
     }
   };
 
+  // Add new function to handle double click on title
+  const handlePreAllocatedTitleDoubleClick = () => {
+    setManualCleanupMode(!manualCleanupMode);
+    setSelectedForCleanup([]);
+    toast({
+      title: manualCleanupMode ? "Manual Cleanup Mode Disabled" : "Manual Cleanup Mode Enabled",
+      description: manualCleanupMode ? 
+        "Exiting cleanup mode" : 
+        "Click on pre-allocations to select them for cleanup",
+    });
+  };
+
+  // Add function to handle manual cleanup
+  const handleManualCleanup = async () => {
+    if (!selectedForCleanup.length) return;
+
+    try {
+      const db = getDatabase();
+      const updates: { [key: string]: any } = {};
+
+      // Mark each selected allocation as loaded
+      selectedForCleanup.forEach(allocationId => {
+        updates[`permitPreAllocations/${allocationId}`] = null;
+      });
+
+      await update(ref(db), updates);
+
+      toast({
+        title: "Cleanup Complete",
+        description: `Removed ${selectedForCleanup.length} pre-allocations`,
+      });
+
+      setSelectedForCleanup([]);
+      setManualCleanupMode(false);
+    } catch (error) {
+      console.error('Manual cleanup error:', error);
+      toast({
+        title: "Error",
+        description: "Failed to cleanup selected pre-allocations",
+        variant: "destructive"
+      });
+    }
+  };
+
   return (
     <div className="min-h-screen">
       <header className="fixed top-0 left-0 w-full border-b z-50 bg-gradient-to-r from-emerald-900/10 via-blue-900/10 to-blue-900/10 backdrop-blur-xl">
@@ -816,11 +863,26 @@ const handleReset = async () => {
         {/* Updated Pre-Allocations Card with improved mobile layout */}
         <Card className="border-emerald-500/20">
           <CardHeader className="sm:pb-3">
-            <CardTitle className="text-xl font-semibold bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent flex items-center justify-between">
+            <CardTitle 
+              className="text-xl font-semibold bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent flex items-center justify-between"
+              onDoubleClick={handlePreAllocatedTitleDoubleClick}
+            >
               <span>Pre-Allocated Permits</span>
-              <span className="text-sm font-normal text-muted-foreground">
-                {getFilteredPreAllocations().length} Active
-              </span>
+              <div className="flex items-center gap-2">
+                {manualCleanupMode && (
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={handleManualCleanup}
+                    disabled={!selectedForCleanup.length}
+                  >
+                    Clean Selected ({selectedForCleanup.length})
+                  </Button>
+                )}
+                <span className="text-sm font-normal text-muted-foreground">
+                  {getFilteredPreAllocations().length} Active
+                </span>
+              </div>
             </CardTitle>
             <div className="mt-2">
               <Input
@@ -836,7 +898,19 @@ const handleReset = async () => {
               {getFilteredPreAllocations().map((allocation) => (
                 <div 
                   key={allocation.id} 
-                  className="group relative rounded-lg border bg-card hover:bg-accent/50 transition-colors"
+                  className={cn(
+                    "group relative rounded-lg border bg-card hover:bg-accent/50 transition-colors",
+                    manualCleanupMode && "cursor-pointer",
+                    selectedForCleanup.includes(allocation.id) && "bg-red-50 dark:bg-red-950/20"
+                  )}
+                  onClick={() => {
+                    if (!manualCleanupMode) return;
+                    setSelectedForCleanup(prev => 
+                      prev.includes(allocation.id) 
+                        ? prev.filter(id => id !== allocation.id)
+                        : [...prev, allocation.id]
+                    );
+                  }}
                 >
                   {/* Mobile Layout */}
                   <div className="block sm:hidden p-4 space-y-3">
