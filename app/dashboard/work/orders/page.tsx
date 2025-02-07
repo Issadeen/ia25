@@ -2031,13 +2031,18 @@ const getActiveOwnerSummary = () => {
                             <div>AGO Orders: {data.agoOrders}</div>
                             <div>PMS Orders: {data.pmsOrders}</div>
                             
-                            {/* New Orders Summary */}
+                            {/* Enhanced New Orders Summary */}
                             {newStats.total > 0 && (
                               <div className="mt-2 pt-2 border-t">
                                 <div className="text-sm font-medium text-emerald-600">New Orders (7 Days):</div>
-                                <div className="text-sm">Total: {newStats.total}</div>
-                                <div className="text-sm">AGO: {newStats.ago}</div>
-                                <div className="text-sm">PMS: {newStats.pms}</div>
+                                <div className="grid grid-cols-2 gap-x-4 gap-y-1 mt-1">
+                                  <div className="text-sm">Total: {newStats.total}</div>
+                                  <div className="text-sm">AGO: {newStats.ago}</div>
+                                  <div className="text-sm">PMS: {newStats.pms}</div>
+                                  <div className="text-sm text-yellow-600">Pending: {newStats.pending}</div>
+                                  <div className="text-sm text-orange-600">Unqueued: {newStats.unqueued}</div>
+                                  <div className="text-sm text-green-600">Loaded: {newStats.loaded}</div>
+                                </div>
                               </div>
                             )}
                           </div>
