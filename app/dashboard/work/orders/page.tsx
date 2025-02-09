@@ -9,7 +9,7 @@ import { useEffect, useState } from "react"
 import { useSession } from "next-auth/react"
 import { useRouter } from "next/navigation"
 // Add Triangle to imports
-import { ArrowLeft, Plus, Trash2, FileText, Loader2, Edit, Check, X, Copy, Triangle, Download, FileSpreadsheet, History, Receipt, RefreshCw } from 'lucide-react'
+import { ArrowLeft, Plus, Trash2, FileText, Loader2, Edit, Check, X, Copy, Triangle, Download, FileSpreadsheet, History, Receipt, RefreshCw, MoreHorizontal, ChevronDown } from 'lucide-react'
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card } from "@/components/ui/card"
@@ -40,6 +40,14 @@ import {
 import { zodResolver } from "@hookform/resolvers/zod"
 import { useForm } from "react-hook-form"
 import * as z from "zod"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 
 // Add new interfaces
 interface Payment {
@@ -1346,21 +1354,19 @@ const handleDriverInfoSubmit = async (data: z.infer<typeof driverInfoSchema>) =>
 
 // Add new function to handle profile click
 const handleProfileClick = () => {
-  const newCount = profileClickCount + 1;
-  if (newCount === 3) {
-    setProfileClickCount(0);
-    setShowUnloadedGP(true);
-    // Move toast to useEffect
-    setTimeout(() => {
+  setProfileClickCount(prev => {
+    const newCount = prev + 1;
+    if (newCount === 3) {
+      setShowUnloadedGP(true);
       toast({
-        title: "Developer Mode",
-        description: "Unloaded Gate Pass enabled",
-        variant: "default"
+        title: "Developer Mode Enabled",
+        description: "You can now generate gate passes for unloaded trucks",
+        duration: 3000,
       });
-    }, 0);
-  } else {
-    setProfileClickCount(newCount);
-  }
+      return 0; // Reset count
+    }
+    return newCount;
+  });
 };
 
 // Modify the helper function for decimal precision
@@ -2019,11 +2025,23 @@ const getActiveOwnerSummary = () => {
                                   className="w-32"
                                 />
                               ) : (
-                                <div className="flex flex-col">
+                                <div className="flex flex-col gap-1">
                                   <span>{detail.truck_number}</span>
                                   {detail.previous_trucks && detail.previous_trucks.length > 0 && (
                                     <small className="text-muted-foreground">
                                       Previous: {detail.previous_trucks[detail.previous_trucks.length - 1]}
+                                    </small>
+                                  )}
+                                  {detail.loaded && (
+                                    <small className={cn(
+                                      "text-xs font-medium",
+                                      detail.paid 
+                                        ? "text-green-600" 
+                                        : detail.paymentPending
+                                          ? "text-yellow-600"
+                                          : "text-red-600"
+                                    )}>
+                                      {detail.paid ? "Paid" : detail.paymentPending ? "Payment Pending" : "Unpaid"}
                                     </small>
                                   )}
                                 </div>
@@ -2121,17 +2139,97 @@ const getActiveOwnerSummary = () => {
                                     </Button>
                                   </>
                                 ) : (
-                                  <>
+                                  <div className="flex items-center gap-2">
                                     <Button
                                       variant="ghost"
                                       size="sm"
                                       onClick={() => startEditing(detail)}
-                                      disabled={detail.loaded} // Prevent editing loaded orders
+                                      disabled={detail.loaded}
                                     >
                                       <Edit className="h-4 w-4" />
                                     </Button>
-                                    {/* ... existing action buttons ... */}
-                                  </>
+                                    
+                                    <DropdownMenu>
+                                      <DropdownMenuTrigger asChild>
+                                        <Button variant="ghost" size="sm">
+                                          <MoreHorizontal className="h-4 w-4" />
+                                        </Button>
+                                      </DropdownMenuTrigger>
+                                      <DropdownMenuContent align="end" className="w-[200px]">
+                                        <DropdownMenuLabel>Actions</DropdownMenuLabel>
+                                        {!detail.loaded && (
+                                          <DropdownMenuItem
+                                            onClick={() => handleLoadedStatus(detail.id)}
+                                          >
+                                            <Loader2 className="mr-2 h-4 w-4" />
+                                            Mark as Loaded
+                                          </DropdownMenuItem>
+                                        )
+                                        }
+                                        
+                                        {detail.loaded && !detail.paid && (
+                                          <>
+                                            <DropdownMenuItem
+                                              onClick={() => handlePaidStatus(detail.id)}
+                                            >
+                                              <Receipt className="mr-2 h-4 w-4" />
+                                              Mark as Paid
+                                            </DropdownMenuItem>
+                                            <DropdownMenuItem
+                                              onClick={() => handleForceRelease(detail)}
+                                            >
+                                              <Triangle className="mr-2 h-4 w-4" />
+                                              Force Release
+                                            </DropdownMenuItem>
+                                          </>
+                                        )
+                                        }
+                                        
+                                        {detail.loaded && (
+                                          <>
+                                            <DropdownMenuItem
+                                              onClick={() => handleSyncStatus(detail)}
+                                            >
+                                              <RefreshCw className="mr-2 h-4 w-4" />
+                                              Sync Payment Status
+                                            </DropdownMenuItem>
+                                            <DropdownMenuItem
+                                              onClick={() => handleGenerateGatePass(detail)}
+                                              disabled={!detail.loaded && !showUnloadedGP} // Allow unloaded gate pass when showUnloadedGP is true
+                                            >
+                                              <FileText className="mr-2 h-4 w-4" />
+                                              {showUnloadedGP || detail.loaded ? 'Generate Gate Pass' : 'Loaded Gate Pass Only'}
+                                            </DropdownMenuItem>
+                                          </>
+                                        )
+                                        }
+                                        
+                                        {detail.previous_trucks && detail.previous_trucks.length > 0 && (
+                                          <DropdownMenuItem
+                                            onClick={() => {
+                                              setSelectedTruckHistory(detail);
+                                              setShowTruckHistory(true);
+                                            }}
+                                          >
+                                            <History className="mr-2 h-4 w-4" />
+                                            View History
+                                          </DropdownMenuItem>
+                                        )
+                                        }
+                                        
+                                        <DropdownMenuSeparator />
+                                        
+                                        <DropdownMenuItem
+                                          className="text-red-600"
+                                          onClick={() => handleDelete(detail.id)}
+                                        >
+                                          <Trash2 className="mr-2 h-4 w-4" />
+                                          Delete
+                                        </DropdownMenuItem>
+                                      </DropdownMenuContent>
+                                    </DropdownMenu>
+                                
+                                  </div>
                                 )}
                               </div>
                             </td>
