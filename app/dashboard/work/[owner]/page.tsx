@@ -19,7 +19,7 @@ import type { WorkDetail, TruckPayment, OwnerBalance } from "@/types"
 import { motion, AnimatePresence } from 'framer-motion'
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { useSession } from "next-auth/react"
-import { ArrowLeft, Download, Receipt, Wallet2, PlusCircle, X, FileSpreadsheet, RefreshCw, MoreHorizontal } from 'lucide-react' // Add X and FileSpreadsheet icon to imports
+import { ArrowLeft, Download, Wallet2, PlusCircle, X, FileSpreadsheet, RefreshCw, MoreHorizontal } from 'lucide-react' // Add X and FileSpreadsheet icon to imports
 import { ThemeToggle } from "@/components/ui/molecules/theme-toggle" // Add ThemeToggle import
 import { Skeleton } from "@/components/ui/skeleton"
 import jsPDF from 'jspdf'
@@ -37,6 +37,7 @@ import {
 } from "@/lib/payment-utils";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog" // Add AlertDialog imports
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu" // Add DropdownMenu imports
+import { AlertCircle, Receipt, ReceiptText, Shield } from 'lucide-react' // Add new imports
 
 // Add interfaces at the top
 interface TruckAllocation {
@@ -157,6 +158,14 @@ export default function OwnerDetailsPage() {
 
   // Ensure isSaving state is present
   const [isSaving, setIsSaving] = useState(false);
+
+  // Add new state for action confirmations
+  const [actionConfirmation, setActionConfirmation] = useState<{
+    type: 'reverse' | 'writeoff' | 'correct';
+    payment: any;
+    truck: WorkDetail;
+    allocation: any;
+  } | null>(null);
 
   // Fetch data when component mounts
   useEffect(() => {
@@ -862,6 +871,51 @@ export default function OwnerDetailsPage() {
     }
   };
 
+  // Add new handlers
+  const handleReverseTruckPayment = async (payment: any, truck: WorkDetail, allocation: any) => {
+    try {
+      const correction: PaymentCorrection = {
+        paymentId: payment.id,
+        truckId: truck.id,
+        oldAmount: allocation.amount,
+        newAmount: 0, // Reverse by setting to 0
+        timestamp: payment.timestamp,
+        note: `Payment reversed - Original amount: $${formatNumber(allocation.amount)}`
+      };
+  
+      await correctPaymentAllocation(database, owner, correction);
+      toast({ title: "Payment Reversed", description: "Payment allocation has been reversed" });
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to reverse payment",
+        variant: "destructive"
+      });
+    }
+  };
+  
+  const handleWriteOff = async (payment: any, truck: WorkDetail, allocation: any) => {
+    try {
+      const correction: PaymentCorrection = {
+        paymentId: payment.id,
+        truckId: truck.id,
+        oldAmount: allocation.amount,
+        newAmount: getTruckAllocations(truck, truckPayments).balance, // Set to full balance
+        timestamp: payment.timestamp,
+        note: `Payment written off - Original amount: $${formatNumber(allocation.amount)}`
+      };
+  
+      await correctPaymentAllocation(database, owner, correction);
+      toast({ title: "Payment Written Off", description: "Payment has been written off" });
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to write off payment",
+        variant: "destructive"
+      });
+    }
+  };
+
   // Add new context menu for payments table
   const PaymentActions = ({ payment, truck, allocation }: { payment: any; truck: WorkDetail; allocation: any }) => (
     <DropdownMenu>
@@ -876,7 +930,30 @@ export default function OwnerDetailsPage() {
           setCorrectionAmount(allocation.amount.toString());
           setShowCorrectionDialog(true);
         }}>
-          Correct Allocation
+          <Receipt className="mr-2 h-4 w-4" />
+          Correct Amount
+        </DropdownMenuItem>
+        <DropdownMenuItem 
+          onClick={() => {
+            if (confirm(`Are you sure you want to reverse the payment of $${formatNumber(allocation.amount)} for truck ${truck.truck_number}?`)) {
+              handleReverseTruckPayment(payment, truck, allocation);
+            }
+          }}
+          className="text-red-600"
+        >
+          <AlertCircle className="mr-2 h-4 w-4" />
+          Reverse Payment
+        </DropdownMenuItem>
+        <DropdownMenuItem 
+          onClick={() => {
+            if (confirm(`Are you sure you want to write off the remaining balance for truck ${truck.truck_number}?`)) {
+              handleWriteOff(payment, truck, allocation);
+            }
+          }}
+          className="text-amber-600"
+        >
+          <Shield className="mr-2 h-4 w-4" />
+          Write Off Balance
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
@@ -1235,49 +1312,43 @@ export default function OwnerDetailsPage() {
                       <thead>
                         <tr>
                           <th className="p-2 text-left">ID</th>
+                          <th className="p-2 text-left">Actions</th>
                           <th className="p-2 text-left">Amount</th>
                           <th className="p-2 text-left">Date</th>
                           <th className="p-2 text-left">Allocated Trucks</th>
-                          <th className="p-2 text-left">Note</th>
-                          <th className="p-2 text-left">Actions</th>
-                        </tr>
-                      </thead>
+                          <th className="p-2 text-left">Note</th></tr></thead>
                       <tbody>
                         {ownerPayments.map((payment) => (
-                          <tr key={payment.id} className={cn(
-                            "border-t",
-                            payment.corrected && "bg-muted/50"
-                          )}>
+                          <tr key={payment.id} className={cn("border-t",payment.corrected && "bg-muted/50")}>
                             <td className="p-2">{payment.id}</td>
+                            <td className="p-2">{payment.allocatedTrucks?.map((allocation: any) => {
+                              const truck = workDetails.find(t => t.id === allocation.truckId);
+                              return truck ? (
+                                <div key={allocation.truckId}>
+                                  <PaymentActions 
+                                    payment={payment}
+                                    truck={truck}
+                                    allocation={allocation}/>
+                                </div>
+                              ) : null;
+                            })}</td>
                             <td className="p-2">${formatNumber(payment.amount)}</td>
                             <td className="p-2">{new Date(payment.timestamp).toLocaleString()}</td>
-                            <td className="p-2">
-                              {payment.allocatedTrucks?.map((allocation: any) => {
-                                const truck = workDetails.find(t => t.id === allocation.truckId);
-                                return truck ? (
-                                  <div key={allocation.truckId} className="flex items-center justify-between">
-                                    <span className="text-xs">
-                                      {truck.truck_number} (${formatNumber(allocation.amount)})
-                                      {payment.corrected && (
-                                        <span className="ml-1 text-muted-foreground">
-                                          (Corrected)
-                                        </span>
-                                      )}
-                                    </span>
-                                    <PaymentActions 
-                                      payment={payment}
-                                      truck={truck}
-                                      allocation={allocation}
-                                    />
-                                  </div>
-                                ) : null;
-                              })}
-                            </td>
-                            <td className="p-2 whitespace-nowrap">{payment.note || '—'}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                            <td className="p-2">{payment.allocatedTrucks?.map((allocation: any) => {
+                              const truck = workDetails.find(t => t.id === allocation.truckId);
+                              return truck ? (
+                                <div key={allocation.truckId} className="flex items-center">
+                                  <span className="text-xs">
+                                    {truck.truck_number} (${formatNumber(allocation.amount)})
+                                    {payment.corrected && (
+                                      <span className="ml-1 text-muted-foreground">(Corrected)</span>
+                                    )}
+                                  </span>
+                                </div>
+                              ) : null;
+                            })}</td>
+                            <td className="p-2 whitespace-nowrap">{payment.note || '—'}</td></tr>
+                      ))}</tbody></table>
                   </div>
                 </div>
               </Card>
@@ -1609,6 +1680,41 @@ export default function OwnerDetailsPage() {
                 className="bg-red-500 hover:bg-red-600"
               >
                 Apply Correction
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+        {/* Add new confirmation dialog */}
+        <AlertDialog open={!!actionConfirmation} onOpenChange={() => setActionConfirmation(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>
+                {actionConfirmation?.type === 'reverse' ? 'Reverse Payment' :
+                 actionConfirmation?.type === 'writeoff' ? 'Write Off Balance' :
+                 'Correct Payment'}
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                This action cannot be undone. Are you sure?
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => {
+                  if (!actionConfirmation) return;
+                  const { type, payment, truck, allocation } = actionConfirmation;
+                  
+                  if (type === 'reverse') {
+                    handleReverseTruckPayment(payment, truck, allocation);
+                  } else if (type === 'writeoff') {
+                    handleWriteOff(payment, truck, allocation);
+                  }
+                  
+                  setActionConfirmation(null);
+                }}
+                className="bg-red-500 hover:bg-red-600"
+              >
+                Confirm
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
