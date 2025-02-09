@@ -1,4 +1,4 @@
-import { Database, ref, update, push, get, query, orderByChild, equalTo } from 'firebase/database';
+import { Database, ref, update, push, get, query, orderByChild, equalTo, set } from 'firebase/database';
 import type { PermitEntry, PreAllocation } from '@/types/permits';
 import { getPermitEntryStatus, validatePermitEntry } from '@/utils/permit-helpers';
 
@@ -9,9 +9,12 @@ export const preAllocatePermitEntry = async (
   owner: string,
   permitEntryId: string,
   permitEntryNumber: string,
-  quantity?: number // Make quantity optional, default to work detail quantity
+  quantity: number // Add this parameter
 ): Promise<PreAllocation> => {
   try {
+    // Convert quantity to liters if in thousands
+    const quantityInLiters = quantity < 1000 ? quantity * 1000 : quantity;
+
     // Check if truck already has an allocation
     const existingAllocationSnapshot = await get(
       query(ref(db, 'permitPreAllocations'), 
@@ -35,8 +38,16 @@ export const preAllocatePermitEntry = async (
       throw new Error('Permit entry not found');
     }
 
+    if (!workSnapshot.exists()) {
+      throw new Error('Work detail not found for truck');
+    }
+
+    const workDetail = Object.values(workSnapshot.val())[0] as any;
     const permitData = permitSnapshot.val();
     const currentPreAllocated = permitData.preAllocatedQuantity || 0;
+    
+    // Calculate required quantity first
+    const requiredQuantity = quantityInLiters || parseFloat(workDetail.quantity) * 1000;
     
     // Calculate actual available volume
     const totalVolume = permitData.remainingQuantity;
@@ -47,26 +58,12 @@ export const preAllocatePermitEntry = async (
 
     const actualAvailableVolume = totalVolume - existingAllocations;
 
-    console.info('Volume check:', {
-      totalVolume,
-      existingAllocations,
-      actualAvailableVolume,
-      currentPreAllocated
-    });
-
-    if (!workSnapshot.exists()) {
-      throw new Error('Work detail not found for truck');
-    }
-
-    const workDetail = Object.values(workSnapshot.val())[0] as any;
-    const requiredQuantity = quantity || parseFloat(workDetail.quantity) * 1000;
-    
-    // Log only essential information
     if (process.env.NODE_ENV === 'development') {
-      console.info(`Pre-allocating permit for truck ${truckNumber}:`, {
-        permitNumber: permitEntryNumber,
-        quantity: requiredQuantity,
-        available: permitData.remainingQuantity - currentPreAllocated
+      console.info(`[Permit Allocation] ${truckNumber}:`, {
+        product,
+        required: requiredQuantity,
+        available: actualAvailableVolume,
+        permitNumber: permitEntryNumber
       });
     }
 
@@ -81,22 +78,25 @@ export const preAllocatePermitEntry = async (
     }
 
     // Create pre-allocation record
-    const preAllocationRef = push(ref(db, 'permitPreAllocations'));
+    const newPreAllocationRef = ref(db, `permitPreAllocations/${truckNumber}-${Date.now()}`);
     
     const preAllocation: PreAllocation = {
-      id: preAllocationRef.key!,
+      id: `${truckNumber}-${Date.now()}`,
       truckNumber,
       product,
       owner,
       permitEntryId,
       permitNumber: permitEntryNumber,
       quantity: requiredQuantity,
-      allocatedAt: new Date().toISOString()
+      allocatedAt: new Date().toISOString(),
+      used: false
     };
+
+    await set(newPreAllocationRef, preAllocation);
 
     // Update permit entry with pre-allocation tracking
     const updates: { [key: string]: any } = {
-      [`permitPreAllocations/${preAllocationRef.key}`]: preAllocation,
+      [`permitPreAllocations/${newPreAllocationRef.key}`]: preAllocation,
       [`allocations/${permitEntryId}/preAllocatedQuantity`]: currentPreAllocated + requiredQuantity,
       [`allocations/${permitEntryId}/lastUpdated`]: new Date().toISOString(),
       [`work_details/${workDetail.id}/permitAllocated`]: true,
@@ -108,9 +108,9 @@ export const preAllocatePermitEntry = async (
     return preAllocation;
     
   } catch (error) {
-    console.error('Pre-allocation failed:', {
+    console.error('[Permit Allocation Error]:', {
       truck: truckNumber,
-      permitEntry: permitEntryNumber,
+      permit: permitEntryNumber,
       error: error instanceof Error ? error.message : 'Unknown error'
     });
     throw error;
@@ -227,4 +227,90 @@ export const consolidatePermitAllocations = async (
   updates[`permitPreAllocations/${primary.id}/quantity`] = totalQuantity;
   
   await update(ref(db), updates);
+};
+
+export const resetTruckAllocation = async (
+  db: Database,
+  truckNumber: string
+): Promise<void> => {
+  try {
+    // Get current allocation
+    const preAllocationsSnapshot = await get(
+      query(ref(db, 'permitPreAllocations'), 
+        orderByChild('truckNumber'), 
+        equalTo(truckNumber)
+      )
+    );
+
+    if (preAllocationsSnapshot.exists()) {
+      const updates: Record<string, any> = {};
+      
+      // Remove all allocations for this truck
+      Object.entries(preAllocationsSnapshot.val()).forEach(([key, allocation]: [string, any]) => {
+        updates[`permitPreAllocations/${key}`] = null;
+      });
+
+      // Reset work detail permit status
+      const workSnapshot = await get(
+        query(ref(db, 'work_details'), 
+          orderByChild('truck_number'), 
+          equalTo(truckNumber)
+        )
+      );
+
+      if (workSnapshot.exists()) {
+        const [workId] = Object.keys(workSnapshot.val());
+        updates[`work_details/${workId}/permitAllocated`] = false;
+        updates[`work_details/${workId}/permitNumber`] = null;
+        updates[`work_details/${workId}/permitEntryId`] = null;
+      }
+
+      await update(ref(db), updates);
+    }
+  } catch (error) {
+    console.error('Error resetting truck allocation:', error);
+    throw error;
+  }
+};
+
+export const updatePermitAllocation = async (
+  db: Database,
+  allocationId: string,
+  newQuantity: number,
+  originalQuantity: number
+): Promise<void> => {
+  try {
+    const allocationRef = ref(db, `permitPreAllocations/${allocationId}`);
+    const snapshot = await get(allocationRef);
+    
+    if (!snapshot.exists()) {
+      throw new Error('Allocation not found');
+    }
+
+    const allocation = snapshot.val() as PreAllocation;
+    const difference = originalQuantity - newQuantity;
+
+    // Get permit entry
+    const entryRef = ref(db, `allocations/${allocation.permitEntryId}`);
+    const entrySnapshot = await get(entryRef);
+    
+    if (!entrySnapshot.exists()) {
+      throw new Error('Permit entry not found');
+    }
+
+    const entry = entrySnapshot.val();
+    const updates: Record<string, any> = {};
+
+    // Update allocation quantity
+    updates[`permitPreAllocations/${allocationId}/quantity`] = newQuantity;
+    
+    // Update permit entry remaining quantity
+    updates[`allocations/${allocation.permitEntryId}/remainingQuantity`] = 
+      entry.remainingQuantity + difference;
+    
+    await update(ref(db), updates);
+  } catch (error) {
+    console.error('Error updating allocation:', error);
+    throw error;
+  }
 };

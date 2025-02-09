@@ -18,109 +18,61 @@ export const cleanupDuplicateAllocations = async (
   };
 
   try {
-    // Only log in development
-    if (process.env.NODE_ENV === 'development') {
-      console.info('Starting permit system cleanup...');
-    }
-
-    // Get all required data
-    const [preAllocationsSnapshot, workDetailsSnapshot, allocationsSnapshot] = await Promise.all([
+    const [preAllocationsSnapshot, workDetailsSnapshot] = await Promise.all([
       get(ref(db, 'permitPreAllocations')),
-      get(ref(db, 'work_details')),
-      get(ref(db, 'allocations'))
+      get(ref(db, 'work_details'))
     ]);
 
-    if (!preAllocationsSnapshot.exists()) {
-      return result;
-    }
+    if (!preAllocationsSnapshot.exists()) return result;
 
-    let updates: Record<string, any> = {};
-    const processedTrucks = new Set<string>();
-    let updateCount = 0;
+    const updates: Record<string, any> = {};
+    const processed = new Set<string>();
 
-    // Get pre-allocations
-    const preAllocations = Object.entries(preAllocationsSnapshot.val() as Record<string, PreAllocation>)
-      .map(([id, data]) => ({
-        ...data,
-        id
-      }));
-
-    // Get work details that need permits
-    const pendingTrucks = workDetailsSnapshot.exists() 
-      ? Object.values(workDetailsSnapshot.val())
-          .filter((detail: any) => 
-            detail.destination?.toLowerCase() === 'ssd' && 
-            !detail.loaded && 
-            detail.status === 'queued'
-          )
-      : [];
-
-    console.log(`Found ${pendingTrucks.length} pending trucks`);
-
-    // Process each pre-allocation
-    for (const allocation of preAllocations) {
-      // Skip if we've already processed this truck
-      if (processedTrucks.has(allocation.truckNumber)) {
+    for (const [key, allocation] of Object.entries(preAllocationsSnapshot.val())) {
+      const { truckNumber, quantity } = allocation as PreAllocation;
+      
+      // Handle zero or invalid quantities
+      if (!quantity || quantity <= 0) {
+        if (process.env.NODE_ENV === 'development') {
+          console.info(`[Cleanup] Removing invalid allocation for ${truckNumber}`);
+        }
+        const workDetailQuery = query(
+          ref(db, 'work_details'), 
+          orderByChild('truck_number'), 
+          equalTo(truckNumber)
+        );
+        
+        const workDetailSnapshot = await get(workDetailQuery);
+        if (workDetailSnapshot.exists()) {
+          const [workId] = Object.keys(workDetailSnapshot.val());
+          // Reset work detail status
+          updates[`work_details/${workId}/permitAllocated`] = false;
+          updates[`work_details/${workId}/permitNumber`] = null;
+          updates[`work_details/${workId}/permitEntryId`] = null;
+        }
+        
+        // Remove the invalid allocation
+        updates[`permitPreAllocations/${key}`] = null;
+        result.duplicatesRemoved++;
         continue;
       }
 
-      // Check if truck is still pending
-      const isPending = pendingTrucks.some(
-        (t: any) => t.truck_number === allocation.truckNumber
-      );
-
-      if (!isPending) {
-        // Find the permit entry
-        const entry = allocationsSnapshot.exists() 
-          ? Object.values(allocationsSnapshot.val() as Record<string, PermitEntry>).find(
-              (e) => e.number === allocation.permitNumber
-            )
-          : null;
-
-        if (entry) {
-          // Update permit entry
-          const currentPreAllocated = entry.preAllocatedQuantity || 0;
-          if (currentPreAllocated > 0) {
-            updates[`allocations/${entry.id}/preAllocatedQuantity`] = Math.max(0, currentPreAllocated - (allocation.quantity || 0));
-            updates[`allocations/${entry.id}/lastUpdated`] = new Date().toISOString();
-          }
-        }
-
-        // Remove the pre-allocation
-        updates[`permitPreAllocations/${allocation.id}`] = null;
+      // Handle duplicates
+      if (processed.has(truckNumber)) {
+        updates[`permitPreAllocations/${key}`] = null;
         result.duplicatesRemoved++;
-      }
-
-      processedTrucks.add(allocation.truckNumber);
-      updateCount++;
-
-      // Apply updates in batches of 100 to avoid large transactions
-      if (updateCount >= 100) {
-        if (Object.keys(updates).length > 0) {
-          await update(ref(db), updates);
-        }
-        updates = {};
-        updateCount = 0;
+      } else {
+        processed.add(truckNumber);
+        result.consolidated++;
       }
     }
 
-    // Apply any remaining updates
     if (Object.keys(updates).length > 0) {
       await update(ref(db), updates);
     }
 
-    result.consolidated = processedTrucks.size;
-
-    // Log summary instead of individual operations
-    if (result.duplicatesRemoved > 0 || result.consolidated > 0) {
-      console.info('Cleanup completed:', {
-        duplicatesRemoved: result.duplicatesRemoved,
-        consolidated: result.consolidated
-      });
-    }
-
   } catch (error) {
-    console.error('Cleanup failed:', error instanceof Error ? error.message : 'Unknown error');
+    console.error('[Cleanup Error]:', error instanceof Error ? error.message : 'Unknown error');
     result.errors.push(error instanceof Error ? error.message : 'Unknown error');
   }
 

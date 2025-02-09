@@ -73,33 +73,37 @@ export default function AdminPage() {
   }, [session?.user])
 
   const handleVolumeUpdate = async (entry: Entry, newVolume: number) => {
-    try {
-      const response = await fetch(`/api/permits/volume/${entry.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ newVolume })
+    if (newVolume < 0) {
+      toast({
+        title: "Error",
+        description: "Volume cannot be negative",
+        variant: "destructive"
       });
-  
-      const data = await response.json();
+      return;
+    }
+
+    try {
+      const db = getDatabase();
+      const entryRef = ref(db, `allocations/${entry.id}`);
       
-      if (!data.success) {
-        throw new Error(data.error);
-      }
-  
+      await update(entryRef, {
+        remainingQuantity: newVolume
+      });
+
       toast({
         title: "Success",
-        description: "Volume updated successfully"
+        description: `Volume updated to ${newVolume.toLocaleString()}L`
       });
       setEditingEntry(null);
     } catch (error) {
       toast({
         title: "Error",
-        description: error instanceof Error ? error.message : "Failed to update volume",
+        description: "Failed to update volume",
         variant: "destructive"
       });
     }
   };
-  
+
   // Update the handleSave function to use the new volume update
   const handleSave = async (entry: Entry) => {
     if (!editingEntry) return;
