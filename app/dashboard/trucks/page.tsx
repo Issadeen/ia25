@@ -23,8 +23,8 @@ interface TruckData {
   truck_no: string;
   driver: string;
   transporter: string;
-  ago_comps: string[];  // Changed from Record<string, string> to string array
-  pms_comps: string[];  // Changed from Record<string, string> to string array
+  ago_comps: string[];
+  pms_comps: string[];
 }
 
 interface FirebaseUserData {
@@ -46,16 +46,26 @@ const formatNumber = (value: string): string => {
   return num % 1 === 0 ? num.toFixed(0) : num.toFixed(1);
 };
 
+const getOrderedCompartments = (data: any, prefix: string, count: number = 6): string[] => {
+  const result: string[] = [];
+  for (let i = 1; i <= count; i++) {
+    const value = data[`${prefix}${i}`];
+    if (value && !isNaN(parseFloat(value))) {
+      result.push(value);
+    }
+  }
+  return result;
+};
+
 const formatCompartments = (compartments: string[] | undefined | null): string => {
   if (!compartments || !Array.isArray(compartments)) {
     return '0';
   }
-  const sortedComps = compartments
-    .filter(value => value && parseFloat(value) > 0) // Filter out zeros and invalid values
-    .sort()
-    .map(value => formatNumber(value)); // Format to 1 decimal place
+  const validComps = compartments
+    .filter(value => value && parseFloat(value) > 0)
+    .map(value => formatNumber(value));
 
-  return sortedComps.length > 0 ? sortedComps.join(', ') : '0';
+  return validComps.length > 0 ? validComps.join(', ') : '0';
 };
 
 export default function TrucksPage() {
@@ -160,8 +170,8 @@ export default function TrucksPage() {
             truck_no: data.truck_no || '',
             driver: data.driver || '',
             transporter: data.transporter || '',
-            ago_comps: Array.isArray(data.ago_comps) ? data.ago_comps : [],
-            pms_comps: Array.isArray(data.pms_comps) ? data.pms_comps : [],
+            ago_comps: getOrderedCompartments(data, 'ago_comp_'),
+            pms_comps: getOrderedCompartments(data, 'pms_'),
           };
         });
 
