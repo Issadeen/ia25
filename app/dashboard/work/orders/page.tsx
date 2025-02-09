@@ -29,6 +29,17 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { syncTruckPaymentStatus } from "@/lib/payment-utils";
 import { cn } from '@/lib/utils'
 import { OrderTracker } from '@/src/models/OrderTracker';
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "@/components/ui/form"
+import { zodResolver } from "@hookform/resolvers/zod"
+import { useForm } from "react-hook-form"
+import * as z from "zod"
 
 // Add new interfaces
 interface Payment {
@@ -66,6 +77,7 @@ interface WorkDetail {
   paymentPending?: boolean;  // New field to track pending payments
   gatePassGenerated?: boolean; // New field to track gate pass generation
   gatePassGeneratedAt?: string; // New field to track gate pass generation time
+  driverPhone?: string; // Add this field to track driver phone number
 }
 
 // Update the SummaryStats interface
@@ -123,6 +135,14 @@ interface BalanceUsage {
   paymentId: string;
 }
 
+// Add interface for driver info
+interface DriverInfo {
+  phoneNumber: string;
+  name: string;
+  trucks: string[];
+  lastUpdated: string;
+}
+
 // Add animation variants before the component
 const tableRowVariants = {
   hidden: { opacity: 0, y: 20 },
@@ -153,12 +173,44 @@ const HEADER_HEIGHT = {
   desktop: '4rem'  // 64px - single row header
 };
 
+// Add driver info schema
+const driverInfoSchema = z.object({
+  phoneNumber: z.string()
+    .length(10, "Phone number must be exactly 10 digits")
+    .regex(/^\d+$/, "Phone number must contain only digits"),
+  name: z.string().min(2, "Driver name must be at least 2 characters"),
+})
+
+// Remove the non-functioning arrayUnion helper
+// Instead, add this helper function inside the component
+const updateDriverTrucks = (existingTrucks: string[] = [], newTruck: string) => {
+  const updatedTrucks = [...new Set([...(existingTrucks || []), newTruck])];
+  return updatedTrucks;
+};
+
+// Add after other interfaces
+interface EditableWorkDetail extends WorkDetail {
+  _editing?: boolean;
+}
+
 export default function WorkManagementPage() {
-  // 1. Declare all hooks at the top level, before any conditional logic
+  // 1. Form initialization
+  const form = useForm<z.infer<typeof driverInfoSchema>>({
+    resolver: zodResolver(driverInfoSchema),
+    defaultValues: {
+      phoneNumber: '',
+      name: ''
+    }
+  });
+
+  // 2. Required hooks
   const { data: session, status } = useSession()
   const router = useRouter()
+
+  // 3. All useState declarations grouped together at the top
   const [mounted, setMounted] = useState(false)
   const [workDetails, setWorkDetails] = useState<WorkDetail[]>([])
+  const [editableRows, setEditableRows] = useState<{ [key: string]: EditableWorkDetail }>({}) // New state moved up
   const [isAddModalOpen, setIsAddModalOpen] = useState(false)
   const [searchTerm, setSearchTerm] = useState("")
   const [isLoading, setIsLoading] = useState(true)
@@ -227,6 +279,10 @@ export default function WorkManagementPage() {
 
   const [orderTracker] = useState(() => new OrderTracker());
   
+  // Add state for driver dialog
+  const [isDriverDialogOpen, setIsDriverDialogOpen] = useState(false);
+  const [currentTruck, setCurrentTruck] = useState<WorkDetail | null>(null);
+
   // Add this function to calculate new orders
   const getNewOrdersStats = () => {
     const sevenDaysAgo = new Date();
@@ -1172,6 +1228,13 @@ const getFilteredWorkDetails = () => {
 
   // Update handleGenerateGatePass to show warning for unloaded trucks
 const handleGenerateGatePass = async (detail: WorkDetail) => {
+  // Check if this is the first time generating gate pass
+  if (!detail.gatePassGenerated && !detail.driverPhone) {
+    setCurrentTruck(detail);
+    setIsDriverDialogOpen(true);
+    return;
+  }
+
   let shouldProceed = true;
 
   if (detail.gatePassGenerated) {
@@ -1204,6 +1267,81 @@ const handleGenerateGatePass = async (detail: WorkDetail) => {
   });
   
   router.push(`/dashboard/work/orders/gate-pass?${params.toString()}`);
+};
+
+
+
+const handleDriverInfoSubmit = async (data: z.infer<typeof driverInfoSchema>) => {
+  if (!currentTruck) return;
+
+  try {
+    // First check if driver already exists
+    const driverRef = ref(database, `drivers/${data.phoneNumber}`);
+    const driverSnapshot = await get(driverRef);
+    
+    let updates: { [key: string]: any } = {};
+    
+    if (driverSnapshot.exists()) {
+      // Update existing driver
+      const existingDriver = driverSnapshot.val();
+      updates[`drivers/${data.phoneNumber}`] = {
+        ...existingDriver,
+        name: data.name, // Update name in case it changed
+        trucks: updateDriverTrucks(existingDriver.trucks, currentTruck.truck_number),
+        lastUpdated: new Date().toISOString()
+      };
+    } else {
+      // Create new driver
+      updates[`drivers/${data.phoneNumber}`] = {
+        phoneNumber: data.phoneNumber,
+        name: data.name,
+        trucks: [currentTruck.truck_number],
+        lastUpdated: new Date().toISOString()
+      };
+    }
+    
+    // Add driver reference to work detail
+    updates[`work_details/${currentTruck.id}/driverPhone`] = data.phoneNumber;
+    
+    // Apply all updates atomically
+    await update(ref(database), updates);
+
+    // Set gate pass generated flag
+    await update(ref(database, `work_details/${currentTruck.id}`), {
+      gatePassGenerated: true,
+      gatePassGeneratedAt: new Date().toISOString()
+    });
+
+    setIsDriverDialogOpen(false);
+    form.reset();
+    
+    // Navigate directly to gate pass page instead of calling handleGenerateGatePass
+    const params = new URLSearchParams({
+      orderNo: currentTruck.orderno,
+      destination: currentTruck.destination,
+      truck: currentTruck.truck_number,
+      product: currentTruck.product,
+      quantity: currentTruck.quantity.toString(),
+      at20: currentTruck.at20 || '',
+      isLoaded: currentTruck.loaded ? 'true' : 'false',
+      driverPhone: data.phoneNumber,
+      driverName: data.name
+    });
+    
+    router.push(`/dashboard/work/orders/gate-pass?${params.toString()}`);
+    
+    toast({
+      title: "Success",
+      description: "Driver information saved successfully",
+    });
+  } catch (error) {
+    console.error('Error saving driver info:', error);
+    toast({
+      title: "Error",
+      description: "Failed to save driver information",
+      variant: "destructive"
+    });
+  }
 };
 
 // Add new function to handle profile click
@@ -1453,7 +1591,6 @@ const getUnpaidSummary = () => {
 
 const renderSummaryCard = () => (
   <Card className="p-6">
-    {/* ...existing summary card content... */}
     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 sm:gap-4">
       {/* ...existing summary sections... */}
       
@@ -1526,6 +1663,58 @@ const getActiveOwnerSummary = () => {
     Object.entries(ownerSummary).filter(([owner]) => activeOwners.has(owner))
   );
 };
+
+  // Add this with other state declarations at the top of the component
+
+  
+  // Add these functions inside the component but before the render method
+  const handleEditChange = (id: string, field: keyof WorkDetail, value: string) => {
+    setEditableRows(prev => ({
+      ...prev,
+      [id]: { ...prev[id], [field]: value }
+    }));
+  };
+
+  const startEditing = (detail: WorkDetail) => {
+    setEditableRows(prev => ({
+      ...prev,
+      [detail.id]: { ...detail, _editing: true }
+    }));
+  };
+
+  const cancelEditing = (id: string) => {
+    setEditableRows(prev => {
+      const newState = { ...prev };
+      delete newState[id];
+      return newState;
+    });
+  };
+
+  const saveRowChanges = async (id: string) => {
+    try {
+      const editedRow = editableRows[id];
+      if (!editedRow) return;
+
+      // Remove _editing flag before saving
+      const { _editing, ...updateData } = editedRow;
+
+      await update(ref(database, `work_details/${id}`), updateData);
+      
+      // Clear the editing state
+      cancelEditing(id);
+      
+      toast({
+        title: "Updated",
+        description: "Row updated successfully",
+      });
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to update row",
+        variant: "destructive"
+      });
+    }
+  };
 
   return (
     <div className="min-h-screen">
@@ -1615,7 +1804,7 @@ const getActiveOwnerSummary = () => {
         }
       `}</style>
 
-      <main className="max-w-7xl mx-auto px-2 sm:px-4 pt-28 sm:pt-24 pb-6 sm:pb-8">
+      <div className="max-w-7xl mx-auto px-2 sm:px-4 pt-28 sm:pt-24 pb-6 sm:pb-8">
         <div className="space-y-4">
           {/* Search and Toggle Filters on the same line */} 
           <div className="flex flex-col items-center sm:flex-row sm:justify-center sm:space-x-4 gap-2 sm:gap-0">
@@ -1633,6 +1822,51 @@ const getActiveOwnerSummary = () => {
               {showFilters ? "Hide Filters" : "Show Filters"}
             </Button>
           </div>
+
+          {/* Conditionally Rendered Filter Controls */}
+          <AnimatePresence>
+            {showFilters && (
+              <motion.div
+                variants={filterVariants}
+                initial="hidden"
+                animate="visible"
+                exit="hidden"
+                className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 w-full max-w-4xl mx-auto"
+              >
+                <Input
+                  placeholder="Filter by Owner"
+                  value={ownerFilter}
+                  onChange={(e) => setOwnerFilter(e.target.value)}
+                  className="max-w-xs w-full sm:w-auto"
+                />
+                <div className="max-w-xs w-full sm:w-auto">
+                  <Select
+                    value={productFilter}
+                    onValueChange={(value) => setProductFilter(value)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Filter by Product" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="ALL">All</SelectItem>
+                      <SelectItem value="AGO">AGO</SelectItem>
+                      <SelectItem value="PMS">PMS</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex gap-2">
+                  <Button variant="outline" onClick={handleDownloadPDF}>
+                    <FileText className="mr-2 h-4 w-4" />
+                    PDF
+                  </Button>
+                  <Button variant="outline" onClick={handleExportToExcel}>
+                    <FileSpreadsheet className="mr-2 h-4 w-4" />
+                    Excel
+                  </Button>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
           {/* Conditionally Rendered Filter Controls with reduced sizes */} 
           <AnimatePresence>
@@ -1657,76 +1891,29 @@ const getActiveOwnerSummary = () => {
                     value={productFilter}
                     onValueChange={(value) => setProductFilter(value)}
                   >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Filter by Product" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="ALL">All</SelectItem>
-                    <SelectItem value="AGO">AGO</SelectItem>
-                    <SelectItem value="PMS">PMS</SelectItem> {/* Fixed missing closing tag */} 
-                  </SelectContent>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Filter by Product" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="ALL">All</SelectItem>
+                      <SelectItem value="AGO">AGO</SelectItem>
+                      <SelectItem value="PMS">PMS</SelectItem>
+                    </SelectContent>
                   </Select>
                 </div>
-                {/* Status Filter */} 
-                <Select
-                  value={statusFilter}
-                  onValueChange={(value) => setStatusFilter(value)}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Filter by Status" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="ALL">All</SelectItem>
-                    <SelectItem value="queued">Queued</SelectItem>
-                    <SelectItem value="not queued">Not Queued</SelectItem>
-                  </SelectContent>
-                </Select>
-                {/* Depot Filter */} 
-                <Input
-                  placeholder="Filter by Depot"
-                  value={depotFilter}
-                  onChange={(e) => setDepotFilter(e.target.value)}
-                  className="max-w-xs w-full sm:w-auto"
-                />
-                {/* Destination Filter */} 
-                <Input
-                  placeholder="Filter by Destination"
-                  value={destinationFilter}
-                  onChange={(e) => setDestinationFilter(e.target.value)}
-                  className="max-w-xs w-full sm:w-auto"
-                />
-                {/* Clear Filters Button */} 
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    setOwnerFilter("")
-                    setProductFilter("ALL")
-                    setStatusFilter("ALL")
-                    setDepotFilter("")
-                    setDestinationFilter("")
-                    // Removed setSearchTerm("") to keep the search box intact
-                  }}
-                  className="max-w-xs w-full sm:w-auto"
-                >
-                  Clear Filters
-                </Button>
+                <div className="flex gap-2">
+                  <Button variant="outline" onClick={handleDownloadPDF}>
+                    <FileText className="mr-2 h-4 w-4" />
+                    PDF
+                  </Button>
+                  <Button variant="outline" onClick={handleExportToExcel}>
+                    <FileSpreadsheet className="mr-2 h-4 w-4" />
+                    Excel
+                  </Button>
+                </div>
               </motion.div>
             )}
           </AnimatePresence>
-
-          {/* Download PDF Button */} 
-          <div className="flex justify-end mb-4">
-            <div className="flex gap-2">
-              <Button variant="outline" onClick={handleDownloadPDF}>
-                <Download className="mr-2 h-4 w-4" />
-                PDF
-              </Button>
-              <Button variant="outline" onClick={handleExportToExcel}>
-                <FileSpreadsheet className="mr-2 h-4 w-4" />
-                Excel
-              </Button>
-            </div>
-          </div>
 
           {isLoading ? (
             <motion.div
@@ -1753,220 +1940,185 @@ const getActiveOwnerSummary = () => {
                       <th className="p-3 text-left font-medium bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">Actions</th>
                     </tr>
                   </thead>
-                  <AnimatePresence>
+                  <AnimatePresence mode="wait">
                     <tbody>
-                      {getFilteredWorkDetails().map((detail, index) => (
-                        <motion.tr
-                          key={detail.id}
-                          variants={tableRowVariants}
-                          initial="hidden"
-                          animate="visible"
-                          transition={{ delay: index * 0.05 }}
-                          className={cn(
-                            'border-b hover:bg-muted/50',
-                            detail.loaded && 'opacity-50 bg-muted/20',
-                            detail.id === lastAddedId && 'highlight-new-record',
-                            highlightUnqueued && detail.status !== "queued" && detail.status !== "completed" && 'bg-yellow-50 dark:bg-yellow-950/20',
-                            isNewOrder(detail.createdAt) && 'bg-emerald-50/50 dark:bg-emerald-950/20' // Add this line
-                          )}
-                        >
-                          <td className="p-2 sm:p-3">{detail.owner}</td>
-                          <td className="p-2 sm:p-3">{detail.product}</td>
-                          <td className="p-2 sm:p-3">
-                            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2">
-                              {editingTruckId === detail.id ? (
+                      {getFilteredWorkDetails().map((detail, index) => {
+                        const isEditing = editableRows[detail.id]?._editing;
+                        const editedDetail = editableRows[detail.id] || detail;
+                      
+                        return (
+                          <motion.tr
+                            key={detail.id}
+                            variants={tableRowVariants}
+                            initial="hidden"
+                            animate="visible"
+                            transition={{ delay: index * 0.05 }}
+                            className={cn(
+                              'border-b hover:bg-muted/50',
+                              detail.loaded && 'opacity-50 bg-muted/20',
+                              detail.id === lastAddedId && 'highlight-new-record',
+                              highlightUnqueued && detail.status !== "queued" && detail.status !== "completed" && 'bg-yellow-50 dark:bg-yellow-950/20',
+                              isNewOrder(detail.createdAt) && 'bg-emerald-50/50 dark:bg-emerald-950/20',
+                              isEditing && 'bg-blue-50/50 dark:bg-blue-950/20' // Highlight row being edited
+                            )}
+                          >
+                            <td className="p-2 sm:p-3">
+                              {isEditing ? (
                                 <Input
-                                  value={detail.truck_number}
-                                  onChange={(e) => handleTruckNumberChange(detail.id, e.target.value, detail.truck_number)}
+                                  value={editedDetail.owner}
+                                  onChange={(e) => handleEditChange(detail.id, 'owner', e.target.value)}
                                   className="w-32"
                                 />
                               ) : (
-                                <span>{detail.truck_number}</span>
+                                detail.owner
                               )}
-                              {!detail.loaded && (
-                                editingTruckId === detail.id ? (
+                            </td>
+                            <td className="p-2 sm:p-3">
+                              {isEditing ? (
+                                <Select
+                                  value={editedDetail.product}
+                                  onValueChange={(value) => handleEditChange(detail.id, 'product', value)}
+                                >
+                                  <SelectTrigger className="w-24">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="AGO">AGO</SelectItem>
+                                    <SelectItem value="PMS">PMS</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              ) : (
+                                detail.product
+                              )}
+                            </td>
+                            <td className="p-2 sm:p-3">
+                              {isEditing ? (
+                                <Input
+                                  value={editedDetail.truck_number}
+                                  onChange={(e) => handleEditChange(detail.id, 'truck_number', e.target.value)}
+                                  className="w-32"
+                                />
+                              ) : (
+                                <div className="flex flex-col">
+                                  <span>{detail.truck_number}</span>
+                                  {detail.previous_trucks && detail.previous_trucks.length > 0 && (
+                                    <small className="text-muted-foreground">
+                                      Previous: {detail.previous_trucks[detail.previous_trucks.length - 1]}
+                                    </small>
+                                  )}
+                                </div>
+                              )}
+                            </td>
+                            <td className="p-2 sm:p-3">
+                              {isEditing ? (
+                                <Input
+                                  type="number"
+                                  value={editedDetail.quantity}
+                                  onChange={(e) => handleEditChange(detail.id, 'quantity', e.target.value)}
+                                  className="w-24"
+                                />
+                              ) : (
+                                detail.quantity
+                              )}
+                            </td>
+                            <td className="p-2 sm:p-3">
+                              {isEditing ? (
+                                <Select
+                                  value={editedDetail.status}
+                                  onValueChange={(value) => handleEditChange(detail.id, 'status', value)}
+                                >
+                                  <SelectTrigger className="w-32">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="queued">Queued</SelectItem>
+                                    <SelectItem value="not queued">Not Queued</SelectItem>
+                                    <SelectItem value="completed">Completed</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              ) : (
+                                <Button
+                                  variant={detail.status === "queued" ? "default" : "secondary"}
+                                  size="sm"
+                                  className={detail.status === "queued" ? "bg-emerald-600 hover:bg-emerald-700" : ""}
+                                  disabled={detail.loaded}
+                                  onClick={() => handleStatusChange(detail.id, detail.status)}
+                                >
+                                  {detail.status}
+                                </Button>
+                              )}
+                            </td>
+                            <td className="p-2 sm:p-3">
+                              {isEditing ? (
+                                <Input
+                                  value={editedDetail.orderno}
+                                  onChange={(e) => handleEditChange(detail.id, 'orderno', e.target.value)}
+                                  className="w-32"
+                                />
+                              ) : (
+                                detail.orderno
+                              )}
+                            </td>
+                            <td className="p-2 sm:p-3">
+                              {isEditing ? (
+                                <Input
+                                  value={editedDetail.depot}
+                                  onChange={(e) => handleEditChange(detail.id, 'depot', e.target.value)}
+                                  className="w-32"
+                                />
+                              ) : (
+                                detail.depot
+                              )}
+                            </td>
+                            <td className="p-2 sm:p-3">
+                              {isEditing ? (
+                                <Input
+                                  value={editedDetail.destination}
+                                  onChange={(e) => handleEditChange(detail.id, 'destination', e.target.value)}
+                                  className="w-32"
+                                />
+                              ) : (
+                                detail.destination
+                              )}
+                            </td>
+                            <td className="p-2 sm:p-3">
+                              <div className="flex gap-2">
+                                {isEditing ? (
                                   <>
                                     <Button
-                                      variant="ghost"
+                                      variant="default"
                                       size="sm"
-                                      onClick={() => handleTruckNumberChange(detail.id, detail.truck_number, detail.truck_number)}
+                                      onClick={() => saveRowChanges(detail.id)}
                                     >
                                       <Check className="h-4 w-4" />
                                     </Button>
                                     <Button
                                       variant="ghost"
                                       size="sm"
-                                      onClick={() => setEditingTruckId(null)}
+                                      onClick={() => cancelEditing(detail.id)}
                                     >
                                       <X className="h-4 w-4" />
                                     </Button>
                                   </>
                                 ) : (
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => setEditingTruckId(detail.id)}
-                                  >
-                                    <Edit className="h-4 w-4" />
-                                  </Button>
-                                )
-                              )}
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => {
-                                  setSelectedTruckHistory(detail)
-                                  setShowTruckHistory(true)
-                                }}
-                              >
-                                <History className="h-4 w-4" />
-                              </Button>
-                            </div>
-                            {detail.previous_trucks && detail.previous_trucks.length > 0 && (
-                              <small className="text-muted-foreground">
-                                Previous: {detail.previous_trucks[detail.previous_trucks.length - 1]}
-                              </small>
-                            )}
-                          </td>
-                          <td className="p-2 sm:p-3">{detail.quantity}</td>
-                          <td className="p-2 sm:p-3">
-                            <Button
-                              variant={detail.status === "queued" ? "default" : "secondary"}
-                              size="sm"
-                              className={detail.status === "queued" ? "bg-emerald-600 hover:bg-emerald-700" : ""}
-                              disabled={detail.loaded}
-                              onClick={() => handleStatusChange(detail.id, detail.status)}
-                            >
-                              {detail.status}
-                            </Button>
-                          </td>
-                          <td className="p-2 sm:p-3">{detail.orderno}</td>
-                          <td className="p-2 sm:p-3">{detail.depot}</td>
-                          <td className="p-2 sm:p-3">{detail.destination}</td>
-                          <td className="p-2 sm:p-3">
-                            <div className="flex flex-col sm:flex-row gap-2">
-                              {!detail.loaded ? (
-                                <div className="flex gap-2">
-                                  <Button 
-                                    variant="default"
-                                    size="sm"
-                                    onClick={() => handleLoadedStatus(detail.id)}
-                                  >
-                                    Loaded?
-                                  </Button>
-                                  {showUnloadedGP && (
-                                    <Button
-                                      variant={detail.gatePassGenerated ? "secondary" : "outline"}
-                                      size="sm"
-                                      onClick={() => handleGenerateGatePass(detail)}
-                                      className={cn(
-                                        "relative",
-                                        detail.gatePassGenerated && "bg-amber-100 hover:bg-amber-200 text-amber-700"
-                                      )}
-                                    >
-                                      {detail.gatePassGenerated ? "BG" : "GP"}
-                                      {detail.gatePassGenerated && (
-                                        <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-amber-500" />
-                                      )}
-                                    </Button>
-                                  )}
-                                </div>
-                              ) : !detail.released ? (
-                                <div className="flex gap-2">
-                                  {isTruckPaymentAllocated(detail.id) ? (
-                                    <Button
-                                      variant="default"
-                                      size="sm"
-                                      onClick={async () => {
-                                        if (confirm('Confirm release of truck?')) {
-                                          await update(ref(database, `work_details/${detail.id}`), {
-                                            released: true,
-                                            paid: true,
-                                            paymentPending: false
-                                          });
-                                          toast({
-                                            title: "Released",
-                                            description: "Truck has been released",
-                                          });
-                                        }
-                                      }}
-                                    >
-                                      Release
-                                    </Button>
-                                  ) : (
-                                    <div className="flex items-center gap-1">
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        onClick={() => {
-                                          toast({
-                                            title: "Payment Required",
-                                            description: "Please allocate payment from owner details",
-                                          });
-                                        }}
-                                      >
-                                        Payment Required
-                                      </Button>
-                                      <Button
-                                        variant="ghost"
-                                        size="icon"
-                                        className="h-8 w-8 text-red-500 hover:text-red-700"
-                                        onClick={() => handleForceRelease(detail)}
-                                      >
-                                        <Triangle className="h-4 w-4" />
-                                      </Button>
-                                    </div>
-                                  )}
-                                </div>
-                              ) : (
-                                <div className="flex gap-2">
-                                  <Button
-                                    variant={detail.gatePassGenerated ? "secondary" : "outline"}
-                                    size="sm"
-                                    onClick={() => handleGenerateGatePass(detail)}
-                                    className={cn(
-                                      "relative",
-                                      detail.gatePassGenerated && "bg-amber-100 hover:bg-amber-200 text-amber-700"
-                                    )}
-                                  >
-                                    {detail.gatePassGenerated ? "BG" : "GP"}
-                                    {detail.gatePassGenerated && (
-                                      <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-amber-500" />
-                                    )}
-                                  </Button>
-                                  {detail.paymentPending && (
+                                  <>
                                     <Button
                                       variant="ghost"
                                       size="sm"
-                                      onClick={() => handleOwnerInfo(detail.owner)}
-                                      className="text-red-500"
+                                      onClick={() => startEditing(detail)}
+                                      disabled={detail.loaded} // Prevent editing loaded orders
                                     >
-                                      Payment Pending
+                                      <Edit className="h-4 w-4" />
                                     </Button>
-                                  )}
-                                </div>
-                              )}
-                              <Button
-                                variant="destructive"
-                                size="sm"
-                                onClick={() => handleDelete(detail.id)}
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => handleSyncStatus(detail)}
-                                className="h-6 w-6 p-0"
-                                title="Sync payment status"
-                              >
-                                <RefreshCw className="h-3 w-3" />
-                              </Button>
-                            </div>
-                          </td>
-                        </motion.tr>
-                      ))}
-                    </tbody>
+                                    {/* ... existing action buttons ... */}
+                                  </>
+                                )}
+                              </div>
+                            </td>
+                          </motion.tr>
+                        );
+                        })}
+                      </tbody>
                   </AnimatePresence>
                 </table>
               </div>
@@ -2055,7 +2207,7 @@ const getActiveOwnerSummary = () => {
             </motion.div>
           </div>
         </div>
-      </main>
+      </div>
 
       {/* Add Work Dialog */} 
       <AnimatePresence>
@@ -2183,8 +2335,53 @@ const getActiveOwnerSummary = () => {
           </div>
         </DialogContent>
       </Dialog>
+      
+
+      {/* Add Driver Info Dialog */}
+      <Dialog open={isDriverDialogOpen} onOpenChange={setIsDriverDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Enter Driver Information</DialogTitle>
+          </DialogHeader>
+          <Form {...form}>
+            <form onSubmit={form.handleSubmit(handleDriverInfoSubmit)} className="space-y-4">
+              <FormField
+                control={form.control}
+                name="phoneNumber"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Phone Number</FormLabel>
+                    <FormControl>
+                      <Input placeholder="0712345678" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="name"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Driver Name</FormLabel>
+                    <FormControl>
+                      <Input placeholder="John Doe" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <Button type="submit">Save and Continue</Button>
+            </form>
+          </Form>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
 
+
+function arrayUnion(truck_number: string) {
+  throw new Error('Function not implemented.')
+}
 
