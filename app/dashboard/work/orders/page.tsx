@@ -216,6 +216,9 @@ export default function WorkManagementPage() {
   const router = useRouter()
 
   // 3. All useState declarations grouped together at the top
+  // Add the new state variables at the beginning with other state declarations
+  const [loadedFilter, setLoadedFilter] = useState("ALL")
+  const [queueFilter, setQueueFilter] = useState("ALL")
   const [mounted, setMounted] = useState(false)
   const [workDetails, setWorkDetails] = useState<WorkDetail[]>([])
   const [editableRows, setEditableRows] = useState<{ [key: string]: EditableWorkDetail }>({}) // New state moved up
@@ -295,22 +298,29 @@ export default function WorkManagementPage() {
   const getNewOrdersStats = () => {
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-
+  
     const newOrders = workDetails.filter(detail => {
       const createdAt = new Date(detail.createdAt || '');
       return createdAt > sevenDaysAgo;
     });
-
+  
+    const unqueuedOrders = newOrders.filter(order => 
+      order.status !== "queued" && order.status !== "completed"
+    );
+  
     return {
       total: newOrders.length,
       ago: newOrders.filter(order => order.product === 'AGO').length,
       pms: newOrders.filter(order => order.product === 'PMS').length,
-      unqueued: newOrders.filter(order => order.status !== "queued" && order.status !== "completed").length,
+      unqueued: unqueuedOrders.length,
+      unqueuedAgo: unqueuedOrders.filter(order => order.product === 'AGO').length,
+      unqueuedPms: unqueuedOrders.filter(order => order.product === 'PMS').length,
       loaded: newOrders.filter(order => order.loaded).length,
       pending: newOrders.filter(order => order.status === "queued" && !order.loaded).length,
       orders: newOrders
     };
   };
+  
 
   // Add this function to calculate new orders for each owner
   const getNewOwnerOrdersStats = (owner: string) => {
@@ -1220,9 +1230,21 @@ const getFilteredWorkDetails = () => {
 
     const matchesOwner = ownerFilter ? detail.owner.toLowerCase().includes(ownerFilter.toLowerCase()) : true;
     const matchesProduct = productFilter !== "ALL" ? detail.product === productFilter : true;
-    const matchesStatus = statusFilter !== "ALL" ? detail.status === statusFilter : true;
-    const matchesDepot = depotFilter ? detail.depot.toLowerCase().includes(depotFilter.toLowerCase()) : true;
-    const matchesDestination = destinationFilter ? detail.destination.toLowerCase().includes(destinationFilter.toLowerCase()) : true;
+    
+    // Queue status filter
+    const matchesQueueStatus = queueFilter === "ALL" 
+      ? true 
+      : queueFilter === "QUEUED" 
+        ? detail.status === "queued" || detail.status === "completed"
+        : detail.status !== "queued" && detail.status !== "completed";
+    
+    // Loaded status filter
+    const matchesLoadedStatus = loadedFilter === "ALL"
+      ? true
+      : loadedFilter === "LOADED"
+        ? detail.loaded
+        : !detail.loaded;
+    
     const matchesSearch = searchTerm
       ? detail.owner.toLowerCase().includes(searchTerm.toLowerCase()) ||
         detail.truck_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -1230,7 +1252,12 @@ const getFilteredWorkDetails = () => {
         detail.product.toLowerCase().includes(searchTerm.toLowerCase()) ||
         detail.destination.toLowerCase().includes(searchTerm.toLowerCase())
       : true;
-    return matchesOwner && matchesProduct && matchesStatus && matchesDepot && matchesDestination && matchesSearch;
+
+    return matchesOwner && 
+           matchesProduct && 
+           matchesQueueStatus && 
+           matchesLoadedStatus && 
+           matchesSearch;
   });
 };
 
@@ -1624,7 +1651,14 @@ const renderSummaryCard = () => (
                 <div className="text-lg font-semibold text-gray-600">
                   {newStats.unqueued}
                 </div>
-                <div className="text-sm text-muted-foreground">New Unqueued Orders</div>
+                <div className="text-sm text-muted-foreground">
+                  New Unqueued Orders
+                  {newStats.unqueued > 0 && (
+                    <div className="text-xs mt-0.5 text-muted-foreground">
+                      AGO: {newStats.unqueuedAgo}, PMS: {newStats.unqueuedPms}
+                    </div>
+                  )}
+                </div>
               </div>
               <div className="bg-green-50 dark:bg-green-950/20 p-3 rounded-lg">
                 <div className="text-lg font-semibold text-green-600">
@@ -1664,8 +1698,6 @@ const getActiveOwnerSummary = () => {
     Object.entries(ownerSummary).filter(([owner]) => activeOwners.has(owner))
   );
 };
-
-  // Add this with other state declarations at the top of the component
 
   
   // Add these functions inside the component but before the render method
@@ -1852,7 +1884,7 @@ const getActiveOwnerSummary = () => {
                 initial="hidden"
                 animate="visible"
                 exit="hidden"
-                className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 w-full max-w-4xl mx-auto"
+                className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2 w-full max-w-4xl mx-auto"
               >
                 <Input
                   placeholder="Filter by Owner"
@@ -1875,50 +1907,33 @@ const getActiveOwnerSummary = () => {
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="flex gap-2">
-                  <Button variant="outline" onClick={handleDownloadPDF}>
-                    <FileText className="mr-2 h-4 w-4" />
-                    PDF
-                  </Button>
-                  <Button variant="outline" onClick={handleExportToExcel}>
-                    <FileSpreadsheet className="mr-2 h-4 w-4" />
-                    Excel
-                  </Button>
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-
-          {/* Conditionally Rendered Filter Controls with reduced sizes */} 
-          <AnimatePresence>
-            {showFilters && (
-              <motion.div
-                variants={filterVariants}
-                initial="hidden"
-                animate="visible"
-                exit="hidden"
-                className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 w-full max-w-4xl mx-auto"
-              >
-                {/* Owner Filter */} 
-                <Input
-                  placeholder="Filter by Owner"
-                  value={ownerFilter}
-                  onChange={(e) => setOwnerFilter(e.target.value)}
-                  className="max-w-xs w-full sm:w-auto"
-                />
-                {/* Product Filter */} 
                 <div className="max-w-xs w-full sm:w-auto">
                   <Select
-                    value={productFilter}
-                    onValueChange={(value) => setProductFilter(value)}
+                    value={queueFilter}
+                    onValueChange={(value) => setQueueFilter(value)}
                   >
                     <SelectTrigger>
-                      <SelectValue placeholder="Filter by Product" />
+                      <SelectValue placeholder="Queue Status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="ALL">All Status</SelectItem>
+                      <SelectItem value="QUEUED">Queued</SelectItem>
+                      <SelectItem value="UNQUEUED">Unqueued</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="max-w-xs w-full sm:w-auto">
+                  <Select
+                    value={loadedFilter}
+                    onValueChange={(value) => setLoadedFilter(value)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Load Status" />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="ALL">All</SelectItem>
-                      <SelectItem value="AGO">AGO</SelectItem>
-                      <SelectItem value="PMS">PMS</SelectItem>
+                      <SelectItem value="LOADED">Loaded</SelectItem>
+                      <SelectItem value="PENDING">Pending</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -2066,8 +2081,8 @@ const getActiveOwnerSummary = () => {
                                   <SelectContent>
                                     <SelectItem value="queued">Queued</SelectItem>
                                     <SelectItem value="not queued">Not Queued</SelectItem>
-                                    <SelectItem value="completed">Completed</SelectItem>
-                                  </SelectContent>
+                                      <SelectItem value="completed">Completed</SelectItem>
+                                    </SelectContent>
                                 </Select>
                               ) : (
                                 <Button
