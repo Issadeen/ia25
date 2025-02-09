@@ -1,5 +1,7 @@
 'use client'
 
+// Update imports to include useProfileImage
+import { useProfileImage } from '@/hooks/useProfileImage'
 import { useState, useEffect, useCallback } from 'react'
 import { getDatabase, ref, onValue, get, update } from 'firebase/database'
 import { useSession } from 'next-auth/react'
@@ -64,11 +66,11 @@ interface ExtendedWorkDetail extends WorkDetailWithPermit {
 export default function PermitsPage() {
   const { data: session, status } = useSession()
   const router = useRouter()
+  const profilePicUrl = useProfileImage()  // Add this line
   const { toast } = useToast()
   const [permits, setPermits] = useState<{ [key: string]: PermitAllocation }>({})
   const [searchTerm, setSearchTerm] = useState('')
   const [isRefreshing, setIsRefreshing] = useState(false)
-  const [lastUploadedImage, setLastUploadedImage] = useState<string | null>(null)
   const [pendingPermits, setPendingPermits] = useState<WorkDetailWithPermit[]>([])
   const [availableEntries, setAvailableEntries] = useState<PermitEntry[]>([])
   const [selectedPermitEntries, setSelectedPermitEntries] = useState<{ [truckId: string]: string }>({});
@@ -115,25 +117,6 @@ export default function PermitsPage() {
 
     return () => unsubscribe()
   }, [status, router])
-
-  useEffect(() => {
-    const fetchImageUrl = async () => {
-      const userEmail = session?.user?.email
-      if (!userEmail || session?.user?.image) return
-  
-      try {
-        const storage = getStorage()
-        const filename = `${userEmail}.jpg`
-        const imageRef = storageRef(storage, `profile-pics/${filename}`)
-        const url = await getDownloadURL(imageRef)
-        setLastUploadedImage(url)
-      } catch (error) {
-        // Silently handle missing profile image
-      }
-    }
-  
-    fetchImageUrl()
-  }, [session?.user?.email, session?.user?.image])
 
   const fetchPendingPermits = async () => {
     const db = getDatabase()
@@ -824,7 +807,7 @@ const handleReset = async () => {
                     onClick={() => router.push('/dashboard')}
                   >
                     <AvatarImage 
-                      src={session?.user?.image || lastUploadedImage || ''} 
+                      src={session?.user?.image || profilePicUrl || ''} 
                       alt={session?.user?.name || 'User Profile'}
                       className="h-8 w-8"
                     />

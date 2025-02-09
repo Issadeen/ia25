@@ -1,5 +1,6 @@
 "use client";
 
+// Update imports to include useProfileImage
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { useTheme } from "next-themes";
@@ -29,44 +30,13 @@ import {
   validatePaymentForm,
   updatePaymentStatuses 
 } from "@/lib/payment-utils";
+import { useProfileImage } from '@/hooks/useProfileImage'
 
 export default function WorkPage() {
   const { theme, setTheme } = useTheme();
   const { data: session } = useSession();
   const router = useRouter();
-  const [profilePicUrl, setProfilePicUrl] = useState<string | null>(null);
-
-  // Add profile pic fetch effect
-  useEffect(() => {
-    const fetchProfilePic = async () => {
-      const storage = getFirebaseStorage();
-      const userEmail = session?.user?.email;
-
-      if (!storage || !userEmail) return;
-
-      try {
-        const imageRef = storageRef(storage, `profile-pics/${userEmail}.jpg`);
-        const auth = getFirebaseAuth();
-        const currentUser = auth ? (auth.currentUser as FirebaseUser | null) : null;
-
-        if (!currentUser) return;
-
-        if (currentUser.photoURL) {
-          setProfilePicUrl(currentUser.photoURL);
-        } else if (currentUser.email) {
-          const fileName = `profile-pics/${currentUser.email.replace(/[.@]/g, "_")}.jpg`;
-          const imageRef = storageRef(storage, fileName);
-          const url = await getDownloadURL(imageRef);
-          setProfilePicUrl(url);
-        }
-      } catch (error) {
-        console.log("No existing profile picture found");
-        setProfilePicUrl(session?.user?.image || null);
-      }
-    };
-
-    fetchProfilePic();
-  }, [session]);
+  const profilePicUrl = useProfileImage()  // Add this line
 
   // Updated work cards organization
   const workCards = [

@@ -38,6 +38,7 @@ import {
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog" // Add AlertDialog imports
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu" // Add DropdownMenu imports
 import { AlertCircle, Receipt, ReceiptText, Shield } from 'lucide-react' // Add new imports
+import { useProfileImage } from '@/hooks/useProfileImage'
 
 // Add interfaces at the top
 interface TruckAllocation {
@@ -114,7 +115,6 @@ export default function OwnerDetailsPage() {
   const [truckPayments, setTruckPayments] = useState<{ [truckId: string]: TruckPayment[] }>({})
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false)
   const { data: session } = useSession()
-  const [lastUploadedImage, setLastUploadedImage] = useState<string | null>(null)
   const [sortConfig, setSortConfig] = useState<{
     key: string;
     direction: 'asc' | 'desc';
@@ -228,24 +228,6 @@ export default function OwnerDetailsPage() {
 
     fetchOwnerData()
   }, [owner])
-
-  // Add useEffect for profile image
-  useEffect(() => {
-    const fetchImageUrl = async () => {
-      if (!session?.user?.email || session?.user?.image) return
-  
-      try {
-        const filename = `${session.user.email}.jpg`
-        const imageRef = storageRef(storage, `profile-pics/${filename}`)
-        const url = await getDownloadURL(imageRef)
-        setLastUploadedImage(url)
-      } catch (error) {
-        console.log('Profile image not found:', error)
-      }
-    }
-  
-    fetchImageUrl()
-  }, [session?.user])
 
   // Update calculateTotals with proper typing
   const calculateTotals = (): OwnerTotals => {
@@ -959,6 +941,8 @@ export default function OwnerDetailsPage() {
     </DropdownMenu>
   );
 
+  const profilePicUrl = useProfileImage()
+
   return (
     <div className="min-h-screen">
       {/* Animate header */}
@@ -1022,7 +1006,7 @@ export default function OwnerDetailsPage() {
                 className="h-7 w-7 sm:h-8 sm:w-8 ring-2 ring-pink-500/50"
               >
                 <AvatarImage 
-                  src={session?.user?.image || lastUploadedImage || ''} 
+                  src={profilePicUrl || ''} 
                   alt="Profile"
                 />
                 <AvatarFallback className="bg-pink-100 text-pink-700">

@@ -19,6 +19,7 @@ import { motion } from 'framer-motion'
 import { auth, storage } from "@/lib/firebase"
 import { getDownloadURL, ref as storageRef } from "firebase/storage"
 import { useToast } from "@/components/ui/use-toast"
+import { useProfileImage } from '@/hooks/useProfileImage'
 
 const AddEntriesPage: React.FC = () => {
   // State management
@@ -36,25 +37,7 @@ const AddEntriesPage: React.FC = () => {
   const router = useRouter()
   const { theme, setTheme } = useTheme()
   const { toast } = useToast()
-
-  // Profile image handling
-  useEffect(() => {
-    const fetchImageUrl = async () => {
-      const userEmail = session?.user?.email
-      if (!userEmail || session?.user?.image) return
-
-      try {
-        const filename = `${userEmail}.jpg`
-        const imageRef = storageRef(storage, `profile-pics/${filename}`)
-        const url = await getDownloadURL(imageRef)
-        setLastUploadedImage(url)
-      } catch (error) {
-        console.log('Profile image not found:', error)
-      }
-    }
-
-    fetchImageUrl()
-  }, [session?.user?.email, session?.user?.image])
+  const profilePicUrl = useProfileImage()
 
   // Authentication check
   useEffect(() => {
@@ -158,7 +141,7 @@ const AddEntriesPage: React.FC = () => {
     }
   }
 
-  const avatarSrc = session?.user?.image || lastUploadedImage || ''
+  const avatarSrc = session?.user?.image || profilePicUrl || ''
 
   return (
     <div className="min-h-screen">

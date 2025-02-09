@@ -10,14 +10,13 @@ import { ThemeToggle } from "@/components/ui/molecules/theme-toggle"
 import { GatePassForm } from "@/components/ui/molecules/GatePassForm"
 import { ThemeProvider } from '@/components/theme-provider'
 import { Toaster } from "@/components/ui/toaster"
-import { storage } from "@/lib/firebase"
-import { ref as storageRef, getDownloadURL } from "firebase/storage"
+import { useProfileImage } from '@/hooks/useProfileImage'
 
 export default function GatePassPage() {
   const { data: session, status } = useSession()
   const router = useRouter()
   const [mounted, setMounted] = useState(false)
-  const [lastUploadedImage, setLastUploadedImage] = useState<string | null>(null)
+  const profilePicUrl = useProfileImage()
 
   useEffect(() => {
     setMounted(true)
@@ -28,23 +27,6 @@ export default function GatePassPage() {
       router.push("/login")
     }
   }, [status, router])
-
-  useEffect(() => {
-    const fetchImageUrl = async () => {
-      if (!session?.user?.email || session?.user?.image) return
-  
-      try {
-        const filename = `${session.user.email}.jpg`
-        const imageRef = storageRef(storage, `profile-pics/${filename}`)
-        const url = await getDownloadURL(imageRef)
-        setLastUploadedImage(url)
-      } catch (error) {
-        console.log('Profile image not found:', error)
-      }
-    }
-  
-    fetchImageUrl()
-  }, [session?.user])
 
   if (!mounted) {
     return null
@@ -76,7 +58,7 @@ export default function GatePassPage() {
                 className="h-8 w-8 ring-2 ring-pink-500/50 ring-offset-2 ring-offset-background shadow-lg shadow-pink-500/10 transition-shadow hover:ring-pink-500/75"
               >
                 <AvatarImage 
-                  src={session?.user?.image || lastUploadedImage || ''} 
+                  src={session?.user?.image || profilePicUrl || ''} 
                   alt="Profile"
                 />
                 <AvatarFallback className="bg-pink-100 text-pink-700">

@@ -54,6 +54,7 @@ import { reminderService } from '@/lib/reminders' // Add this line
 import { StockItem } from '@/types/stock';
 import { Entry } from "@/types/entries"
 import { getPreAllocatedPermit, markPermitAsUsed } from '@/lib/permit-utils'; // Add this line
+import { useProfileImage } from '@/hooks/useProfileImage' // Add this import
 
 // Add new constants at the top of the file
 const WARNING_TIMEOUT = 9 * 60 * 1000; // 9 minutes
@@ -162,7 +163,6 @@ export default function EntriesPage() {
 
   // 1. State hooks
   const [mounted, setMounted] = useState(false)
-  const [lastUploadedImage, setLastUploadedImage] = useState<string | null>(null)
   const [truckNumber, setTruckNumber] = useState('')
   const [destination, setDestination] = useState('')
   const [product, setProduct] = useState('')
@@ -353,6 +353,7 @@ export default function EntriesPage() {
   const router = useRouter()
   const { theme, setTheme } = useTheme()
   const { toast } = useToast()
+  const profilePicUrl = useProfileImage() // Replace lastUploadedImage state and related code with useProfileImage hook
 
   // 3. Helper functions
   function generateProfileImageFilename(email: string): string {
@@ -834,24 +835,6 @@ export default function EntriesPage() {
       router.push("/login")
     }
   }, [status, router])
-
-  useEffect(() => {
-    const fetchImageUrl = async () => {
-      const userEmail = session?.user?.email
-      if (!userEmail || session?.user?.image) return
-  
-      try {
-        const filename = `${userEmail}.jpg`
-        const imageRef = storageRef(storage, `profile-pics/${filename}`)
-        const url = await getDownloadURL(imageRef)
-        setLastUploadedImage(url)
-      } catch (error) {
-        // Silently handle missing profile image
-      }
-    }
-  
-    fetchImageUrl()
-  }, [session?.user?.email, session?.user?.image])
 
   // Add this effect for real-time volume validation
   useEffect(() => {
@@ -3064,7 +3047,7 @@ const updateTruckUsage = async (
                   onClick={() => router.push('/dashboard')}
                 >
                   <AvatarImage 
-                    src={session?.user?.image || lastUploadedImage || ''} 
+                    src={session?.user?.image || profilePicUrl || ''} 
                     alt={session?.user?.name || 'User Profile'}
                   />
                   <AvatarFallback className="bg-emerald-100 text-emerald-700">

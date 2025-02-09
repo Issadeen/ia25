@@ -21,6 +21,7 @@ import { useToast } from "@/components/ui/use-toast"
 import { ThemeToggle } from "@/components/ui/molecules/theme-toggle"
 import { Switch } from "@/components/ui/switch"
 import { ToastAction } from "@/components/ui/toast"
+import { useProfileImage } from '@/hooks/useProfileImage'
 
 // Update the interface to handle multiple entries
 interface AllocationReport {
@@ -90,6 +91,7 @@ export default function ReportsPage() {
   const [newReportId, setNewReportId] = useState<string | null>(null);
   const [isMigrating, setIsMigrating] = useState(false)
   const [showDuplicates, setShowDuplicates] = useState(false);
+  const profilePicUrl = useProfileImage()
 
   useEffect(() => {
     setMounted(true)
@@ -134,23 +136,6 @@ export default function ReportsPage() {
 
     return () => unsubscribe()
   }, [])
-
-  useEffect(() => {
-    const fetchImageUrl = async () => {
-      if (!session?.user?.email || session?.user?.image) return
-  
-      try {
-        const filename = `${session.user.email}.jpg`
-        const imageRef = storageRef(storage, `profile-pics/${filename}`)
-        const url = await getDownloadURL(imageRef)
-        setLastUploadedImage(url)
-      } catch (error) {
-        // Silently handle missing profile image
-      }
-    }
-  
-    fetchImageUrl()
-  }, [session?.user?.email, session?.user?.image])
 
   // Add this after your existing useEffect hooks
   useEffect(() => {
@@ -672,7 +657,7 @@ const handleRemoveEditEntry = (reportId: string, entryIndex: number) => {
                 onClick={() => router.push('/dashboard')}
               >
                 <AvatarImage 
-                  src={session?.user?.image || lastUploadedImage || ''} 
+                  src={profilePicUrl || ''} 
                   alt={session?.user?.name || 'User Profile'}
                 />
                 <AvatarFallback className="bg-emerald-100 text-emerald-700">

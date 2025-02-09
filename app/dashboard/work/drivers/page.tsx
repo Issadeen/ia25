@@ -13,9 +13,8 @@ import { toast } from "@/components/ui/use-toast"
 import { ThemeToggle } from "@/components/ui/molecules/theme-toggle"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { motion } from 'framer-motion'
-import { storage } from "@/lib/firebase"
-import { ref as storageRef, getDownloadURL } from "firebase/storage"
 import { cn } from "@/lib/utils"
+import { useProfileImage } from '@/hooks/useProfileImage'
 
 interface DriverInfo {
   phoneNumber: string;
@@ -43,8 +42,8 @@ export default function DriversPage() {
   const [drivers, setDrivers] = useState<DriverInfo[]>([])
   const [searchTerm, setSearchTerm] = useState("")
   const [mounted, setMounted] = useState(false)
-  const [lastUploadedImage, setLastUploadedImage] = useState<string | null>(null)
   const [copiedItem, setCopiedItem] = useState<string | null>(null)
+  const profilePicUrl = useProfileImage()
 
   // Add mounting effect
   useEffect(() => {
@@ -56,23 +55,6 @@ export default function DriversPage() {
       router.push("/login")
     }
   }, [status, router])
-
-  useEffect(() => {
-    const fetchImageUrl = async () => {
-      if (!session?.user?.email || session?.user?.image) return
-  
-      try {
-        const filename = `${session.user.email}.jpg`
-        const imageRef = storageRef(storage, `profile-pics/${filename}`)
-        const url = await getDownloadURL(imageRef)
-        setLastUploadedImage(url)
-      } catch (error) {
-        console.log('Profile image not found:', error)
-      }
-    }
-  
-    fetchImageUrl()
-  }, [session?.user])
 
   useEffect(() => {
     const driversRef = ref(database, 'drivers')
@@ -138,7 +120,7 @@ export default function DriversPage() {
               <div className="flex items-center gap-2">
                 <ThemeToggle />
                 <Avatar className="h-8 w-8 ring-1 ring-pink-500/50">
-                  <AvatarImage src={session?.user?.image || lastUploadedImage || ''} alt="Profile" />
+                  <AvatarImage src={profilePicUrl || ''} alt="Profile" />
                   <AvatarFallback className="text-xs">
                     {session?.user?.email?.[0]?.toUpperCase() || 'U'}
                   </AvatarFallback>

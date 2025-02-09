@@ -13,6 +13,7 @@ import { ThemeToggle } from '@/components/theme-toggle'
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar'
 import { getStorage, ref as storageRef, getDownloadURL } from 'firebase/storage'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select'
+import { useProfileImage } from '@/hooks/useProfileImage'
 
 interface Entry {
   id: string;
@@ -32,9 +33,9 @@ export default function AdminPage() {
   const [editingEntry, setEditingEntry] = useState<string | null>(null);
   const [editValue, setEditValue] = useState<number>(0);
   const { data: session, status } = useSession()
-  const [lastUploadedImage, setLastUploadedImage] = useState<string | null>(null)
   const [searchTerm, setSearchTerm] = useState('')
   const [productFilter, setProductFilter] = useState('ALL')
+  const profilePicUrl = useProfileImage()
 
   useEffect(() => {
     const db = getDatabase();
@@ -52,25 +53,6 @@ export default function AdminPage() {
 
     return () => unsubscribe();
   }, []);
-
-  // Add profile image fetch effect
-  useEffect(() => {
-    const fetchImageUrl = async () => {
-      if (!session?.user?.email || session?.user?.image) return
-  
-      try {
-        const storage = getStorage()
-        const filename = `${session.user.email}.jpg`
-        const imageRef = storageRef(storage, `profile-pics/${filename}`)
-        const url = await getDownloadURL(imageRef)
-        setLastUploadedImage(url)
-      } catch (error) {
-        // Silently handle missing profile image
-      }
-    }
-  
-    fetchImageUrl()
-  }, [session?.user])
 
   const handleVolumeUpdate = async (entry: Entry, newVolume: number) => {
     if (newVolume < 0) {
@@ -153,7 +135,7 @@ export default function AdminPage() {
                     onClick={() => router.push('/dashboard')}
                   >
                     <AvatarImage 
-                      src={session?.user?.image || lastUploadedImage || ''} 
+                      src={session?.user?.image || profilePicUrl || ''} 
                       alt={session?.user?.name || 'User Profile'}
                       className="h-8 w-8"
                     />
