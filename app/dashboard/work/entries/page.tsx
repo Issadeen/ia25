@@ -134,6 +134,13 @@ interface Notification {
   read: boolean;
 }
 
+// Add new interfaces after existing interfaces
+interface TruckUsage {
+  id?: string;  // Make id optional
+  truckNumber: string;
+  quantity: number;
+}
+
 export default function EntriesPage() {
   // Add highlightText inside the component
   const highlightText = useCallback((text: string, filter: string) => {
@@ -320,6 +327,26 @@ export default function EntriesPage() {
 
   // Add new state for animating the bell icon
   const [animateBell, setAnimateBell] = useState(false)
+
+  // Add ref for heading click tracking
+  const h2Ref = useRef<{ lastClick: number; clickCount: number }>({ lastClick: 0, clickCount: 0 })
+
+  // Add new state variables inside component
+  const [editingUsage, setEditingUsage] = useState<{
+    entryKey: string;
+    usageId: string;
+    truckNumber: string;
+    quantity: number;
+  } | null>(null);
+
+  // Add after existing state declarations
+  const [isAdminMode, setIsAdminMode] = useState(false);
+
+  // Add to existing state declarations
+  const [hiddenDuplicates, setHiddenDuplicates] = useState<Set<string>>(new Set());
+
+  // Add new state for showing duplicates
+  const [showDuplicates, setShowDuplicates] = useState(false);
 
   // 2. Other hooks
   const { data: session, status } = useSession()
@@ -1950,8 +1977,26 @@ const renderStockInfo = () => {
           transition={{ duration: 0.3 }}
         >
           <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-6">
-            <h2 className="text-2xl font-semibold bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">
-              Entry Usage
+            <h2 
+              className="text-2xl font-semibold bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent cursor-pointer select-none"
+              onClick={(e) => {
+                // Track clicks using a custom counter
+                const now = Date.now();
+                if (!h2Ref.current.lastClick || now - h2Ref.current.lastClick > 500) {
+                  h2Ref.current.clickCount = 1;
+                } else {
+                  h2Ref.current.clickCount++;
+                }
+                h2Ref.current.lastClick = now;
+
+                // Check for triple click
+                if (h2Ref.current.clickCount === 3) {
+                  toggleAdminMode();
+                  h2Ref.current.clickCount = 0;
+                }
+              }}
+            >
+              Entry Usage {isAdminMode && <span className="text-xs text-emerald-500">(Admin Mode)</span>}
             </h2>
             <Button 
               variant="outline" 
@@ -2070,13 +2115,118 @@ const renderStockInfo = () => {
                           <TableCell>{highlightText(entry.product, usageFilters.product)}</TableCell>
                           <TableCell>{highlightText(entry.destination, usageFilters.destination)}</TableCell>
                           <TableCell>
-                            {entry.usedBy.map((usage: { truckNumber: string; quantity: number }, idx: number) => (
-                              <div key={idx} className="mb-1">
-                                {`${idx + 1}. `}
-                                {highlightText(usage.truckNumber, usageFilters.truck)}
-                                {`: ${usage.quantity}`}
-                              </div>
-                            ))}
+                            {/* Add toggle button if there are duplicates */}
+                            {entry.usedBy.some((usage: any, idx: number) => {
+                              const isDuplicate = entry.usedBy.findIndex(
+                                (u: any) => u.truckNumber === usage.truckNumber && u.quantity === usage.quantity
+                              ) !== idx;
+                              return isDuplicate;
+                            }) && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="mb-2 text-xs"
+                                onClick={() => setShowDuplicates(!showDuplicates)}
+                              >
+                                {showDuplicates ? "Hide Duplicates" : "Show Duplicates"}
+                              </Button>
+                            )}
+                            
+                            {entry.usedBy
+                              .filter((usage: any, idx: number) => {
+                                const isDuplicate = entry.usedBy.findIndex(
+                                  (u: any) => u.truckNumber === usage.truckNumber && u.quantity === usage.quantity
+                                ) !== idx;
+                                // Show all if showDuplicates is true, otherwise hide duplicates
+                                return showDuplicates ? true : !isDuplicate;
+                              })
+                              .map((usage: any, idx: number) => {
+                                const isEditing = editingUsage?.entryKey === entry.key && 
+                                editingUsage?.usageId === `${idx}`;
+                                const isDuplicate = entry.usedBy.filter(
+                                  (u: any) => u.truckNumber === usage.truckNumber && 
+                                             u.quantity === usage.quantity
+                                ).length > 1;
+                    
+                                return (
+                                  <div key={idx} className="mb-1 flex items-center gap-2">
+                                    {isEditing && isAdminMode ? (
+                                      <div className="flex items-center gap-2">
+                                        <Input
+                                          className="w-32"
+                                          value={editingUsage.truckNumber}
+                                          onChange={(e) => setEditingUsage({
+                                            ...editingUsage,
+                                            truckNumber: e.target.value
+                                          })}
+                                        />
+                                        <Input
+                                          type="number"
+                                          className="w-24"
+                                          value={editingUsage.quantity}
+                                          onChange={(e) => setEditingUsage({
+                                            ...editingUsage,
+                                            quantity: parseFloat(e.target.value)
+                                          })}
+                                        />
+                                        <Button
+                                          size="sm"
+                                          onClick={() => {
+                                            updateTruckUsage(
+                                              entry.key,
+                                              usage.truckNumber,
+                                              editingUsage.truckNumber,
+                                              editingUsage.quantity
+                                            );
+                                            setEditingUsage(null);
+                                          }}
+                                        >
+                                          Save
+                                        </Button>
+                                        <Button
+                                          size="sm"
+                                          variant="outline"
+                                          onClick={() => setEditingUsage(null)}
+                                        >
+                                          Cancel
+                                        </Button>
+                                      </div>
+                                    ) : (
+                                      <div className="flex items-center gap-2">
+                                        <span>
+                                          {`${idx + 1}. ${usage.truckNumber}: ${usage.quantity}`}
+                                        </span>
+                                        {isAdminMode && (
+                                          <>
+                                            <Button
+                                              size="sm"
+                                              variant="ghost"
+                                              onClick={() => setEditingUsage({
+                                                entryKey: entry.key,
+                                                usageId: `${idx}`,
+                                                truckNumber: usage.truckNumber,
+                                                quantity: usage.quantity
+                                              })}
+                                            >
+                                              Edit
+                                            </Button>
+                                            {isDuplicate && (
+                                              <Button
+                                                size="sm"
+                                                variant="ghost"
+                                                className="text-yellow-600 hover:text-yellow-700"
+                                                onClick={() => hideDuplicate(entry.number, usage)}
+                                              >
+                                                Hide Duplicate
+                                              </Button>
+                                            )}
+                                          </>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
                           </TableCell>
                         </TableRow>
                       ))}
@@ -2092,7 +2242,7 @@ const renderStockInfo = () => {
             {showScrollTop && (
               <motion.button
                 initial={{ opacity: 0, scale: 0.8 }}
-                animate={{ opacity: 1, scale: 1 }}
+                animate={{ opacity: 1, scale: 1 }} // Changed from scale: 8 to scale: 1
                 exit={{ opacity: 0, scale: 0.8 }}
                 onClick={scrollToTop}
                 className="fixed bottom-4 right-4 p-2 rounded-full bg-emerald-500/90 text-white shadow-lg hover:bg-emerald-600/90 transition-colors z-50"
@@ -2674,6 +2824,101 @@ const renderStockInfo = () => {
       );
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  // Add these helper functions before renderMainContent
+const findDuplicateUsages = (usages: TruckUsage[]) => {
+  const seen = new Set<string>();
+  const duplicates = new Set<string>();
+
+  usages.forEach(usage => {
+    const key = `${usage.truckNumber}-${usage.quantity}`;
+    if (seen.has(key)) {
+      duplicates.add(key);
+    }
+    seen.add(key);
+  });
+
+  return duplicates;
+};
+
+const hideDuplicate = (entryNumber: string, usage: TruckUsage) => {
+  setHiddenDuplicates(prev => {
+    const key = `${entryNumber}-${usage.truckNumber}-${usage.quantity}`;
+    const newSet = new Set(prev);
+    newSet.add(key);
+    return newSet;
+  });
+  
+  addNotification(
+    "Success",
+    "Duplicate usage entry hidden",
+    "success"
+  );
+};
+
+const updateTruckUsage = async (
+  entryKey: string, 
+  oldTruckNumber: string, 
+  newTruckNumber: string, 
+  newQuantity: number
+) => {
+  const db = getDatabase();
+  try {
+    // Get the old truck entry
+    const oldTruckRef = dbRef(db, `truckEntries/${oldTruckNumber.replace(/\//g, '-')}`);
+    const snapshot = await get(oldTruckRef);
+
+    if (snapshot.exists()) {
+      const updates: { [key: string]: any } = {};
+      
+      // Find and update the matching entry
+      snapshot.forEach((child) => {
+        const entry = child.val();
+        if (entry.entryNumber === entryKey) {
+          // Remove old entry
+          updates[`truckEntries/${oldTruckNumber.replace(/\//g, '-')}/${child.key}`] = null;
+          
+          // Create new entry
+          const newTruckKey = newTruckNumber.replace(/\//g, '-');
+          const newRef = push(dbRef(db, `truckEntries/${newTruckKey}`));
+          updates[`truckEntries/${newTruckKey}/${newRef.key}`] = {
+            entryNumber: entryKey,
+            subtractedQuantity: newQuantity,
+            timestamp: Date.now()
+          };
+        }
+      });
+
+      if (Object.keys(updates).length > 0) {
+        await update(dbRef(db), updates);
+        await getUsage(); // Refresh usage data
+        addNotification(
+          "Success",
+          "Usage entry updated successfully",
+          "success"
+        );
+      }
+    }
+  } catch (error) {
+    addNotification(
+      "Error",
+      "Failed to update usage entry",
+      "error"
+    );
+  }
+};
+
+  // Add this function before renderMainContent
+  const toggleAdminMode = () => {
+    setIsAdminMode(prev => !prev);
+    if (!isAdminMode) {
+      addNotification(
+        "Admin Mode Activated",
+        "Edit and remove functionality is now available",
+        "info"
+      );
     }
   };
 
