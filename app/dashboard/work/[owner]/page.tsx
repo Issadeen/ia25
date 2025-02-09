@@ -19,7 +19,7 @@ import type { WorkDetail, TruckPayment, OwnerBalance } from "@/types"
 import { motion, AnimatePresence } from 'framer-motion'
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { useSession } from "next-auth/react"
-import { ArrowLeft, Download, Receipt, Wallet2, PlusCircle, X, FileSpreadsheet, RefreshCw } from 'lucide-react' // Add X and FileSpreadsheet icon to imports
+import { ArrowLeft, Download, Receipt, Wallet2, PlusCircle, X, FileSpreadsheet, RefreshCw, MoreHorizontal } from 'lucide-react' // Add X and FileSpreadsheet icon to imports
 import { ThemeToggle } from "@/components/ui/molecules/theme-toggle" // Add ThemeToggle import
 import { Skeleton } from "@/components/ui/skeleton"
 import jsPDF from 'jspdf'
@@ -32,8 +32,11 @@ import {
   validatePaymentForm,
   updatePaymentStatuses,
   fixTruckPaymentStatus, // Add fixTruckPaymentStatus import
-  syncTruckPaymentStatus // Add syncTruckPaymentStatus import
+  syncTruckPaymentStatus, // Add syncTruckPaymentStatus import
+  PaymentCorrection, correctPaymentAllocation // Add PaymentCorrection and correctPaymentAllocation import
 } from "@/lib/payment-utils";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog" // Add AlertDialog imports
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu" // Add DropdownMenu imports
 
 // Add interfaces at the top
 interface TruckAllocation {
@@ -125,6 +128,16 @@ export default function OwnerDetailsPage() {
   // Add new state variables after the existing state declarations
   const [showPendingOrders, setShowPendingOrders] = useState(false);
   const [orderStatsClickCount, setOrderStatsClickCount] = useState(0);
+
+  // Add new state
+  const [showCorrectionDialog, setShowCorrectionDialog] = useState(false)
+  const [selectedCorrection, setSelectedCorrection] = useState<{
+    payment: any;
+    truck: WorkDetail;
+    allocation: any;
+  } | null>(null)
+  const [correctionAmount, setCorrectionAmount] = useState("")
+  const [correctionNote, setCorrectionNote] = useState("")
 
   interface PaymentFormData {
     amount: number;
@@ -814,7 +827,60 @@ export default function OwnerDetailsPage() {
       });
     }
   };
-  
+
+  // Add new handler
+  const handleCorrectionSubmit = async () => {
+    if (!selectedCorrection || !correctionAmount || !correctionNote) return;
+
+    try {
+      const correction: PaymentCorrection = {
+        paymentId: selectedCorrection.payment.id,
+        truckId: selectedCorrection.truck.id,
+        oldAmount: selectedCorrection.allocation.amount,
+        newAmount: parseFloat(correctionAmount),
+        timestamp: selectedCorrection.payment.timestamp,
+        note: correctionNote
+      };
+
+      await correctPaymentAllocation(database, owner, correction);
+
+      toast({
+        title: "Correction Applied",
+        description: "Payment allocation has been corrected",
+      });
+
+      setShowCorrectionDialog(false);
+      setSelectedCorrection(null);
+      setCorrectionAmount("");
+      setCorrectionNote("");
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to apply correction",
+        variant: "destructive"
+      });
+    }
+  };
+
+  // Add new context menu for payments table
+  const PaymentActions = ({ payment, truck, allocation }: { payment: any; truck: WorkDetail; allocation: any }) => (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="sm">
+          <MoreHorizontal className="h-4 w-4" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent>
+        <DropdownMenuItem onClick={() => {
+          setSelectedCorrection({ payment, truck, allocation });
+          setCorrectionAmount(allocation.amount.toString());
+          setShowCorrectionDialog(true);
+        }}>
+          Correct Allocation
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
 
   return (
     <div className="min-h-screen">
@@ -1173,11 +1239,15 @@ export default function OwnerDetailsPage() {
                           <th className="p-2 text-left">Date</th>
                           <th className="p-2 text-left">Allocated Trucks</th>
                           <th className="p-2 text-left">Note</th>
+                          <th className="p-2 text-left">Actions</th>
                         </tr>
                       </thead>
                       <tbody>
                         {ownerPayments.map((payment) => (
-                          <tr key={payment.id} className="border-t">
+                          <tr key={payment.id} className={cn(
+                            "border-t",
+                            payment.corrected && "bg-muted/50"
+                          )}>
                             <td className="p-2">{payment.id}</td>
                             <td className="p-2">${formatNumber(payment.amount)}</td>
                             <td className="p-2">{new Date(payment.timestamp).toLocaleString()}</td>
@@ -1185,8 +1255,20 @@ export default function OwnerDetailsPage() {
                               {payment.allocatedTrucks?.map((allocation: any) => {
                                 const truck = workDetails.find(t => t.id === allocation.truckId);
                                 return truck ? (
-                                  <div key={allocation.truckId} className="text-xs">
-                                    {truck.truck_number} (${formatNumber(allocation.amount)})
+                                  <div key={allocation.truckId} className="flex items-center justify-between">
+                                    <span className="text-xs">
+                                      {truck.truck_number} (${formatNumber(allocation.amount)})
+                                      {payment.corrected && (
+                                        <span className="ml-1 text-muted-foreground">
+                                          (Corrected)
+                                        </span>
+                                      )}
+                                    </span>
+                                    <PaymentActions 
+                                      payment={payment}
+                                      truck={truck}
+                                      allocation={allocation}
+                                    />
                                   </div>
                                 ) : null;
                               })}
@@ -1490,6 +1572,47 @@ export default function OwnerDetailsPage() {
             </Dialog>
           )}
         </AnimatePresence>
+        {/* Add correction dialog before closing main div */}
+        <AlertDialog open={showCorrectionDialog} onOpenChange={setShowCorrectionDialog}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Correct Payment Allocation</AlertDialogTitle>
+              <AlertDialogDescription>
+                Correcting payment for truck {selectedCorrection?.truck.truck_number}.
+                Original amount: ${formatNumber(selectedCorrection?.allocation.amount || 0)}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <Label>New Amount</Label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  value={correctionAmount}
+                  onChange={(e) => setCorrectionAmount(e.target.value)}
+                  placeholder="Enter corrected amount"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Correction Note</Label>
+                <Input
+                  value={correctionNote}
+                  onChange={(e) => setCorrectionNote(e.target.value)}
+                  placeholder="Explain reason for correction"
+                />
+              </div>
+            </div>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction 
+                onClick={handleCorrectionSubmit}
+                className="bg-red-500 hover:bg-red-600"
+              >
+                Apply Correction
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </main>
     </div>
   );

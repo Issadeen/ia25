@@ -1,6 +1,6 @@
 import { toFixed2 } from "./utils";
 import type { WorkDetail, TruckPayment } from "@/types";
-import { ref, push, DatabaseReference } from "firebase/database";
+import { ref, push, DatabaseReference, update, get } from "firebase/database";
 
 // Update existing interfaces
 export interface TruckAllocation {
@@ -12,6 +12,15 @@ export interface TruckAllocation {
 
 // Use Firebase Database type
 import { Database } from 'firebase/database';
+
+export interface PaymentCorrection {
+  paymentId: string;
+  truckId: string;
+  oldAmount: number;
+  newAmount: number;
+  timestamp: string;
+  note: string;
+}
 
 export const getTruckAllocations = (
   truck: WorkDetail,
@@ -175,3 +184,52 @@ export const fixTruckPaymentStatus = async (
 ) => {
   return syncTruckPaymentStatus(database, truck, truckPayments);
 };
+
+export async function correctPaymentAllocation(
+  database: any,
+  owner: string,
+  correction: PaymentCorrection
+) {
+  const updates: { [key: string]: any } = {};
+  const timestamp = new Date().toISOString();
+
+  // Update truck payment record
+  updates[`truckPayments/${correction.truckId}/${correction.paymentId}`] = {
+    amount: correction.newAmount,
+    timestamp: correction.timestamp,
+    correctedAt: timestamp,
+    note: correction.note
+  };
+
+  // Add correction record
+  const correctionRef = push(ref(database, `payment_corrections/${owner}`));
+  updates[`payment_corrections/${owner}/${correctionRef.key}`] = {
+    ...correction,
+    correctedAt: timestamp
+  };
+
+  // Update the original payment record to mark it as corrected
+  updates[`payments/${owner}/${correction.paymentId}/corrected`] = true;
+  updates[`payments/${owner}/${correction.paymentId}/correctedAt`] = timestamp;
+
+  // Add audit log
+  const auditRef = push(ref(database, `audit_logs/${owner}`));
+  updates[`audit_logs/${owner}/${auditRef.key}`] = {
+    type: 'payment_correction',
+    timestamp,
+    details: correction,
+    note: correction.note
+  };
+
+  await update(ref(database), updates);
+  return updates;
+}
+
+export async function getPaymentCorrections(
+  database: any,
+  owner: string
+): Promise<PaymentCorrection[]> {
+  const correctionsRef = ref(database, `payment_corrections/${owner}`);
+  const snapshot = await get(correctionsRef);
+  return snapshot.exists() ? Object.values(snapshot.val()) : [];
+}

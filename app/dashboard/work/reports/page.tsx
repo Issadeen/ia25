@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react"
 import { useSession } from "next-auth/react"
 import { useRouter } from "next/navigation"
-import { ArrowLeft, Download, Search, Plus, Loader2, ChevronLeft, ChevronRight, Edit, Check, X } from "lucide-react"
+import { ArrowLeft, Download, Search, Plus, Loader2, ChevronLeft, ChevronRight, Edit, Check, X, AlertCircle } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -19,12 +19,15 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useToast } from "@/components/ui/use-toast"
 import { ThemeToggle } from "@/components/ui/molecules/theme-toggle"
+import { Switch } from "@/components/ui/switch"
+import { ToastAction } from "@/components/ui/toast"
 
 // Update the interface to handle multiple entries
 interface AllocationReport {
   id?: string;  // Add this line
   truckNumber: string;
   entries: {
+    id?: string; // Add this line
     volume: string;
     entryUsed: string;
   }[];
@@ -86,6 +89,7 @@ export default function ReportsPage() {
   const [editFormData, setEditFormData] = useState<Partial<AllocationReport>>({})
   const [newReportId, setNewReportId] = useState<string | null>(null);
   const [isMigrating, setIsMigrating] = useState(false)
+  const [showDuplicates, setShowDuplicates] = useState(false);
 
   useEffect(() => {
     setMounted(true)
@@ -159,6 +163,22 @@ export default function ReportsPage() {
     }
   }, [monthClickCount])
 
+  // Add this after the edit mode activation effect
+  useEffect(() => {
+    if (showEditControls) {
+      toast({
+        title: "Edit Mode Active",
+        description: "You're in edit mode. Click here to exit.",
+        action: (
+          <ToastAction altText="Exit edit mode" onClick={() => setShowEditControls(false)}>
+            Exit
+          </ToastAction>
+        ),
+        duration: 0, // Keep showing until dismissed
+      })
+    }
+  }, [showEditControls])
+
   const nextMonth = () => {
     setCurrentDate(prev => {
       const next = new Date(prev)
@@ -175,21 +195,54 @@ export default function ReportsPage() {
     })
   }
 
-  const filteredReports = reports.filter(report => {
-    if (!report) return false;
-    
-    const reportDate = new Date(report.allocationDate)
-    const isInCurrentMonth = 
-      reportDate.getMonth() === currentDate.getMonth() && 
-      reportDate.getFullYear() === currentDate.getFullYear()
+  const removeDuplicates = (reports: AllocationReport[]) => {
+    const seen = new Map<string, AllocationReport>();
+    const duplicates = new Set<string>();
+  
+    reports.forEach(report => {
+      const key = `${report.loadedDate}-${report.truckNumber}`;
+      if (seen.has(key)) {
+        duplicates.add(key);
+        // Keep the entry with depot information if available
+        const existing = seen.get(key)!;
+        if (!existing.depot && report.depot) {
+          seen.set(key, report);
+        }
+      } else {
+        seen.set(key, report);
+      }
+    });
+  
+    return {
+      uniqueReports: Array.from(seen.values()),
+      duplicateCount: duplicates.size
+    };
+  };
 
-    return isInCurrentMonth && (
-      report.truckNumber?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      report.owner?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      report.product?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      report.entries?.some(entry => entry?.entryUsed?.toLowerCase().includes(searchTerm.toLowerCase()))
-    )
-  })
+  const filteredReports = (() => {
+    let filtered = reports.filter(report => {
+      if (!report) return false;
+      
+      const reportDate = new Date(report.allocationDate);
+      const isInCurrentMonth = 
+        reportDate.getMonth() === currentDate.getMonth() && 
+        reportDate.getFullYear() === currentDate.getFullYear();
+  
+      return isInCurrentMonth && (
+        report.truckNumber?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        report.owner?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        report.product?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        report.entries?.some(entry => entry?.entryUsed?.toLowerCase().includes(searchTerm.toLowerCase()))
+      );
+    });
+  
+    if (!showDuplicates) {
+      const { uniqueReports } = removeDuplicates(filtered);
+      filtered = uniqueReports;
+    }
+  
+    return filtered;
+  })();
 
   // Add this helper function at the top level of your component
   const formatDate = (dateString: string | undefined) => {
@@ -405,42 +458,55 @@ export default function ReportsPage() {
 
   // Add these functions to handle editing
   const handleEdit = (report: AllocationReport) => {
-    setEditingReport(report.truckNumber)
-    setEditFormData(report)
-  }
+    setEditingReport(report.truckNumber);
+    setEditFormData({
+      ...report,
+      entries: [...(report.entries || [])]  // Make sure to clone the entries array
+    });
+  };
 
   const handleSaveEdit = async (reportId: string) => {
     try {
-      const db = getDatabase()
-      const reportsRef = ref(db, 'allocation_reports')
-      const snapshot = await get(reportsRef)
+      const db = getDatabase();
+      const reportsRef = ref(db, 'allocation_reports');
+      const snapshot = await get(reportsRef);
       
       if (snapshot.exists()) {
-        // Find the report key
-        let reportKey: string | null = null
+        let reportKey: string | null = null;
         Object.entries(snapshot.val()).forEach(([key, value]: [string, any]) => {
           if (value.truckNumber === reportId) {
-            reportKey = key
+            reportKey = key;
           }
-        })
+        });
 
         if (reportKey) {
-          await update(ref(db, `allocation_reports/${reportKey}`), editFormData)
+          // Calculate new total volume
+          const totalVolume = editFormData.entries?.reduce(
+            (sum, entry) => sum + parseFloat(entry.volume || '0'),
+            0
+          ).toString();
+
+          // Include total volume in update
+          await update(ref(db, `allocation_reports/${reportKey}`), {
+            ...editFormData,
+            totalVolume
+          });
+
           toast({
             title: "Success",
             description: "Report updated successfully"
-          })
-          setEditingReport(null)
-          setEditFormData({})
+          });
+          setEditingReport(null);
+          setEditFormData({});
         }
       }
     } catch (error) {
       toast({
         title: "Error",
         description: "Failed to update report"
-      })
+      });
     }
-  }
+  };
 
   // Add this new function to handle data migration
   const migrateExistingData = async () => {
@@ -503,6 +569,42 @@ export default function ReportsPage() {
     }
   };
 
+  // Add these helper functions after your existing state declarations
+const handleEditEntryChange = (reportId: string, entryIndex: number, field: 'volume' | 'entryUsed', value: string) => {
+  setEditFormData(prev => {
+    const newEntries = [...(prev.entries || [])];
+    newEntries[entryIndex] = { ...newEntries[entryIndex], [field]: value };
+    return { ...prev, entries: newEntries };
+  });
+};
+
+const handleAddEditEntry = (reportId: string) => {
+  setEditFormData(prev => ({
+    ...prev,
+    entries: [...(prev.entries || []), { volume: '', entryUsed: '' }]
+  }));
+};
+
+const handleRemoveEditEntry = (reportId: string, entryIndex: number) => {
+  setEditFormData(prev => ({
+    ...prev,
+    entries: (prev.entries || []).filter((_, i) => i !== entryIndex)
+  }));
+};
+
+  // Add this function with your other handlers
+  const exitEditMode = () => {
+    setShowEditControls(false)
+    setEditingReport(null)
+    setEditFormData({})
+    setShowDuplicates(false)
+    setMonthClickCount(0)
+    toast({
+      title: "Edit Mode Deactivated",
+      description: "You've exited edit mode"
+    })
+  }
+
   if (!mounted) return null
 
   return (
@@ -552,6 +654,16 @@ export default function ReportsPage() {
                       <span className="hidden sm:inline">Update Missing Depots</span>
                     </>
                   )}
+                </Button>
+              )}
+              {showEditControls && (
+                <Button
+                  variant="outline"
+                  onClick={exitEditMode}
+                  className="gap-2 text-red-600 hover:text-red-700 hover:bg-red-50"
+                >
+                  <AlertCircle className="h-4 w-4" />
+                  <span className="hidden sm:inline">Exit Edit Mode</span>
                 </Button>
               )}
               <ThemeToggle />
@@ -621,6 +733,27 @@ export default function ReportsPage() {
               </Button>
             </div>
 
+            {/* Replace the duplicate controls section with this */}
+            {showEditControls && (
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="showDuplicates">Show Duplicates</Label>
+                  <Switch
+                    id="showDuplicates"
+                    checked={showDuplicates}
+                    onCheckedChange={setShowDuplicates}
+                  />
+                </div>
+                {!showDuplicates && (
+                  <p className="text-sm text-muted-foreground">
+                    {removeDuplicates(reports).duplicateCount > 0 
+                      ? `${removeDuplicates(reports).duplicateCount} duplicate entries hidden` 
+                      : 'No duplicates found'}
+                  </p>
+                )}
+              </div>
+            )}
+
             <Table>
   <TableHeader>
     <TableRow>
@@ -666,10 +799,56 @@ export default function ReportsPage() {
         )}</TableCell>
         <TableCell>{report?.product?.toUpperCase() || '-'}</TableCell>
         <TableCell>
-          <div className="space-y-1">{report?.entries?.map((entry, i) => (
-            <div key={i} className="text-sm">{entry?.entryUsed || '-'}: {entry?.volume || '0'}L</div>
-          ))}</div>
-        </TableCell>
+  {editingReport === report.truckNumber ? (
+    <div className="space-y-2">
+      {(editFormData.entries || report.entries)?.map((entry, i) => (
+        <div key={i} className="flex items-center gap-2">
+          <Input
+            className="w-24"
+            value={entry.entryUsed}
+            onChange={(e) => handleEditEntryChange(report.truckNumber, i, 'entryUsed', e.target.value)}
+            placeholder="Entry"
+          />
+          <Input
+            className="w-24"
+            type="number"
+            value={entry.volume}
+            onChange={(e) => handleEditEntryChange(report.truckNumber, i, 'volume', e.target.value)}
+            placeholder="Volume"
+          />
+          {(editFormData.entries || report.entries).length > 1 && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => handleRemoveEditEntry(report.truckNumber, i)}
+              className="h-8 w-8 p-0"
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          )}
+        </div>
+      ))}
+      {(editFormData.entries || report.entries).length < 3 && (
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => handleAddEditEntry(report.truckNumber)}
+          className="w-full mt-2"
+        >
+          <Plus className="h-4 w-4 mr-2" /> Add Entry
+        </Button>
+      )}
+    </div>
+  ) : (
+    <div className="space-y-1">
+      {report?.entries?.map((entry, i) => (
+        <div key={i} className="text-sm">
+          {entry?.entryUsed || '-'}: {entry?.volume || '0'}L
+        </div>
+      ))}
+    </div>
+  )}
+</TableCell>
         <TableCell>{report?.totalVolume ? `${report.totalVolume}L` : '-'}</TableCell>
         <TableCell>{report?.at20 || '-'}</TableCell>
         <TableCell>{report?.entryDestination?.toUpperCase() || '-'}</TableCell>
