@@ -2150,7 +2150,7 @@ const getActiveOwnerSummary = () => {
                                           <MoreHorizontal className="h-4 w-4" />
                                         </Button>
                                       </DropdownMenuTrigger>
-                                      <DropdownMenuContent align="end" className="w-[200px]">
+                                      <DropdownMenuContent align="end" className="w-[200px] bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 shadow-lg">
                                         <DropdownMenuLabel>Actions</DropdownMenuLabel>
                                         {!detail.loaded && (
                                           <DropdownMenuItem
