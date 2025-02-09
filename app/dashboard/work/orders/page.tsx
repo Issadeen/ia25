@@ -1358,11 +1358,6 @@ const handleProfileClick = () => {
     const newCount = prev + 1;
     if (newCount === 3) {
       setShowUnloadedGP(true);
-      toast({
-        title: "Developer Mode Enabled",
-        description: "You can now generate gate passes for unloaded trucks",
-        duration: 3000,
-      });
       return 0; // Reset count
     }
     return newCount;
@@ -2185,7 +2180,7 @@ const getActiveOwnerSummary = () => {
                                         )
                                         }
                                         
-                                        {detail.loaded && (
+                                        {detail.loaded || showUnloadedGP && (
                                           <>
                                             <DropdownMenuItem
                                               onClick={() => handleSyncStatus(detail)}
