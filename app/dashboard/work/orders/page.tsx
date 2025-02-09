@@ -1669,10 +1669,30 @@ const getActiveOwnerSummary = () => {
   
   // Add these functions inside the component but before the render method
   const handleEditChange = (id: string, field: keyof WorkDetail, value: string) => {
-    setEditableRows(prev => ({
-      ...prev,
-      [id]: { ...prev[id], [field]: value }
-    }));
+    setEditableRows(prev => {
+      const currentRow = prev[id] || workDetails.find(d => d.id === id);
+      if (!currentRow) return prev;
+
+      // If changing truck number, prepare to update previous_trucks
+      if (field === 'truck_number') {
+        return {
+          ...prev,
+          [id]: {
+            ...currentRow,
+            [field]: value,
+            previous_trucks: currentRow.truck_number 
+              ? [...(currentRow.previous_trucks || []), currentRow.truck_number]
+              : currentRow.previous_trucks
+          }
+        };
+      }
+
+      // For other fields, just update normally
+      return {
+        ...prev,
+        [id]: { ...currentRow, [field]: value }
+      };
+    });
   };
 
   const startEditing = (detail: WorkDetail) => {
@@ -1823,7 +1843,7 @@ const getActiveOwnerSummary = () => {
             </Button>
           </div>
 
-          {/* Conditionally Rendered Filter Controls */}
+          {/* Conditionally Rendered Filter Controls */} 
           <AnimatePresence>
             {showFilters && (
               <motion.div
