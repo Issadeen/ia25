@@ -33,6 +33,7 @@ import {
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import * as z from "zod";
+import { useProfileImage } from '@/hooks/useProfileImage';
 
 // Simplify the form schema
 const truckFormSchema = z.object({
@@ -59,7 +60,7 @@ export default function EditTruckPage({ params }: { params: Promise<{ id: string
   const [isSaving, setIsSaving] = useState(false);
   const router = useRouter();
   const { data: session } = useSession(); // Add this hook
-  const [profilePicUrl, setProfilePicUrl] = useState<string | null>(null);
+  const profilePicUrl = useProfileImage();
 
   const form = useForm<TruckFormData>({
     resolver: zodResolver(truckFormSchema),
@@ -150,38 +151,6 @@ export default function EditTruckPage({ params }: { params: Promise<{ id: string
       mounted = false;
     };
   }, [id, router]); // Remove form from dependencies
-
-  // Add profile picture fetch effect
-  useEffect(() => {
-    const fetchProfilePic = async () => {
-      const storage = getFirebaseStorage();
-      const userEmail = session?.user?.email;
-
-      if (!storage || !userEmail) return;
-
-      try {
-        const imageRef = storageRef(storage, `profile-pics/${userEmail}.jpg`);
-        const auth = getFirebaseAuth();
-        const currentUser = auth ? (auth.currentUser as FirebaseAuthUser | null) : null;
-
-        if (!currentUser) return;
-
-        if (currentUser.photoURL) {
-          setProfilePicUrl(currentUser.photoURL);
-        } else if (currentUser.email) {
-          const fileName = `profile-pics/${currentUser.email.replace(/[.@]/g, "_")}.jpg`;
-          const imageRef = storageRef(storage, fileName);
-          const url = await getDownloadURL(imageRef);
-          setProfilePicUrl(url);
-        }
-      } catch (error) {
-        console.error("Error fetching profile picture:", error);
-        setProfilePicUrl(session?.user?.image || null);
-      }
-    };
-
-    fetchProfilePic();
-  }, [session]);
 
   const onSubmit = async (data: TruckFormData) => {
     setIsSaving(true);

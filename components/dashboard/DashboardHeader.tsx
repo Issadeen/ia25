@@ -64,6 +64,16 @@ export function DashboardHeader({ avatarSrc, isLoadingProfile, onEditProfilePic 
             whileTap={{ scale: 0.9 }}
             onClick={onEditProfilePic}
             className="cursor-pointer"
+            animate={{
+              scale: [1, 1.01, 1],
+            }}
+            transition={{
+              duration: 6,
+              ease: [0.4, 0, 0.4, 1], // Custom easing for more natural movement
+              repeat: Infinity,
+              repeatType: "reverse",
+              repeatDelay: 0.5 // Add a small pause between cycles
+            }}
           >
             <Avatar>
               <AvatarImage 

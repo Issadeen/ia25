@@ -17,6 +17,7 @@ import { updateProfile, User as FirebaseAuthUser } from "firebase/auth";
 import { getFirebaseAuth } from "@/lib/firebase";
 import { useRouter } from 'next/navigation';
 import { WorkIdDialog } from '@/components/dashboard/WorkIdDialog';
+import { useProfileImage } from '@/hooks/useProfileImage';
 
 interface TruckData {
   id: string;
@@ -71,63 +72,16 @@ const formatCompartments = (compartments: string[] | undefined | null): string =
 export default function TrucksPage() {
   const { theme, setTheme } = useTheme();
   const { data: session } = useSession();
+  const profilePicUrl = useProfileImage();
   const [trucks, setTrucks] = useState<TruckData[]>([]);
   const [filteredTrucks, setFilteredTrucks] = useState<TruckData[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
-  const [profilePicUrl, setProfilePicUrl] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showScrollTop, setShowScrollTop] = useState(false);
   const [isVerifyingWorkId, setIsVerifyingWorkId] = useState(false);
   const [selectedTruckId, setSelectedTruckId] = useState<string | null>(null);
   const router = useRouter();
-
-  useEffect(() => {
-    const fetchProfilePic = async () => {
-      const storage = getFirebaseStorage();
-      const userEmail = session?.user?.email;
-
-      if (!storage || !userEmail) return;
-
-      try {
-        const imageRef = storageRef(storage, `profile-pics/${userEmail}.jpg`);
-        const auth = getFirebaseAuth();
-        const currentUser = auth ? (auth.currentUser as FirebaseAuthUser | null) : null;
-
-        if (!currentUser) return;
-
-        if (currentUser.photoURL) {
-          setProfilePicUrl(currentUser.photoURL);
-        } else if (currentUser.email) {
-          const fileName = `profile-pics/${currentUser.email.replace(
-            /[.@]/g,
-            "_"
-          )}.jpg`;
-          if (!storage) {
-            throw new Error('Firebase storage is not initialized');
-          }
-          const imageRef = storageRef(storage, fileName);
-
-          try {
-            const url = await getDownloadURL(imageRef);
-            setProfilePicUrl(url);
-            await updateProfile(currentUser, { photoURL: url });
-          } catch (error) {
-            console.log("No existing profile picture found");
-            setProfilePicUrl(session?.user?.image || null);
-          }
-        }
-      } catch (error) {
-        console.error("Error fetching profile picture:", error);
-        setProfilePicUrl(session?.user?.image || null);
-      }
-    };
-
-    const auth = getFirebaseAuth();
-    if (auth?.currentUser) {
-      fetchProfilePic();
-    }
-  }, [getFirebaseAuth()?.currentUser, session]);
 
   useEffect(() => {
     if (!searchQuery.trim()) {

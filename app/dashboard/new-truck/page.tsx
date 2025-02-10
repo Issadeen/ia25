@@ -1,5 +1,6 @@
 "use client";
 
+import { useProfileImage } from "@/hooks/useProfileImage";
 import { useEffect, useState } from "react";
 import { getDatabase, ref, push, set } from "firebase/database";
 import { ref as storageRef, getDownloadURL } from "firebase/storage";
@@ -65,7 +66,7 @@ export default function NewTruckPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showAddComps, setShowAddComps] = useState(false);
   const [extraComps, setExtraComps] = useState(0);
-  const [profilePicUrl, setProfilePicUrl] = useState<string | null>(null);
+  const profilePicUrl = useProfileImage();
 
   const form = useForm<FormData>({
     resolver: zodResolver(formSchema),
@@ -78,38 +79,6 @@ export default function NewTruckPage() {
       pms_comps: Array(3).fill("0"),
     },
   });
-
-  // Profile pic fetch effect (copy from trucks page)
-  useEffect(() => {
-    const fetchProfilePic = async () => {
-      const storage = getFirebaseStorage();
-      const userEmail = session?.user?.email;
-
-      if (!storage || !userEmail) return;
-
-      try {
-        const imageRef = storageRef(storage, `profile-pics/${userEmail}.jpg`);
-        const auth = getFirebaseAuth();
-        const currentUser = auth ? (auth.currentUser as FirebaseUser | null) : null;
-
-        if (!currentUser) return;
-
-        if (currentUser.photoURL) {
-          setProfilePicUrl(currentUser.photoURL);
-        } else if (currentUser.email) {
-          const fileName = `profile-pics/${currentUser.email.replace(/[.@]/g, "_")}.jpg`;
-          const imageRef = storageRef(storage, fileName);
-          const url = await getDownloadURL(imageRef);
-          setProfilePicUrl(url);
-        }
-      } catch (error) {
-        console.error("Error fetching profile picture:", error);
-        setProfilePicUrl(session?.user?.image || null);
-      }
-    };
-
-    fetchProfilePic();
-  }, [session]);
 
   const onSubmit = async (data: FormData) => {
     setIsSubmitting(true);
