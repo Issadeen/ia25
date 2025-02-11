@@ -1208,8 +1208,8 @@ const calculateOwnerTotals = (owner: string | null) => {
   // Modify getFilteredWorkDetails to include the completed filter
 const getFilteredWorkDetails = () => {
   return getSortedWorkDetails().filter(detail => {
-    // First check if we should show this completed order
-    if (!showCompleted && detail.released) {
+    // Hide completed orders and released orders unless showCompleted is true
+    if (!showCompleted && (detail.released || detail.status === "completed")) {
       return false;
     }
 
@@ -2184,17 +2184,19 @@ const getActiveOwnerSummary = () => {
                                               Sync Payment Status
                                             </DropdownMenuItem>
 
-                                            {/* Gate Pass Generation */}
-                                            {!detail.gatePassGenerated ? (
-                                              <DropdownMenuItem onClick={() => handleGenerateGatePass(detail)}>
-                                                <FileText className="mr-2 h-4 w-4" />
-                                                Generate Gate Pass
-                                              </DropdownMenuItem>
-                                            ) : (
-                                              <DropdownMenuItem onClick={() => handleGenerateGatePass(detail)}>
-                                                <FileText className="mr-2 h-4 w-4" />
-                                                Regenerate Gate Pass
-                                              </DropdownMenuItem>
+                                            {/* Gate Pass Generation - Only show if paid */}
+                                            {detail.paid && (
+                                              !detail.gatePassGenerated ? (
+                                                <DropdownMenuItem onClick={() => handleGenerateGatePass(detail)}>
+                                                  <FileText className="mr-2 h-4 w-4" />
+                                                  Generate Gate Pass
+                                                </DropdownMenuItem>
+                                              ) : (
+                                                <DropdownMenuItem onClick={() => handleGenerateGatePass(detail)}>
+                                                  <FileText className="mr-2 h-4 w-4" />
+                                                  Regenerate Gate Pass
+                                                </DropdownMenuItem>
+                                              )
                                             )}
                                           </>
                                         )}
