@@ -48,6 +48,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { useProfileImage } from '@/hooks/useProfileImage'
 
 // Add new interfaces
 interface Payment {
@@ -240,7 +241,6 @@ export default function WorkManagementPage() {
   })
   const [ownerSummary, setOwnerSummary] = useState<OwnerSummary>({})
   const [editingTruckId, setEditingTruckId] = useState<string | null>(null)
-  const [lastUploadedImage, setLastUploadedImage] = useState<string | null>(null)
   const [ownerFilter, setOwnerFilter] = useState("")
   const [productFilter, setProductFilter] = useState("ALL")
   const [statusFilter, setStatusFilter] = useState("ALL")
@@ -1120,22 +1120,7 @@ const calculateOwnerTotals = (owner: string | null) => {
     return () => unsubscribe()
   }, [])
 
-  useEffect(() => {
-    const fetchImageUrl = async () => {
-      if (!session?.user?.email || session?.user?.image) return
-  
-      try {
-        const filename = `${session.user.email}.jpg`
-        const imageRef = storageRef(storage, `profile-pics/${filename}`)
-        const url = await getDownloadURL(imageRef)
-        setLastUploadedImage(url)
-      } catch (error) {
-        console.log('Profile image not found:', error)
-      }
-    }
-  
-    fetchImageUrl()
-  }, [session?.user])
+  const profilePicUrl = useProfileImage()
 
   // Add useEffect to fetch truck payments
   useEffect(() => {
@@ -1822,7 +1807,7 @@ const getActiveOwnerSummary = () => {
                   onClick={handleProfileClick}
                 >
                   <AvatarImage 
-                    src={session?.user?.image || lastUploadedImage || ''} 
+                    src={session?.user?.image || profilePicUrl || ''} 
                     alt="Profile"
                   />
                   <AvatarFallback className="text-xs">
