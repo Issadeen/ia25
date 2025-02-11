@@ -2152,53 +2152,62 @@ const getActiveOwnerSummary = () => {
                                       </DropdownMenuTrigger>
                                       <DropdownMenuContent align="end" className="w-[200px] bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 shadow-lg">
                                         <DropdownMenuLabel>Actions</DropdownMenuLabel>
+                                        
+                                        {/* Loading Action */}
                                         {!detail.loaded && (
-                                          <DropdownMenuItem
-                                            onClick={() => handleLoadedStatus(detail.id)}
-                                          >
+                                          <DropdownMenuItem onClick={() => handleLoadedStatus(detail.id)}>
                                             <Loader2 className="mr-2 h-4 w-4" />
                                             Mark as Loaded
                                           </DropdownMenuItem>
-                                        )
-                                        }
+                                        )}
                                         
-                                        {detail.loaded && !detail.paid && (
+                                        {/* Loaded Truck Actions */}
+                                        {detail.loaded && (
                                           <>
-                                            <DropdownMenuItem
-                                              onClick={() => handlePaidStatus(detail.id)}
-                                            >
-                                              <Receipt className="mr-2 h-4 w-4" />
-                                              Mark as Paid
-                                            </DropdownMenuItem>
-                                            <DropdownMenuItem
-                                              onClick={() => handleForceRelease(detail)}
-                                            >
-                                              <Triangle className="mr-2 h-4 w-4" />
-                                              Force Release
-                                            </DropdownMenuItem>
-                                          </>
-                                        )
-                                        }
-                                        
-                                        {detail.loaded || showUnloadedGP && (
-                                          <>
-                                            <DropdownMenuItem
-                                              onClick={() => handleSyncStatus(detail)}
-                                            >
+                                            {/* Payment Actions */}
+                                            {!detail.paid && (
+                                              <>
+                                                <DropdownMenuItem onClick={() => handlePaidStatus(detail.id)}>
+                                                  <Receipt className="mr-2 h-4 w-4" />
+                                                  Mark as Paid
+                                                </DropdownMenuItem>
+                                                <DropdownMenuItem onClick={() => handleForceRelease(detail)}>
+                                                  <Triangle className="mr-2 h-4 w-4" />
+                                                  Force Release
+                                                </DropdownMenuItem>
+                                              </>
+                                            )}
+                                            
+                                            {/* Sync Payment Status */}
+                                            <DropdownMenuItem onClick={() => handleSyncStatus(detail)}>
                                               <RefreshCw className="mr-2 h-4 w-4" />
                                               Sync Payment Status
                                             </DropdownMenuItem>
-                                            <DropdownMenuItem
-                                              onClick={() => handleGenerateGatePass(detail)}
-                                              disabled={!detail.loaded && !showUnloadedGP} // Allow unloaded gate pass when showUnloadedGP is true
-                                            >
-                                              <FileText className="mr-2 h-4 w-4" />
-                                              {showUnloadedGP || detail.loaded ? 'Generate Gate Pass' : 'Loaded Gate Pass Only'}
-                                            </DropdownMenuItem>
+
+                                            {/* Gate Pass Generation */}
+                                            {!detail.gatePassGenerated ? (
+                                              <DropdownMenuItem onClick={() => handleGenerateGatePass(detail)}>
+                                                <FileText className="mr-2 h-4 w-4" />
+                                                Generate Gate Pass
+                                              </DropdownMenuItem>
+                                            ) : (
+                                              <DropdownMenuItem onClick={() => handleGenerateGatePass(detail)}>
+                                                <FileText className="mr-2 h-4 w-4" />
+                                                Regenerate Gate Pass
+                                              </DropdownMenuItem>
+                                            )}
                                           </>
-                                        )
-                                        }
+                                        )}
                                         
+                                        {/* Unloaded Gate Pass (Dev Mode) */}
+                                        {!detail.loaded && showUnloadedGP && (
+                                          <DropdownMenuItem onClick={() => handleGenerateGatePass(detail)}>
+                                            <FileText className="mr-2 h-4 w-4" />
+                                            Generate Unloaded Gate Pass
+                                          </DropdownMenuItem>
+                                        )}
+
+                                        {/* Truck History */}
                                         {detail.previous_trucks && detail.previous_trucks.length > 0 && (
                                           <DropdownMenuItem
                                             onClick={() => {
@@ -2209,8 +2218,7 @@ const getActiveOwnerSummary = () => {
                                             <History className="mr-2 h-4 w-4" />
                                             View History
                                           </DropdownMenuItem>
-                                        )
-                                        }
+                                        )}
                                         
                                         <DropdownMenuSeparator />
                                         
