@@ -19,7 +19,7 @@ import type { WorkDetail, TruckPayment, OwnerBalance } from "@/types"
 import { motion, AnimatePresence } from 'framer-motion'
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { useSession } from "next-auth/react"
-import { ArrowLeft, Download, Wallet2, PlusCircle, X, FileSpreadsheet, RefreshCw, MoreHorizontal } from 'lucide-react' // Add X and FileSpreadsheet icon to imports
+import { ArrowLeft, Download, Wallet2, PlusCircle, X, FileSpreadsheet, RefreshCw, MoreHorizontal, Search, ChevronDown, ChevronUp } from 'lucide-react' // Add X and FileSpreadsheet icon to imports
 import { ThemeToggle } from "@/components/ui/molecules/theme-toggle" // Add ThemeToggle import
 import { Skeleton } from "@/components/ui/skeleton"
 import jsPDF from 'jspdf'
@@ -39,6 +39,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu" // Add DropdownMenu imports
 import { AlertCircle, Receipt, ReceiptText, Shield } from 'lucide-react' // Add new imports
 import { useProfileImage } from '@/hooks/useProfileImage'
+import React from 'react'
 
 // Add interfaces at the top
 interface TruckAllocation {
@@ -72,6 +73,27 @@ interface Prepayment extends BalanceUsage {
   amount: number;
   timestamp: string;
   note?: string;
+}
+
+// Add new interface for truck payment history
+interface TruckPaymentHistory {
+  paymentId: string;
+  timestamp: string;
+  amount: number;
+  note: string;
+  truckNumber: string;
+}
+
+// Add new type for grouped payments
+interface GroupedTruckPayment {
+  truckNumber: string;
+  total: number;
+  payments: {
+    date: Date;
+    paymentId: string;
+    amount: number;
+    note: string;
+  }[];
 }
 
 // Add these animation variants before the component
@@ -166,6 +188,14 @@ export default function OwnerDetailsPage() {
     truck: WorkDetail;
     allocation: any;
   } | null>(null);
+
+  // Add new state for truck payment tracking
+  const [selectedTruck, setSelectedTruck] = useState<string | null>(null);
+  const [truckFilter, setTruckFilter] = useState("");
+  const [truckPaymentHistory, setTruckPaymentHistory] = useState<TruckPaymentHistory[]>([]);
+
+  // Add state for expanded rows
+  const [expandedTrucks, setExpandedTrucks] = useState<Set<string>>(new Set());
 
   // Fetch data when component mounts
   useEffect(() => {
@@ -941,6 +971,84 @@ export default function OwnerDetailsPage() {
     </DropdownMenu>
   );
 
+  // Add new function to get truck payment history
+  const getTruckPaymentHistory = (truckId: string) => {
+    const history: TruckPaymentHistory[] = [];
+    
+    ownerPayments.forEach(payment => {
+      payment.allocatedTrucks?.forEach((allocation: any) => {
+        if (allocation.truckId === truckId) {
+          const truck = workDetails.find(t => t.id === truckId);
+          history.push({
+            paymentId: payment.id,
+            timestamp: payment.timestamp,
+            amount: allocation.amount,
+            note: payment.note || '',
+            truckNumber: truck?.truck_number || ''
+          });
+        }
+      });
+    });
+    
+    // Sort by date (oldest first)
+    return history.sort((a, b) => 
+      new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+    );
+  };
+
+  // Add new function to filter trucks
+  const getFilteredTrucks = () => {
+    return workDetails
+      .filter(truck => 
+        truck.loaded && 
+        truck.truck_number.toLowerCase().includes(truckFilter.toLowerCase())
+      )
+      .sort((a, b) => a.truck_number.localeCompare(b.truck_number));
+  };
+
+  // Add function to group payments by truck
+  const groupPaymentsByTruck = () => {
+    const grouped: { [key: string]: GroupedTruckPayment } = {};
+    
+    ownerPayments
+      .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+      .forEach(payment => {
+        payment.allocatedTrucks?.forEach((allocation: any) => {
+          const truck = workDetails.find(t => t.id === allocation.truckId);
+          if (!truck || !truck.truck_number.toLowerCase().includes(truckFilter.toLowerCase())) return;
+          
+          if (!grouped[truck.truck_number]) {
+            grouped[truck.truck_number] = {
+              truckNumber: truck.truck_number,
+              total: 0,
+              payments: []
+            };
+          }
+          
+          grouped[truck.truck_number].total += allocation.amount;
+          grouped[truck.truck_number].payments.push({
+            date: new Date(payment.timestamp),
+            paymentId: payment.id,
+            amount: allocation.amount,
+            note: payment.note || '—'
+          });
+        });
+      });
+      
+    return Object.values(grouped);
+  };
+
+  // Add toggle function for rows
+  const toggleTruckExpand = (truckNumber: string) => {
+    const newExpanded = new Set(expandedTrucks);
+    if (newExpanded.has(truckNumber)) {
+      newExpanded.delete(truckNumber);
+    } else {
+      newExpanded.add(truckNumber);
+    }
+    setExpandedTrucks(newExpanded);
+  };
+
   const profilePicUrl = useProfileImage()
 
   return (
@@ -1369,6 +1477,110 @@ export default function OwnerDetailsPage() {
                       ))}
                     </tbody>
                   </table>
+                </div>
+              </Card>
+            </motion.div>
+
+            {/* Add this new section before the closing main tag */}
+            <motion.div variants={slideUp}>
+              <Card className="p-3 sm:p-6">
+                <div className="flex justify-between items-center mb-4">
+                  <h2 className="text-lg sm:text-xl font-semibold">Truck Payment Tracker</h2>
+                  <div className="relative w-64">
+                    <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      placeholder="Search truck number..."
+                      value={truckFilter}
+                      onChange={(e) => setTruckFilter(e.target.value)}
+                      className="pl-8"
+                    />
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full border-collapse">
+                    <thead>
+                      <tr className="bg-muted/50">
+                        <th className="border p-2 text-left font-medium">Truck Number</th>
+                        <th className="border p-2 text-left font-medium">Date</th>
+                        <th className="border p-2 text-left font-medium">Payment ID</th>
+                        <th className="border p-2 text-right font-medium">Amount</th>
+                        <th className="border p-2 text-left font-medium">Note</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {workDetails
+                        .filter(truck => truck.loaded && truck.truck_number.toLowerCase().includes(truckFilter.toLowerCase()))
+                        .sort((a, b) => a.truck_number.localeCompare(b.truck_number))
+                        .map(truck => {
+                          const payments = ownerPayments
+                            .flatMap(payment => 
+                              payment.allocatedTrucks
+                                ?.filter((allocation: any) => allocation.truckId === truck.id)
+                                .map((allocation: any) => ({
+                                  date: new Date(payment.timestamp),
+                                  paymentId: payment.id,
+                                  amount: allocation.amount,
+                                  note: payment.note || '—'
+                                }))
+                            )
+                            .filter(Boolean)
+                            .sort((a, b) => b.date.getTime() - a.date.getTime()); // Changed sort order here
+
+                          const total = payments.reduce((sum, p) => sum + p.amount, 0);
+
+                          return (
+                            <React.Fragment key={truck.id}>
+                              <tr className="bg-muted/10 font-medium">
+                                <td className="border p-2" rowSpan={payments.length + 1}>
+                                  {truck.truck_number}
+                                </td>
+                                <td className="border p-2" colSpan={2}>
+                                  Total Payments
+                                </td>
+                                <td className="border p-2 text-right text-green-600">
+                                  ${formatNumber(total)}
+                                </td>
+                                <td className="border p-2"></td>
+                              </tr>
+                              {payments.reverse().map((payment, idx) => ( // Added reverse() here
+                                <tr 
+                                  key={`${payment.paymentId}-${idx}`}
+                                  className={idx % 2 === 0 ? 'bg-background' : 'bg-muted/5'}
+                                >
+                                  <td className="border p-2 text-sm">
+                                    {payment.date.toLocaleDateString()}
+                                  </td>
+                                  <td className="border p-2 text-sm text-muted-foreground">
+                                    {payment.paymentId.slice(-6)}
+                                  </td>
+                                  <td className="border p-2 text-right text-sm">
+                                    ${formatNumber(payment.amount)}
+                                  </td>
+                                  <td className="border p-2 text-sm text-muted-foreground">
+                                    {payment.note}
+                                  </td>
+                                </tr>
+                              ))}
+                              {payments.length === 0 && (
+                                <tr>
+                                  <td colSpan={4} className="border p-2 text-center text-muted-foreground">
+                                    No payments recorded
+                                  </td>
+                                </tr>
+                              )}
+                            </React.Fragment>
+                          );
+                        })}
+                    </tbody>
+                  </table>
+                  {workDetails.filter(t => 
+                    t.loaded && t.truck_number.toLowerCase().includes(truckFilter.toLowerCase())
+                  ).length === 0 && (
+                    <div className="text-center py-4 text-muted-foreground">
+                      No trucks found matching the search criteria
+                    </div>
+                  )}
                 </div>
               </Card>
             </motion.div>
