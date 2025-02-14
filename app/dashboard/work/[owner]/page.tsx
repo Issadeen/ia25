@@ -627,89 +627,181 @@ export default function OwnerDetailsPage() {
 
   // Add this new function after handleDownloadPDF
   const handleDownloadTruckPaymentsPDF = () => {
-    // Create PDF in landscape orientation
+    // Create PDF in landscape orientation with bleed
     const doc = new jsPDF({
       orientation: "landscape",
       unit: "mm",
       format: "a4",
-    })
+      putOnlyUsedFonts: true,
+    });
 
-    const pageWidth = doc.internal.pageSize.getWidth()
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const margin = 15; // Increased margin for better spacing
+
+    // Function to add rounded rectangle
+    const addRoundedRect = (x: number, y: number, width: number, height: number, radius: number, fillColor: any) => {
+      doc.setFillColor(fillColor[0], fillColor[1], fillColor[2]);
+      doc.roundedRect(x, y, width, height, radius, radius, 'F');
+    };
+
+    // Modern header with gradient effect and shadow
+    addRoundedRect(0, 0, pageWidth, 45, 0, [41, 128, 185]); // Primary blue
+
+    // Add company logo space (you can add your logo here)
+    doc.setFillColor(255, 255, 255);
+    doc.circle(25, 22, 10, 'F');
+
+    // Add header text with shadow effect
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(28);
+    doc.setTextColor(255, 255, 255);
+    doc.text(`${owner}`, pageWidth / 2, 25, { align: "center" });
+    doc.setFontSize(16);
+    doc.text("Truck Payment Tracker", pageWidth / 2, 38, { align: "center" });
+
+    let startY = 60;
+
+    // Get filtered and sorted trucks (same order as table)
     const filteredTrucks = workDetails
-      .filter((truck) => truck.loaded && truck.truck_number.toLowerCase().includes(truckFilter.toLowerCase()))
-      .sort((a, b) => a.truck_number.localeCompare(b.truck_number))
+      .filter(truck => truck.loaded && truck.truck_number.toLowerCase().includes(truckFilter.toLowerCase()))
+      .sort((a, b) => (paymentOrder[a.id] || 0) - (paymentOrder[b.id] || 0));
 
-    // Header
-    doc.setFontSize(16)
-    doc.text(`Truck Payment Tracker - ${owner}`, pageWidth / 2, 15, { align: "center" })
+    // Add summary section with card styling
+    const totalPayments = filteredTrucks.reduce((sum, truck) => {
+      const truckPayments = ownerPayments
+        .flatMap(p => p.allocatedTrucks?.filter((a: any) => a.truckId === truck.id))
+        .reduce((sum, a: any) => sum + (a?.amount || 0), 0);
+      return sum + truckPayments;
+    }, 0);
 
-    let startY = 25
+    addRoundedRect(margin, startY - 5, pageWidth - (margin * 2), 25, 5, [247, 250, 252]); // Light gray background
+    doc.setTextColor(44, 62, 80);
+    doc.setFontSize(14);
+    doc.text("Summary", margin + 10, startY + 8);
+    doc.setFont("helvetica", "normal");
+    doc.text(`Total Payments: $${formatNumber(totalPayments)}`, pageWidth - margin - 10, startY + 8, { align: 'right' });
 
-    filteredTrucks.forEach((truck) => {
+    startY += 35;
+
+    // Process each truck
+    filteredTrucks.forEach((truck, index) => {
       const payments = ownerPayments
-        .flatMap((payment) =>
+        .flatMap(payment => 
           payment.allocatedTrucks
             ?.filter((allocation: any) => allocation.truckId === truck.id)
             .map((allocation: any) => ({
               date: new Date(payment.timestamp),
               paymentId: payment.id,
               amount: allocation.amount,
-              note: payment.note || "—",
-              timestamp: payment.timestamp,
-            })),
+              note: payment.note || '—',
+              timestamp: payment.timestamp
+            }))
         )
         .filter(Boolean)
-        .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+        .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
 
-      const total = payments.reduce((sum, p) => sum + p.amount, 0)
+      const total = payments.reduce((sum, p) => sum + p.amount, 0);
 
-      // Check if we need a new page
-      if (startY > doc.internal.pageSize.getHeight() - 40) {
-        doc.addPage()
-        startY = 15
+      // Add new page if needed
+      if (startY > pageHeight - 80) {
+        doc.addPage();
+        startY = 20;
       }
 
-      // Truck Number and Total Payments
-      doc.setFontSize(12)
-      doc.text(`${truck.truck_number} - Total Payments: $${formatNumber(total)}`, pageWidth / 2, startY, {
-        align: "center",
-      })
-      startY += 8
+      // Add truck header with modern card-like styling
+      addRoundedRect(margin, startY - 5, pageWidth - (margin * 2), 20, 5, [236, 240, 241]); // Very light gray
+      doc.setTextColor(52, 73, 94);
+      doc.setFontSize(14);
+      doc.setFont("helvetica", "bold");
+      doc.text(`${truck.truck_number}`, margin + 10, startY + 7);
+      doc.setTextColor(46, 204, 113); // Green for total
+      doc.text(`$${formatNumber(total)}`, pageWidth - margin - 10, startY + 7, { align: 'right' });
 
-      // Table Data
-      const tableData = payments.map((payment) => [
-        payment.date.toLocaleDateString(),
-        payment.paymentId.slice(-6),
-        `$${formatNumber(payment.amount)}`,
-        payment.note,
-      ])
+      startY += 25;
 
-      if (tableData.length > 0) {
-        ;(doc as any).autoTable({
-          head: [["Date", "Payment ID", "Amount", "Note"]],
-          body: tableData,
+      // Add payments table with modern styling
+      if (payments.length > 0) {
+        (doc as any).autoTable({
           startY: startY,
-          margin: { left: 14, right: 14 },
-          columnStyles: {
-            0: { cellWidth: 30 },
-            1: { cellWidth: 30 },
-            2: { cellWidth: 30 },
-            3: { cellWidth: "auto" },
+          head: [["Date", "Payment ID", "Amount", "Note"]],
+          body: payments.map((payment) => [
+            payment.date.toLocaleDateString(),
+            payment.paymentId.slice(-6),
+            `$${formatNumber(payment.amount)}`,
+            payment.note
+          ]),
+          margin: { left: margin, right: margin },
+          styles: {
+            fontSize: 11,
+            cellPadding: 7,
+            lineColor: [189, 195, 199],
+            lineWidth: 0.1,
           },
-          headStyles: { fillColor: [41, 128, 185] }, // Add some style to the header
-          alternateRowStyles: { fillColor: [245, 245, 245] }, // Zebra striping
-        })
+          columnStyles: {
+            0: { cellWidth: 35 },
+            1: { cellWidth: 35 },
+            2: { cellWidth: 35, halign: 'right', textColor: [46, 204, 113] },
+            3: { cellWidth: 'auto' },
+          },
+          headStyles: {
+            fillColor: [52, 152, 219],
+            textColor: [255, 255, 255],
+            fontSize: 12,
+            fontStyle: 'bold',
+            halign: 'left',
+          },
+          alternateRowStyles: {
+            fillColor: [250, 250, 250],
+          },
+          bodyStyles: {
+            fillColor: [255, 255, 255],
+          },
+          didDrawPage: function(data: any) {
+            // Add header to each page
+            doc.setFillColor(41, 128, 185);
+            doc.rect(0, 0, pageWidth, 15, 'F');
+            doc.setTextColor(255, 255, 255);
+            doc.setFontSize(10);
+            doc.text(`${owner} - Truck Payment Tracker`, pageWidth / 2, 10, { align: "center" });
+          },
+        });
 
-        startY = (doc as any).lastAutoTable.finalY + 15
+        startY = (doc as any).lastAutoTable.finalY + 20;
       } else {
-        doc.setFontSize(10)
-        doc.text("No payments recorded", pageWidth / 2, startY, { align: "center" })
-        startY += 15
+        doc.setFontSize(12);
+        doc.setTextColor(128, 128, 128);
+        doc.text("No payments recorded", pageWidth / 2, startY + 5, { align: "center" });
+        startY += 30;
       }
-    })
+    });
 
-    doc.save(`TruckPayments_${owner}_${new Date().toISOString().split("T")[0]}.pdf`)
-  }
+    // Add footer with metadata
+    const totalPages = doc.internal.getNumberOfPages();
+    for (let i = 1; i <= totalPages; i++) {
+      doc.setPage(i);
+
+      // Add gradient-like footer
+      doc.setFillColor(236, 240, 241);
+      doc.rect(0, pageHeight - 20, pageWidth, 20, 'F');
+
+      // Add footer content
+      doc.setFontSize(9);
+      doc.setTextColor(128, 128, 128);
+
+      // Left: timestamp
+      const timestamp = new Date().toLocaleString();
+      doc.text(timestamp, margin, pageHeight - 8);
+
+      // Center: owner name
+      doc.text(owner, pageWidth / 2, pageHeight - 8, { align: 'center' });
+
+      // Right: page numbers
+      doc.text(`Page ${i} of ${totalPages}`, pageWidth - margin, pageHeight - 8, { align: 'right' });
+    }
+
+    doc.save(`${owner}_TruckPayments_${new Date().toISOString().split("T")[0]}.pdf`);
+  };
 
   // Add this new function after handleDownloadPDF
   const handleDownloadExcel = () => {
@@ -1218,7 +1310,7 @@ export default function OwnerDetailsPage() {
         initial="hidden"
         animate="visible"
         variants={fadeIn}
-        className="fixed top-0 left-0 w-full border-b z-50 bg-gradient-to-r from-emerald-900/10 via-blue-900/10 to-blue-900/10 backdrop-blur-xl"
+        className="fixed top-0 left=0 w-full border-b z-50 bg-gradient-to-r from-emerald-900/10 via-blue-900/10 to-blue-900/10 backdrop-blur-xl"
       >
         <div className="max-w-7xl mx-auto px-2 sm:px-4 py-2 sm:py-3">
           <div className="flex items-center justify-between">
