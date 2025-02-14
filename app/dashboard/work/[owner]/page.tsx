@@ -1,132 +1,157 @@
-'use client'
+"use client"
 
-import { useParams, useRouter } from 'next/navigation'
+import { useParams, useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { useEffect, useState } from "react"
-import { database, storage } from "@/lib/firebase"
-import { ref, onValue, update, get, push, set } from "firebase/database"
-import { ref as storageRef, getDownloadURL } from "firebase/storage" // Fix storage imports
+import { database } from "@/lib/firebase"
+import { ref, onValue, update, get, push } from "firebase/database"
 import { formatNumber, toFixed2, cn } from "@/lib/utils" // Add cn to imports
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
 import { toast } from "@/components/ui/use-toast"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 // Import all the interfaces from a shared types file
-import type { WorkDetail, TruckPayment, OwnerBalance } from "@/types" 
-import { motion, AnimatePresence } from 'framer-motion'
+import type { WorkDetail, TruckPayment, OwnerBalance } from "@/types"
+import { motion, AnimatePresence } from "framer-motion"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { useSession } from "next-auth/react"
-import { ArrowLeft, Download, Wallet2, PlusCircle, X, FileSpreadsheet, RefreshCw, MoreHorizontal, Search, ChevronDown, ChevronUp } from 'lucide-react' // Add X and FileSpreadsheet icon to imports
+import {
+  ArrowLeft,
+  Download,
+  Wallet2,
+  PlusCircle,
+  X,
+  FileSpreadsheet,
+  RefreshCw,
+  MoreHorizontal,
+  Search,
+  ArrowUp,
+  ArrowDown,
+  MoveVertical,
+  ChevronUp,
+  ChevronDown,
+} from "lucide-react" // Add X and FileSpreadsheet icon to imports
 import { ThemeToggle } from "@/components/ui/molecules/theme-toggle" // Add ThemeToggle import
 import { Skeleton } from "@/components/ui/skeleton"
-import jsPDF from 'jspdf'
-import autoTable from 'jspdf-autotable'
+import jsPDF from "jspdf"
+import autoTable from "jspdf-autotable"
 import { OwnerBalanceDialog } from "@/components/ui/molecules/owner-balance-dialog" // Add OwnerBalanceDialog import
-import * as XLSX from 'xlsx'; // Add XLSX import
-import { 
-  getTruckAllocations, 
-  calculateOptimalAllocation, 
-  validatePaymentForm,
-  updatePaymentStatuses,
-  fixTruckPaymentStatus, // Add fixTruckPaymentStatus import
+import * as XLSX from "xlsx" // Add XLSX import
+import {
+  getTruckAllocations,
   syncTruckPaymentStatus, // Add syncTruckPaymentStatus import
-  PaymentCorrection, correctPaymentAllocation // Add PaymentCorrection and correctPaymentAllocation import
-} from "@/lib/payment-utils";
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog" // Add AlertDialog imports
+  type PaymentCorrection,
+  correctPaymentAllocation, // Add PaymentCorrection and correctPaymentAllocation import
+} from "@/lib/payment-utils"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog" // Add AlertDialog imports
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu" // Add DropdownMenu imports
-import { AlertCircle, Receipt, ReceiptText, Shield } from 'lucide-react' // Add new imports
-import { useProfileImage } from '@/hooks/useProfileImage'
-import React from 'react'
+import { AlertCircle, Receipt, Shield } from "lucide-react" // Add new imports
+import { useProfileImage } from "@/hooks/useProfileImage"
+import React from "react"
 
 // Add interfaces at the top
 interface TruckAllocation {
-  totalAllocated: number;
-  totalDue: number;
-  balance: number;
-  pendingAmount: number;
+  totalAllocated: number
+  totalDue: number
+  balance: number
+  pendingAmount: number
 }
 
 interface OwnerTotals {
-  totalDue: number;
-  totalPaid: number;
-  pendingTotal: number;
-  balance: number;
-  existingBalance: number;
+  totalDue: number
+  totalPaid: number
+  pendingTotal: number
+  balance: number
+  existingBalance: number
 }
 
 // Update the BalanceUsage interface to include the type field
 interface BalanceUsage {
-  amount: number;
-  timestamp: string;
-  usedFor: string[];
-  paymentId: string;
-  type: 'deposit' | 'usage';  // Add this field
-  note?: string;  // Add optional note field
+  amount: number
+  timestamp: string
+  usedFor: string[]
+  paymentId: string
+  type: "deposit" | "usage" // Add this field
+  note?: string // Add optional note field
 }
 
 // Add new type
 interface Prepayment extends BalanceUsage {
-  type: 'deposit';
-  amount: number;
-  timestamp: string;
-  note?: string;
+  type: "deposit"
+  amount: number
+  timestamp: string
+  note?: string
 }
 
 // Add new interface for truck payment history
 interface TruckPaymentHistory {
-  paymentId: string;
-  timestamp: string;
-  amount: number;
-  note: string;
-  truckNumber: string;
+  paymentId: string
+  timestamp: string
+  amount: number
+  note: string
+  truckNumber: string
 }
 
 // Add new type for grouped payments
 interface GroupedTruckPayment {
-  truckNumber: string;
-  total: number;
+  truckNumber: string
+  total: number
   payments: {
-    date: Date;
-    paymentId: string;
-    amount: number;
-    note: string;
-  }[];
+    date: Date
+    paymentId: string
+    amount: number
+    note: string
+  }[]
+}
+
+// Add new interface for ordered payments
+interface OrderedTruckPayment {
+  truckId: string
+  order: number
 }
 
 // Add these animation variants before the component
 const fadeIn = {
   hidden: { opacity: 0 },
-  visible: { opacity: 1 }
-};
+  visible: { opacity: 1 },
+}
 
 const slideUp = {
   hidden: { y: 20, opacity: 0 },
-  visible: { y: 0, opacity: 1 }
-};
+  visible: { y: 0, opacity: 1 },
+}
 
 const staggeredList = {
   hidden: { opacity: 0 },
   visible: {
     opacity: 1,
     transition: {
-      staggerChildren: 0.1
-    }
-  }
-};
+      staggerChildren: 0.1,
+    },
+  },
+}
 
 const listItem = {
   hidden: { x: -20, opacity: 0 },
-  visible: { x: 0, opacity: 1 }
-};
+  visible: { x: 0, opacity: 1 },
+}
 
 export default function OwnerDetailsPage() {
   const params = useParams()
   const router = useRouter()
   const owner = decodeURIComponent(params.owner as string)
-  
+
   // State management
   const [isLoading, setIsLoading] = useState(true)
   const [ownerDetails, setOwnerDetails] = useState<any>(null)
@@ -138,76 +163,80 @@ export default function OwnerDetailsPage() {
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false)
   const { data: session } = useSession()
   const [sortConfig, setSortConfig] = useState<{
-    key: string;
-    direction: 'asc' | 'desc';
-  }>({ key: 'truck_number', direction: 'asc' });
-  const [isBalanceDialogOpen, setIsBalanceDialogOpen] = useState(false); // Add state for balance dialog
+    key: string
+    direction: "asc" | "desc"
+  }>({ key: "truck_number", direction: "asc" })
+  const [isBalanceDialogOpen, setIsBalanceDialogOpen] = useState(false) // Add state for balance dialog
 
   // Add new state for the feature
-  const [ownerNameClickCount, setOwnerNameClickCount] = useState(0);
-  const [isBalanceEditMode, setIsBalanceEditMode] = useState(false);
-  const [manualBalance, setManualBalance] = useState<string>('');
+  const [ownerNameClickCount, setOwnerNameClickCount] = useState(0)
+  const [isBalanceEditMode, setIsBalanceEditMode] = useState(false)
+  const [manualBalance, setManualBalance] = useState<string>("")
 
   // Add new state variables after the existing state declarations
-  const [showPendingOrders, setShowPendingOrders] = useState(false);
-  const [orderStatsClickCount, setOrderStatsClickCount] = useState(0);
+  const [showPendingOrders, setShowPendingOrders] = useState(false)
+  const [orderStatsClickCount, setOrderStatsClickCount] = useState(0)
 
   // Add new state
   const [showCorrectionDialog, setShowCorrectionDialog] = useState(false)
   const [selectedCorrection, setSelectedCorrection] = useState<{
-    payment: any;
-    truck: WorkDetail;
-    allocation: any;
+    payment: any
+    truck: WorkDetail
+    allocation: any
   } | null>(null)
   const [correctionAmount, setCorrectionAmount] = useState("")
   const [correctionNote, setCorrectionNote] = useState("")
 
   interface PaymentFormData {
-    amount: number;
-    note: string;
-    allocatedTrucks: { truckId: string; amount: number; }[];
-    useExistingBalance: boolean;
-    balanceToUse: number;
+    amount: number
+    note: string
+    allocatedTrucks: { truckId: string; amount: number }[]
+    useExistingBalance: boolean
+    balanceToUse: number
   }
 
   const [paymentFormData, setPaymentFormData] = useState<PaymentFormData>({
     amount: 0,
-    note: '',
+    note: "",
     allocatedTrucks: [],
     useExistingBalance: false,
-    balanceToUse: 0
+    balanceToUse: 0,
   })
 
   // Ensure isSaving state is present
-  const [isSaving, setIsSaving] = useState(false);
+  const [isSaving, setIsSaving] = useState(false)
 
   // Add new state for action confirmations
   const [actionConfirmation, setActionConfirmation] = useState<{
-    type: 'reverse' | 'writeoff' | 'correct';
-    payment: any;
-    truck: WorkDetail;
-    allocation: any;
-  } | null>(null);
+    type: "reverse" | "writeoff" | "correct"
+    payment: any
+    truck: WorkDetail
+    allocation: any
+  } | null>(null)
 
   // Add new state for truck payment tracking
-  const [selectedTruck, setSelectedTruck] = useState<string | null>(null);
-  const [truckFilter, setTruckFilter] = useState("");
-  const [truckPaymentHistory, setTruckPaymentHistory] = useState<TruckPaymentHistory[]>([]);
+  const [selectedTruck, setSelectedTruck] = useState<string | null>(null)
+  const [truckFilter, setTruckFilter] = useState("")
+  const [truckPaymentHistory, setTruckPaymentHistory] = useState<TruckPaymentHistory[]>([])
 
   // Add state for expanded rows
-  const [expandedTrucks, setExpandedTrucks] = useState<Set<string>>(new Set());
+  const [expandedTrucks, setExpandedTrucks] = useState<Set<string>>(new Set())
+
+  // Add new state for ordered payments
+  const [paymentOrder, setPaymentOrder] = useState<{ [truckId: string]: number }>({})
+  const [isDragging, setIsDragging] = useState(false)
 
   // Fetch data when component mounts
   useEffect(() => {
     const fetchOwnerData = async () => {
       try {
         // Fetch work details
-        const workDetailsRef = ref(database, 'work_details')
+        const workDetailsRef = ref(database, "work_details")
         onValue(workDetailsRef, (snapshot) => {
           if (snapshot.exists()) {
             const data = Object.entries(snapshot.val())
               .map(([id, detail]: [string, any]) => ({ id, ...detail }))
-              .filter(detail => detail.owner === owner)
+              .filter((detail) => detail.owner === owner)
             setWorkDetails(data)
           }
         })
@@ -216,8 +245,7 @@ export default function OwnerDetailsPage() {
         const paymentsRef = ref(database, `payments/${owner}`)
         onValue(paymentsRef, (snapshot) => {
           if (snapshot.exists()) {
-            const payments = Object.entries(snapshot.val())
-              .map(([id, data]: [string, any]) => ({ id, ...data }))
+            const payments = Object.entries(snapshot.val()).map(([id, data]: [string, any]) => ({ id, ...data }))
             setOwnerPayments(payments)
           }
         })
@@ -231,7 +259,7 @@ export default function OwnerDetailsPage() {
         })
 
         // Fetch truck payments
-        const truckPaymentsRef = ref(database, 'truckPayments')
+        const truckPaymentsRef = ref(database, "truckPayments")
         onValue(truckPaymentsRef, (snapshot) => {
           if (snapshot.exists()) {
             setTruckPayments(snapshot.val())
@@ -246,9 +274,17 @@ export default function OwnerDetailsPage() {
           }
         })
 
+        // Fetch payment order
+        const orderRef = ref(database, `payment_order/${owner}`)
+        onValue(orderRef, (snapshot) => {
+          if (snapshot.exists()) {
+            setPaymentOrder(snapshot.val())
+          }
+        })
+
         setIsLoading(false)
       } catch (error) {
-        console.error('Error fetching data:', error)
+        console.error("Error fetching data:", error)
         toast({
           title: "Error",
           description: "Failed to load owner data",
@@ -261,430 +297,494 @@ export default function OwnerDetailsPage() {
 
   // Update calculateTotals with proper typing
   const calculateTotals = (): OwnerTotals => {
-    const loadedTrucks = workDetails.filter(truck => truck.loaded);
-    
-    const totals = loadedTrucks.reduce((sum, truck) => {
-      const { totalDue, totalAllocated, pendingAmount } = getTruckAllocations(truck, truckPayments);
-      return {
-        totalDue: sum.totalDue + totalDue,
-        totalPaid: sum.totalPaid + totalAllocated,
-        pendingTotal: sum.pendingTotal + (pendingAmount || 0)
-      };
-    }, { totalDue: 0, totalPaid: 0, pendingTotal: 0 });
+    const loadedTrucks = workDetails.filter((truck) => truck.loaded)
+
+    const totals = loadedTrucks.reduce(
+      (sum, truck) => {
+        const { totalDue, totalAllocated, pendingAmount } = getTruckAllocations(truck, truckPayments)
+        return {
+          totalDue: sum.totalDue + totalDue,
+          totalPaid: sum.totalPaid + totalAllocated,
+          pendingTotal: sum.pendingTotal + (pendingAmount || 0),
+        }
+      },
+      { totalDue: 0, totalPaid: 0, pendingTotal: 0 },
+    )
 
     return {
       ...totals,
       balance: totals.totalDue - totals.totalPaid,
-      existingBalance: ownerBalance?.amount || 0
-    };
-  };
+      existingBalance: ownerBalance?.amount || 0,
+    }
+  }
 
   // Payment handling functions
   const handleAddPayment = () => {
     setPaymentFormData({
       amount: 0,
-      note: '',
+      note: "",
       allocatedTrucks: [],
       useExistingBalance: false,
-      balanceToUse: 0
+      balanceToUse: 0,
     })
     setIsPaymentModalOpen(true)
   }
 
   // Add all the payment-related functions from the orders page
   const handlePaymentSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!owner) return;
-  
-    setIsSaving(true); // Start saving
-  
+    e.preventDefault()
+    if (!owner) return
+
+    setIsSaving(true) // Start saving
+
     try {
-      const paymentRef = push(ref(database, `payments/${owner}`));
-      const paymentKey = paymentRef.key!;
-      const timestamp = new Date().toISOString();
-      const updates: { [path: string]: any } = {};
-  
+      const paymentRef = push(ref(database, `payments/${owner}`))
+      const paymentKey = paymentRef.key!
+      const timestamp = new Date().toISOString()
+      const updates: { [path: string]: any } = {}
+
       // Validate total allocation
-      const totalAllocation = toFixed2(
-        paymentFormData.allocatedTrucks.reduce((sum, t) => sum + t.amount, 0)
-      );
-  
+      const totalAllocation = toFixed2(paymentFormData.allocatedTrucks.reduce((sum, t) => sum + t.amount, 0))
+
       // Handle balance usage
-      let remainingAmount = paymentFormData.amount;
+      let remainingAmount = paymentFormData.amount
       if (paymentFormData.useExistingBalance && ownerBalance) {
-        const balanceToUse = Math.min(
-          paymentFormData.balanceToUse,
-          ownerBalance.amount,
-          totalAllocation
-        );
-  
+        const balanceToUse = Math.min(paymentFormData.balanceToUse, ownerBalance.amount, totalAllocation)
+
         if (balanceToUse > 0) {
-          const balanceUsageRef = push(ref(database, `balance_usage/${owner}`));
+          const balanceUsageRef = push(ref(database, `balance_usage/${owner}`))
           updates[`balance_usage/${owner}/${balanceUsageRef.key}`] = {
             amount: balanceToUse,
             timestamp,
-            usedFor: paymentFormData.allocatedTrucks.map(t => t.truckId),
+            usedFor: paymentFormData.allocatedTrucks.map((t) => t.truckId),
             paymentId: paymentKey,
-            type: 'usage',
-            note: `Used for payment ${paymentKey}`
-          };
-  
+            type: "usage",
+            note: `Used for payment ${paymentKey}`,
+          }
+
           // Update owner balance
-          const newBalance = toFixed2(ownerBalance.amount - balanceToUse);
+          const newBalance = toFixed2(ownerBalance.amount - balanceToUse)
           updates[`owner_balances/${owner}`] = {
             amount: newBalance,
-            lastUpdated: timestamp
-          };
-  
-          remainingAmount = toFixed2(remainingAmount - balanceToUse);
+            lastUpdated: timestamp,
+          }
+
+          remainingAmount = toFixed2(remainingAmount - balanceToUse)
         }
       }
-  
+
       // Record the payment
       updates[`payments/${owner}/${paymentKey}`] = {
         amount: remainingAmount,
         timestamp,
         allocatedTrucks: paymentFormData.allocatedTrucks,
         note: paymentFormData.note,
-        type: 'cash_payment'
-      };
-  
+        type: "cash_payment",
+      }
+
       // Update truck payments
       for (const allocation of paymentFormData.allocatedTrucks) {
-        const truckRef = push(ref(database, `truckPayments/${allocation.truckId}`));
+        const truckRef = push(ref(database, `truckPayments/${allocation.truckId}`))
         updates[`truckPayments/${allocation.truckId}/${truckRef.key}`] = {
           amount: allocation.amount,
           timestamp,
           paymentId: paymentKey,
-          note: paymentFormData.note
-        };
-  
+          note: paymentFormData.note,
+        }
+
         // Update truck status
-        const truck = workDetails.find(t => t.id === allocation.truckId);
+        const truck = workDetails.find((t) => t.id === allocation.truckId)
         if (truck) {
-          const { balance } = getTruckAllocations(truck, truckPayments);
-          const newBalance = toFixed2(balance - allocation.amount);
-          
-          updates[`work_details/${allocation.truckId}/paymentStatus`] = newBalance <= 0 ? 'paid' : 'partial';
-          updates[`work_details/${allocation.truckId}/paymentPending`] = newBalance > 0;
-          updates[`work_details/${allocation.truckId}/paid`] = newBalance <= 0;
+          const { balance } = getTruckAllocations(truck, truckPayments)
+          const newBalance = toFixed2(balance - allocation.amount)
+
+          updates[`work_details/${allocation.truckId}/paymentStatus`] = newBalance <= 0 ? "paid" : "partial"
+          updates[`work_details/${allocation.truckId}/paymentPending`] = newBalance > 0
+          updates[`work_details/${allocation.truckId}/paid`] = newBalance <= 0
         }
       }
-  
+
       // Apply all updates atomically
-      await update(ref(database), updates);
-  
+      await update(ref(database), updates)
+
       toast({
         title: "Payment Processed",
         description: `Successfully processed payment of $${formatNumber(totalAllocation)}`,
-      });
-  
-      setIsPaymentModalOpen(false);
-      await fetchOwnerBalances();
-  
+      })
+
+      setIsPaymentModalOpen(false)
+      await fetchOwnerBalances()
     } catch (error) {
-      console.error('Payment error:', error);
+      console.error("Payment error:", error)
       toast({
         title: "Error",
         description: error instanceof Error ? error.message : "Failed to process payment",
-        variant: "destructive"
-      });
+        variant: "destructive",
+      })
     } finally {
-      setIsSaving(false);
+      setIsSaving(false)
     }
-  };
-  
+  }
 
   // Add helper method to handle truck selection
-  const handleTruckSelection = (
-      checked: boolean,
-      truck: WorkDetail
-    ) => {
-      if (checked) {
-        setPaymentFormData(prev => ({
-          ...prev,
-          allocatedTrucks: [
-            ...prev.allocatedTrucks,
-            { truckId: truck.id, amount: 0 }
-          ]
-        }));
-      } else {
-        setPaymentFormData(prev => ({
-          ...prev,
-          allocatedTrucks: prev.allocatedTrucks.filter(t => t.truckId !== truck.id)
-        }));
-      }
-    };
+  const handleTruckSelection = (checked: boolean, truck: WorkDetail) => {
+    if (checked) {
+      setPaymentFormData((prev) => ({
+        ...prev,
+        allocatedTrucks: [...prev.allocatedTrucks, { truckId: truck.id, amount: 0 }],
+      }))
+    } else {
+      setPaymentFormData((prev) => ({
+        ...prev,
+        allocatedTrucks: prev.allocatedTrucks.filter((t) => t.truckId !== truck.id),
+      }))
+    }
+  }
 
   // Add a helper to handle allocation input changes
-  const handleAllocationChange = (
-    e: React.ChangeEvent<HTMLInputElement>,
-    truckId: string
-  ) => {
-    const newAmount = parseFloat(e.target.value);
-    if (isNaN(newAmount)) return;
-  
-    const truck = workDetails.find(t => t.id === truckId);
-    if (!truck) return;
-  
-    const { balance } = getTruckAllocations(truck, truckPayments);
-    const totalAvailable = getTotalAvailable();
-    
+  const handleAllocationChange = (e: React.ChangeEvent<HTMLInputElement>, truckId: string) => {
+    const newAmount = Number.parseFloat(e.target.value)
+    if (isNaN(newAmount)) return
+
+    const truck = workDetails.find((t) => t.id === truckId)
+    if (!truck) return
+
+    const { balance } = getTruckAllocations(truck, truckPayments)
+    const totalAvailable = getTotalAvailable()
+
     // Calculate current total allocation excluding this truck
     const currentTotal = paymentFormData.allocatedTrucks
-      .filter(t => t.truckId !== truckId)
-      .reduce((sum, t) => sum + t.amount, 0);
-  
+      .filter((t) => t.truckId !== truckId)
+      .reduce((sum, t) => sum + t.amount, 0)
+
     // Calculate maximum allowed amount for this truck
     const maxAllowed = Math.min(
       balance, // Can't allocate more than truck's balance
       totalAvailable - currentTotal, // Can't exceed total available amount
-      newAmount // Can't exceed input amount
-    );
-  
+      newAmount, // Can't exceed input amount
+    )
+
     if (maxAllowed >= 0) {
-      setPaymentFormData(prev => ({
+      setPaymentFormData((prev) => ({
         ...prev,
-        allocatedTrucks: prev.allocatedTrucks.map(t =>
-          t.truckId === truckId
-            ? { ...t, amount: toFixed2(maxAllowed) }
-            : t
-        )
-      }));
+        allocatedTrucks: prev.allocatedTrucks.map((t) =>
+          t.truckId === truckId ? { ...t, amount: toFixed2(maxAllowed) } : t,
+        ),
+      }))
     }
-  };
+  }
 
   // Add the missing calculateOptimalAllocation function
   function calculateOptimalAllocation(
     totalAmount: number,
     trucks: WorkDetail[],
     truckPayments: { [truckId: string]: TruckPayment[] },
-    balanceAmount = 0
-  ): { truckId: string; amount: number; }[] {
-    const totalAvailable = toFixed2(totalAmount); // totalAmount already includes balance
-    const allocations: { truckId: string; amount: number; }[] = [];
+    balanceAmount = 0,
+  ): { truckId: string; amount: number }[] {
+    const totalAvailable = toFixed2(totalAmount) // totalAmount already includes balance
+    const allocations: { truckId: string; amount: number }[] = []
 
     // Sort trucks by creation date and balance
     const trucksWithBalances = trucks
-      .filter(truck => {
-        const { balance } = getTruckAllocations(truck, truckPayments);
-        return balance > 0;
+      .filter((truck) => {
+        const { balance } = getTruckAllocations(truck, truckPayments)
+        return balance > 0
       })
       .sort((a, b) => {
         // Sort by creation date first
-        const dateA = new Date(a.createdAt || '').getTime();
-        const dateB = new Date(b.createdAt || '').getTime();
-        return dateA - dateB; // Oldest first
-      });
+        const dateA = new Date(a.createdAt || "").getTime()
+        const dateB = new Date(b.createdAt || "").getTime()
+        return dateA - dateB // Oldest first
+      })
 
-    let remainingAmount = totalAvailable;
+    let remainingAmount = totalAvailable
 
     // Allocate to trucks
     for (const truck of trucksWithBalances) {
-      if (remainingAmount <= 0) break;
+      if (remainingAmount <= 0) break
 
-      const { balance } = getTruckAllocations(truck, truckPayments);
-      const allocation = toFixed2(Math.min(balance, remainingAmount));
-      
+      const { balance } = getTruckAllocations(truck, truckPayments)
+      const allocation = toFixed2(Math.min(balance, remainingAmount))
+
       if (allocation > 0) {
         allocations.push({
           truckId: truck.id,
-          amount: allocation
-        });
-        remainingAmount = toFixed2(remainingAmount - allocation);
+          amount: allocation,
+        })
+        remainingAmount = toFixed2(remainingAmount - allocation)
       }
     }
 
-    return allocations;
+    return allocations
   }
 
   // Add the missing calculateRemainingAmount function
   const calculateRemainingAmount = (totalAmount: number, allocations: { truckId: string; amount: number }[]) => {
-    const totalAllocated = toFixed2(allocations.reduce((sum, allocation) => sum + allocation.amount, 0));
-    return toFixed2(totalAmount - totalAllocated);
-  };
+    const totalAllocated = toFixed2(allocations.reduce((sum, allocation) => sum + allocation.amount, 0))
+    return toFixed2(totalAmount - totalAllocated)
+  }
 
   // Update handlePaymentInputChange to enforce 2 decimal places
   const handlePaymentInputChange = (e: React.ChangeEvent<HTMLInputElement>, truckId: string) => {
-    const value = parseFloat(e.target.value);
-    if (isNaN(value)) return;
-    
-    const newAmount = toFixed2(value);
-    const truck = workDetails.find(t => t.id === truckId);
-    
-    if (!truck) return;
-  
-    const { balance } = getTruckAllocations(truck, truckPayments);
+    const value = Number.parseFloat(e.target.value)
+    if (isNaN(value)) return
+
+    const newAmount = toFixed2(value)
+    const truck = workDetails.find((t) => t.id === truckId)
+
+    if (!truck) return
+
+    const { balance } = getTruckAllocations(truck, truckPayments)
     const otherAllocations = paymentFormData.allocatedTrucks
-      .filter(t => t.truckId !== truckId)
-      .reduce((sum, t) => sum + t.amount, 0);
-    
-    const remainingAmount = toFixed2(paymentFormData.amount - otherAllocations);
-    const maxAllowed = toFixed2(Math.min(balance, remainingAmount));
-  
+      .filter((t) => t.truckId !== truckId)
+      .reduce((sum, t) => sum + t.amount, 0)
+
+    const remainingAmount = toFixed2(paymentFormData.amount - otherAllocations)
+    const maxAllowed = toFixed2(Math.min(balance, remainingAmount))
+
     if (newAmount >= 0 && newAmount <= maxAllowed) {
-      setPaymentFormData(prev => ({
+      setPaymentFormData((prev) => ({
         ...prev,
-        allocatedTrucks: prev.allocatedTrucks.map(t =>
-          t.truckId === truckId
-            ? { ...t, amount: newAmount }
-            : t
-        )
-      }));
+        allocatedTrucks: prev.allocatedTrucks.map((t) => (t.truckId === truckId ? { ...t, amount: newAmount } : t)),
+      }))
     }
-  };
+  }
 
   // Update handleBalanceUseChange to handle amounts correctly
   const handleBalanceUseChange = (checked: boolean) => {
-    const availableBalance = ownerBalance?.amount || 0;
-    
-    setPaymentFormData(prev => ({
+    const availableBalance = ownerBalance?.amount || 0
+
+    setPaymentFormData((prev) => ({
       ...prev,
       useExistingBalance: checked,
       amount: checked ? availableBalance : 0, // Set amount to balance when checked
       balanceToUse: checked ? availableBalance : 0,
-      allocatedTrucks: [] // Reset allocations when changing balance use
-    }));
-  };
+      allocatedTrucks: [], // Reset allocations when changing balance use
+    }))
+  }
 
   // Update the available amount calculation to include balance
   const getTotalAvailable = () => {
-    return paymentFormData.useExistingBalance 
-      ? paymentFormData.amount 
-      : paymentFormData.amount;
-  };
+    return paymentFormData.useExistingBalance ? paymentFormData.amount : paymentFormData.amount
+  }
 
   // Add sorting function
   const sortData = (data: any[], key: string) => {
     return [...data].sort((a, b) => {
-      if (sortConfig.direction === 'asc') {
-        return a[key] > b[key] ? 1 : -1;
+      if (sortConfig.direction === "asc") {
+        return a[key] > b[key] ? 1 : -1
       }
-      return a[key] < b[key] ? 1 : -1;
-    });
-  };
+      return a[key] < b[key] ? 1 : -1
+    })
+  }
 
   // Add export functions
   const handleDownloadPDF = () => {
-    const doc = new jsPDF('landscape');
-    const totals = calculateTotals();
+    const doc = new jsPDF("landscape")
+    const totals = calculateTotals()
 
     // Add header
-    doc.setFontSize(20);
-    doc.text(`${owner} - Financial Summary`, 14, 15);
+    doc.setFontSize(20)
+    doc.text(`${owner} - Financial Summary`, 14, 15)
 
     // Add summary section
     autoTable(doc, {
       startY: 25,
-      head: [['Total Due', 'Total Paid', 'Balance', 'Available Balance']],
-      body: [[
-        `$${formatNumber(totals.totalDue)}`,
-        `$${formatNumber(totals.totalPaid)}`,
-        `$${formatNumber(Math.abs(totals.balance))}`,
-        `$${formatNumber(totals.existingBalance)}`
-      ]],
-    });
+      head: [["Total Due", "Total Paid", "Balance", "Available Balance"]],
+      body: [
+        [
+          `$${formatNumber(totals.totalDue)}`,
+          `$${formatNumber(totals.totalPaid)}`,
+          `$${formatNumber(Math.abs(totals.balance))}`,
+          `$${formatNumber(totals.existingBalance)}`,
+        ],
+      ],
+    })
 
     // Add trucks table
     autoTable(doc, {
       startY: (doc as any).lastAutoTable?.finalY + 10 || 45,
-      head: [['Truck', 'Product', 'At20', 'Price', 'Total Due', 'Paid', 'Balance', 'Status']],
-      body: workDetails.filter(truck => truck.loaded).map(truck => {
-        const { totalDue, totalAllocated, balance } = getTruckAllocations(truck, truckPayments);
-        return [
-          truck.truck_number,
-          truck.product,
-          truck.at20 || '-',
-          `$${formatNumber(parseFloat(truck.price))}`,
-          `$${formatNumber(totalDue)}`,
-          `$${formatNumber(totalAllocated)}`,
-          `$${formatNumber(Math.abs(balance))}`,
-          balance <= 0 ? 'Paid' : truck.paymentPending ? 'Pending' : 'Due'
-        ];
-      }),
-    });
+      head: [["Truck", "Product", "At20", "Price", "Total Due", "Paid", "Balance", "Status"]],
+      body: workDetails
+        .filter((truck) => truck.loaded)
+        .map((truck) => {
+          const { totalDue, totalAllocated, balance } = getTruckAllocations(truck, truckPayments)
+          return [
+            truck.truck_number,
+            truck.product,
+            truck.at20 || "-",
+            `$${formatNumber(Number.parseFloat(truck.price))}`,
+            `$${formatNumber(totalDue)}`,
+            `$${formatNumber(totalAllocated)}`,
+            `$${formatNumber(Math.abs(balance))}`,
+            balance <= 0 ? "Paid" : truck.paymentPending ? "Pending" : "Due",
+          ]
+        }),
+    })
 
-    doc.save(`${owner}_summary_${new Date().toISOString().split('T')[0]}.pdf`);
-  };
+    doc.save(`${owner}_summary_${new Date().toISOString().split("T")[0]}.pdf`)
+  }
+
+  // Add this new function after handleDownloadPDF
+  const handleDownloadTruckPaymentsPDF = () => {
+    // Create PDF in landscape orientation
+    const doc = new jsPDF({
+      orientation: "landscape",
+      unit: "mm",
+      format: "a4",
+    })
+
+    const pageWidth = doc.internal.pageSize.getWidth()
+    const filteredTrucks = workDetails
+      .filter((truck) => truck.loaded && truck.truck_number.toLowerCase().includes(truckFilter.toLowerCase()))
+      .sort((a, b) => a.truck_number.localeCompare(b.truck_number))
+
+    // Header
+    doc.setFontSize(16)
+    doc.text(`Truck Payment Tracker - ${owner}`, pageWidth / 2, 15, { align: "center" })
+
+    let startY = 25
+
+    filteredTrucks.forEach((truck) => {
+      const payments = ownerPayments
+        .flatMap((payment) =>
+          payment.allocatedTrucks
+            ?.filter((allocation: any) => allocation.truckId === truck.id)
+            .map((allocation: any) => ({
+              date: new Date(payment.timestamp),
+              paymentId: payment.id,
+              amount: allocation.amount,
+              note: payment.note || "—",
+              timestamp: payment.timestamp,
+            })),
+        )
+        .filter(Boolean)
+        .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+
+      const total = payments.reduce((sum, p) => sum + p.amount, 0)
+
+      // Check if we need a new page
+      if (startY > doc.internal.pageSize.getHeight() - 40) {
+        doc.addPage()
+        startY = 15
+      }
+
+      // Truck Number and Total Payments
+      doc.setFontSize(12)
+      doc.text(`${truck.truck_number} - Total Payments: $${formatNumber(total)}`, pageWidth / 2, startY, {
+        align: "center",
+      })
+      startY += 8
+
+      // Table Data
+      const tableData = payments.map((payment) => [
+        payment.date.toLocaleDateString(),
+        payment.paymentId.slice(-6),
+        `$${formatNumber(payment.amount)}`,
+        payment.note,
+      ])
+
+      if (tableData.length > 0) {
+        ;(doc as any).autoTable({
+          head: [["Date", "Payment ID", "Amount", "Note"]],
+          body: tableData,
+          startY: startY,
+          margin: { left: 14, right: 14 },
+          columnStyles: {
+            0: { cellWidth: 30 },
+            1: { cellWidth: 30 },
+            2: { cellWidth: 30 },
+            3: { cellWidth: "auto" },
+          },
+          headStyles: { fillColor: [41, 128, 185] }, // Add some style to the header
+          alternateRowStyles: { fillColor: [245, 245, 245] }, // Zebra striping
+        })
+
+        startY = (doc as any).lastAutoTable.finalY + 15
+      } else {
+        doc.setFontSize(10)
+        doc.text("No payments recorded", pageWidth / 2, startY, { align: "center" })
+        startY += 15
+      }
+    })
+
+    doc.save(`TruckPayments_${owner}_${new Date().toISOString().split("T")[0]}.pdf`)
+  }
 
   // Add this new function after handleDownloadPDF
   const handleDownloadExcel = () => {
     // Create workbook
-    const wb = XLSX.utils.book_new();
-    const totals = calculateTotals();
-  
+    const wb = XLSX.utils.book_new()
+    const totals = calculateTotals()
+
     // Summary worksheet
     const summaryData = [
-      ['Financial Summary'],
-      ['Total Due', `$${formatNumber(totals.totalDue)}`],
-      ['Total Paid', `$${formatNumber(totals.totalPaid)}`],
-      ['Balance', `$${formatNumber(Math.abs(totals.balance))}`],
-      ['Available Balance', `$${formatNumber(totals.existingBalance)}`],
+      ["Financial Summary"],
+      ["Total Due", `$${formatNumber(totals.totalDue)}`],
+      ["Total Paid", `$${formatNumber(totals.totalPaid)}`],
+      ["Balance", `$${formatNumber(Math.abs(totals.balance))}`],
+      ["Available Balance", `$${formatNumber(totals.existingBalance)}`],
       [],
-    ];
-    const summaryWs = XLSX.utils.aoa_to_sheet(summaryData);
-    XLSX.utils.book_append_sheet(wb, summaryWs, 'Summary');
-  
+    ]
+    const summaryWs = XLSX.utils.aoa_to_sheet(summaryData)
+    XLSX.utils.book_append_sheet(wb, summaryWs, "Summary")
+
     // Trucks worksheet
-    const trucksData = [
-      ['Truck', 'Product', 'At20', 'Price', 'Total Due', 'Paid', 'Balance', 'Status', 'Date Loaded']
-    ];
+    const trucksData = [["Truck", "Product", "At20", "Price", "Total Due", "Paid", "Balance", "Status", "Date Loaded"]]
     workDetails
-      .filter(truck => truck.loaded)
-      .forEach(truck => {
-        const { totalDue, totalAllocated, balance } = getTruckAllocations(truck, truckPayments);
+      .filter((truck) => truck.loaded)
+      .forEach((truck) => {
+        const { totalDue, totalAllocated, balance } = getTruckAllocations(truck, truckPayments)
         trucksData.push([
           truck.truck_number,
           truck.product,
-          truck.at20 || '-',
-          `$${formatNumber(parseFloat(truck.price))}`,
+          truck.at20 || "-",
+          `$${formatNumber(Number.parseFloat(truck.price))}`,
           `$${formatNumber(totalDue)}`,
           `$${formatNumber(totalAllocated)}`,
           `$${formatNumber(Math.abs(balance))}`,
-          balance <= 0 ? 'Paid' : truck.paymentPending ? 'Pending' : 'Due',
-          new Date(truck.createdAt || Date.now()).toLocaleDateString()
-        ]);
-      });
-    const trucksWs = XLSX.utils.aoa_to_sheet(trucksData);
-    XLSX.utils.book_append_sheet(wb, trucksWs, 'Trucks');
-  
+          balance <= 0 ? "Paid" : truck.paymentPending ? "Pending" : "Due",
+          new Date(truck.createdAt || Date.now()).toLocaleDateString(),
+        ])
+      })
+    const trucksWs = XLSX.utils.aoa_to_sheet(trucksData)
+    XLSX.utils.book_append_sheet(wb, trucksWs, "Trucks")
+
     // Payments worksheet
-    const paymentsData = [
-      ['Date', 'Amount', 'Type', 'Note', 'Allocated Trucks']
-    ];
-    ownerPayments.forEach(payment => {
+    const paymentsData = [["Date", "Amount", "Type", "Note", "Allocated Trucks"]]
+    ownerPayments.forEach((payment) => {
       paymentsData.push([
         new Date(payment.timestamp).toLocaleString(),
         `$${formatNumber(payment.amount)}`,
-        payment.type || 'Payment',
-        payment.note || '-',
-        payment.allocatedTrucks?.map((allocation: any) => {
-          const truck = workDetails.find(t => t.id === allocation.truckId);
-          return truck ? `${truck.truck_number} ($${formatNumber(allocation.amount)})` : '';
-        }).join(', ') || '-'
-      ]);
-    });
-    const paymentsWs = XLSX.utils.aoa_to_sheet(paymentsData);
-    XLSX.utils.book_append_sheet(wb, paymentsWs, 'Payments');
-  
+        payment.type || "Payment",
+        payment.note || "-",
+        payment.allocatedTrucks
+          ?.map((allocation: any) => {
+            const truck = workDetails.find((t) => t.id === allocation.truckId)
+            return truck ? `${truck.truck_number} ($${formatNumber(allocation.amount)})` : ""
+          })
+          .join(", ") || "-",
+      ])
+    })
+    const paymentsWs = XLSX.utils.aoa_to_sheet(paymentsData)
+    XLSX.utils.book_append_sheet(wb, paymentsWs, "Payments")
+
     // Balance History worksheet
-    const balanceData = [
-      ['Date', 'Amount', 'Type', 'Note']
-    ];
-    balanceUsageHistory.forEach(entry => {
+    const balanceData = [["Date", "Amount", "Type", "Note"]]
+    balanceUsageHistory.forEach((entry) => {
       balanceData.push([
         new Date(entry.timestamp).toLocaleDateString(),
-        `${entry.type === 'deposit' ? '+' : '-'}$${formatNumber(entry.amount)}`,
+        `${entry.type === "deposit" ? "+" : "-"}$${formatNumber(entry.amount)}`,
         entry.type,
-        entry.note || '-'
-      ]);
-    });
-    const balanceWs = XLSX.utils.aoa_to_sheet(balanceData);
-    XLSX.utils.book_append_sheet(wb, balanceWs, 'Balance History');
-  
+        entry.note || "-",
+      ])
+    })
+    const balanceWs = XLSX.utils.aoa_to_sheet(balanceData)
+    XLSX.utils.book_append_sheet(wb, balanceWs, "Balance History")
+
     // Save the file
-    XLSX.writeFile(wb, `${owner}_transactions_${new Date().toISOString().split('T')[0]}.xlsx`);
-  };
+    XLSX.writeFile(wb, `${owner}_transactions_${new Date().toISOString().split("T")[0]}.xlsx`)
+  }
 
   // Add loading skeletons component
   const LoadingSkeleton = () => (
@@ -700,188 +800,189 @@ export default function OwnerDetailsPage() {
       <Skeleton className="h-[200px] w-full" />
       <Skeleton className="h-[300px] w-full" />
     </div>
-  );
+  )
 
   // Add function to fetch owner balances
   const fetchOwnerBalances = async () => {
     try {
-      const balanceRef = ref(database, `owner_balances/${owner}`);
-      const snapshot = await get(balanceRef);
+      const balanceRef = ref(database, `owner_balances/${owner}`)
+      const snapshot = await get(balanceRef)
       if (snapshot.exists()) {
-        setOwnerBalance(snapshot.val());
+        setOwnerBalance(snapshot.val())
       }
     } catch (error) {
-      console.error('Error fetching balance:', error);
+      console.error("Error fetching balance:", error)
     }
-  };
+  }
 
   // Add this useEffect to fetch balances when the component mounts
   useEffect(() => {
-    fetchOwnerBalances();
-  }, [owner]);
+    fetchOwnerBalances()
+  }, [owner, workDetails, truckPayments]) // Added dependencies
 
   // Add new handler function after existing state declarations
   const handleOwnerNameClick = () => {
-    const newCount = ownerNameClickCount + 1;
+    const newCount = ownerNameClickCount + 1
     if (newCount === 3) {
-      setOwnerNameClickCount(0);
-      setIsBalanceEditMode(true);
-      setManualBalance((ownerBalance?.amount || 0).toString());
+      setOwnerNameClickCount(0)
+      setIsBalanceEditMode(true)
+      setManualBalance((ownerBalance?.amount || 0).toString())
       toast({
         title: "Developer Mode",
         description: "Balance edit mode enabled",
-        variant: "default"
-      });
+        variant: "default",
+      })
     } else {
-      setOwnerNameClickCount(newCount);
+      setOwnerNameClickCount(newCount)
       // Reset count after 1 second if not clicked three times
-      setTimeout(() => setOwnerNameClickCount(0), 1000);
+      setTimeout(() => setOwnerNameClickCount(0), 1000)
     }
-  };
+  }
 
   // Add new handler for balance update
   const handleManualBalanceUpdate = async () => {
     try {
-      const newBalance = parseFloat(manualBalance);
+      const newBalance = Number.parseFloat(manualBalance)
       if (isNaN(newBalance)) {
-        throw new Error('Invalid balance amount');
+        throw new Error("Invalid balance amount")
       }
 
-      const timestamp = new Date().toISOString();
+      const timestamp = new Date().toISOString()
       const updates: { [key: string]: any } = {
         [`owner_balances/${owner}`]: {
           amount: newBalance,
-          lastUpdated: timestamp
-        }
-      };
+          lastUpdated: timestamp,
+        },
+      }
 
       // Add a record in balance_usage for audit
-      const balanceUsageRef = push(ref(database, `balance_usage/${owner}`));
+      const balanceUsageRef = push(ref(database, `balance_usage/${owner}`))
       updates[`balance_usage/${owner}/${balanceUsageRef.key}`] = {
         amount: newBalance,
         timestamp,
-        type: 'manual_adjustment',
-        note: 'Manual balance adjustment by admin'
-      };
+        type: "manual_adjustment",
+        note: "Manual balance adjustment by admin",
+      }
 
-      await update(ref(database), updates);
-      
+      await update(ref(database), updates)
+
       toast({
         title: "Success",
         description: "Balance manually updated",
-      });
-      
-      setIsBalanceEditMode(false);
-      await fetchOwnerBalances();
+      })
+
+      setIsBalanceEditMode(false)
+      await fetchOwnerBalances()
     } catch (error) {
       toast({
         title: "Error",
         description: error instanceof Error ? error.message : "Failed to update balance",
-        variant: "destructive"
-      });
+        variant: "destructive",
+      })
     }
-  };
+  }
 
   // Add new handler function
   const handleOrderStatsClick = () => {
-    const newCount = orderStatsClickCount + 1;
-    if (newCount === 2) { // Double click
-      setOrderStatsClickCount(0);
-      setShowPendingOrders(true);
+    const newCount = orderStatsClickCount + 1
+    if (newCount === 2) {
+      // Double click
+      setOrderStatsClickCount(0)
+      setShowPendingOrders(true)
       toast({
         title: "Admin Mode",
         description: "Pending orders view enabled",
-        variant: "default"
-      });
+        variant: "default",
+      })
     } else {
-      setOrderStatsClickCount(newCount);
+      setOrderStatsClickCount(newCount)
       // Reset count after 500ms if not double clicked
-      setTimeout(() => setOrderStatsClickCount(0), 500);
+      setTimeout(() => setOrderStatsClickCount(0), 500)
     }
-  };
+  }
 
   // Update the handleFixTruckStatus function
   const handleFixTruckStatus = async (truckId: string) => {
     try {
-      const truck = workDetails.find(t => t.id === truckId);
-      if (!truck) return;
-  
-      const updates = await syncTruckPaymentStatus(database, truck, truckPayments);
-      await update(ref(database), updates);
-  
+      const truck = workDetails.find((t) => t.id === truckId)
+      if (!truck) return
+
+      const updates = await syncTruckPaymentStatus(database, truck, truckPayments)
+      await update(ref(database), updates)
+
       toast({
         title: "Status Updated",
         description: `Payment status synchronized for truck ${truck.truck_number}`,
-      });
+      })
     } catch (error) {
-      console.error('Fix error:', error);
+      console.error("Fix error:", error)
       toast({
         title: "Error",
         description: "Failed to sync payment status",
-        variant: "destructive"
-      });
+        variant: "destructive",
+      })
     }
-  };
-  
+  }
+
   // Update handleFixAllStatuses to use syncTruckPaymentStatus
   const handleFixAllStatuses = async () => {
     try {
-      const allUpdates: { [path: string]: any } = {};
-      
-      for (const truck of workDetails.filter(t => t.loaded)) {
-        const updates = await syncTruckPaymentStatus(database, truck, truckPayments);
-        Object.assign(allUpdates, updates);
+      const allUpdates: { [path: string]: any } = {}
+
+      for (const truck of workDetails.filter((t) => t.loaded)) {
+        const updates = await syncTruckPaymentStatus(database, truck, truckPayments)
+        Object.assign(allUpdates, updates)
       }
-  
-      await update(ref(database), allUpdates);
-  
+
+      await update(ref(database), allUpdates)
+
       toast({
         title: "Status Updated",
         description: "All payment statuses synchronized",
-      });
+      })
     } catch (error) {
-      console.error('Fix error:', error);
+      console.error("Fix error:", error)
       toast({
         title: "Error",
         description: "Failed to sync payment statuses",
-        variant: "destructive"
-      });
+        variant: "destructive",
+      })
     }
-  };
+  }
 
   // Add new handler
   const handleCorrectionSubmit = async () => {
-    if (!selectedCorrection || !correctionAmount || !correctionNote) return;
+    if (!selectedCorrection || !correctionAmount || !correctionNote) return
 
     try {
       const correction: PaymentCorrection = {
         paymentId: selectedCorrection.payment.id,
         truckId: selectedCorrection.truck.id,
         oldAmount: selectedCorrection.allocation.amount,
-        newAmount: parseFloat(correctionAmount),
+        newAmount: Number.parseFloat(correctionAmount),
         timestamp: selectedCorrection.payment.timestamp,
-        note: correctionNote
-      };
+        note: correctionNote,
+      }
 
-      await correctPaymentAllocation(database, owner, correction);
+      await correctPaymentAllocation(database, owner, correction)
 
       toast({
         title: "Correction Applied",
         description: "Payment allocation has been corrected",
-      });
+      })
 
-      setShowCorrectionDialog(false);
-      setSelectedCorrection(null);
-      setCorrectionAmount("");
-      setCorrectionNote("");
+      setShowCorrectionDialog(false)
+      setSelectedCorrection(null)
+      setCorrectionAmount("")
+      setCorrectionNote("")
     } catch (error) {
       toast({
         title: "Error",
         description: "Failed to apply correction",
-        variant: "destructive"
-      });
+        variant: "destructive",
+      })
     }
-  };
+  }
 
   // Add new handlers
   const handleReverseTruckPayment = async (payment: any, truck: WorkDetail, allocation: any) => {
@@ -892,20 +993,20 @@ export default function OwnerDetailsPage() {
         oldAmount: allocation.amount,
         newAmount: 0, // Reverse by setting to 0
         timestamp: payment.timestamp,
-        note: `Payment reversed - Original amount: $${formatNumber(allocation.amount)}`
-      };
-  
-      await correctPaymentAllocation(database, owner, correction);
-      toast({ title: "Payment Reversed", description: "Payment allocation has been reversed" });
+        note: `Payment reversed - Original amount: $${formatNumber(allocation.amount)}`,
+      }
+
+      await correctPaymentAllocation(database, owner, correction)
+      toast({ title: "Payment Reversed", description: "Payment allocation has been reversed" })
     } catch (error) {
       toast({
         title: "Error",
         description: "Failed to reverse payment",
-        variant: "destructive"
-      });
+        variant: "destructive",
+      })
     }
-  };
-  
+  }
+
   const handleWriteOff = async (payment: any, truck: WorkDetail, allocation: any) => {
     try {
       const correction: PaymentCorrection = {
@@ -914,19 +1015,19 @@ export default function OwnerDetailsPage() {
         oldAmount: allocation.amount,
         newAmount: getTruckAllocations(truck, truckPayments).balance, // Set to full balance
         timestamp: payment.timestamp,
-        note: `Payment written off - Original amount: $${formatNumber(allocation.amount)}`
-      };
-  
-      await correctPaymentAllocation(database, owner, correction);
-      toast({ title: "Payment Written Off", description: "Payment has been written off" });
+        note: `Payment written off - Original amount: $${formatNumber(allocation.amount)}`,
+      }
+
+      await correctPaymentAllocation(database, owner, correction)
+      toast({ title: "Payment Written Off", description: "Payment has been written off" })
     } catch (error) {
       toast({
         title: "Error",
         description: "Failed to write off payment",
-        variant: "destructive"
-      });
+        variant: "destructive",
+      })
     }
-  };
+  }
 
   // Add new context menu for payments table
   const PaymentActions = ({ payment, truck, allocation }: { payment: any; truck: WorkDetail; allocation: any }) => (
@@ -937,18 +1038,24 @@ export default function OwnerDetailsPage() {
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent>
-        <DropdownMenuItem onClick={() => {
-          setSelectedCorrection({ payment, truck, allocation });
-          setCorrectionAmount(allocation.amount.toString());
-          setShowCorrectionDialog(true);
-        }}>
+        <DropdownMenuItem
+          onClick={() => {
+            setSelectedCorrection({ payment, truck, allocation })
+            setCorrectionAmount(allocation.amount.toString())
+            setShowCorrectionDialog(true)
+          }}
+        >
           <Receipt className="mr-2 h-4 w-4" />
           Correct Amount
         </DropdownMenuItem>
-        <DropdownMenuItem 
+        <DropdownMenuItem
           onClick={() => {
-            if (confirm(`Are you sure you want to reverse the payment of $${formatNumber(allocation.amount)} for truck ${truck.truck_number}?`)) {
-              handleReverseTruckPayment(payment, truck, allocation);
+            if (
+              confirm(
+                `Are you sure you want to reverse the payment of $${formatNumber(allocation.amount)} for truck ${truck.truck_number}?`,
+              )
+            ) {
+              handleReverseTruckPayment(payment, truck, allocation)
             }
           }}
           className="text-red-600"
@@ -956,10 +1063,10 @@ export default function OwnerDetailsPage() {
           <AlertCircle className="mr-2 h-4 w-4" />
           Reverse Payment
         </DropdownMenuItem>
-        <DropdownMenuItem 
+        <DropdownMenuItem
           onClick={() => {
             if (confirm(`Are you sure you want to write off the remaining balance for truck ${truck.truck_number}?`)) {
-              handleWriteOff(payment, truck, allocation);
+              handleWriteOff(payment, truck, allocation)
             }
           }}
           className="text-amber-600"
@@ -969,85 +1076,138 @@ export default function OwnerDetailsPage() {
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
-  );
+  )
 
   // Add new function to get truck payment history
   const getTruckPaymentHistory = (truckId: string) => {
-    const history: TruckPaymentHistory[] = [];
-    
-    ownerPayments.forEach(payment => {
+    const history: TruckPaymentHistory[] = []
+
+    ownerPayments.forEach((payment) => {
       payment.allocatedTrucks?.forEach((allocation: any) => {
         if (allocation.truckId === truckId) {
-          const truck = workDetails.find(t => t.id === truckId);
+          const truck = workDetails.find((t) => t.id === truckId)
           history.push({
             paymentId: payment.id,
             timestamp: payment.timestamp,
             amount: allocation.amount,
-            note: payment.note || '',
-            truckNumber: truck?.truck_number || ''
-          });
+            note: payment.note || "",
+            truckNumber: truck?.truck_number || "",
+          })
         }
-      });
-    });
-    
+      })
+    })
+
     // Sort by date (oldest first)
-    return history.sort((a, b) => 
-      new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-    );
-  };
+    return history.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+  }
 
   // Add new function to filter trucks
   const getFilteredTrucks = () => {
     return workDetails
-      .filter(truck => 
-        truck.loaded && 
-        truck.truck_number.toLowerCase().includes(truckFilter.toLowerCase())
-      )
-      .sort((a, b) => a.truck_number.localeCompare(b.truck_number));
-  };
+      .filter((truck) => truck.loaded && truck.truck_number.toLowerCase().includes(truckFilter.toLowerCase()))
+      .sort((a, b) => a.truck_number.localeCompare(b.truck_number))
+  }
 
   // Add function to group payments by truck
   const groupPaymentsByTruck = () => {
-    const grouped: { [key: string]: GroupedTruckPayment } = {};
-    
+    const grouped: { [key: string]: GroupedTruckPayment } = {}
+
     ownerPayments
       .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
-      .forEach(payment => {
+      .forEach((payment) => {
         payment.allocatedTrucks?.forEach((allocation: any) => {
-          const truck = workDetails.find(t => t.id === allocation.truckId);
-          if (!truck || !truck.truck_number.toLowerCase().includes(truckFilter.toLowerCase())) return;
-          
+          const truck = workDetails.find((t) => t.id === allocation.truckId)
+          if (!truck || !truck.truck_number.toLowerCase().includes(truckFilter.toLowerCase())) return
+
           if (!grouped[truck.truck_number]) {
             grouped[truck.truck_number] = {
               truckNumber: truck.truck_number,
               total: 0,
-              payments: []
-            };
+              payments: [],
+            }
           }
-          
-          grouped[truck.truck_number].total += allocation.amount;
+
+          grouped[truck.truck_number].total += allocation.amount
           grouped[truck.truck_number].payments.push({
             date: new Date(payment.timestamp),
             paymentId: payment.id,
             amount: allocation.amount,
-            note: payment.note || '—'
-          });
-        });
-      });
-      
-    return Object.values(grouped);
-  };
+            note: payment.note || "—",
+          })
+        })
+      })
+
+    return Object.values(grouped)
+  }
 
   // Add toggle function for rows
   const toggleTruckExpand = (truckNumber: string) => {
-    const newExpanded = new Set(expandedTrucks);
+    const newExpanded = new Set(expandedTrucks)
     if (newExpanded.has(truckNumber)) {
-      newExpanded.delete(truckNumber);
+      newExpanded.delete(truckNumber)
     } else {
-      newExpanded.add(truckNumber);
+      newExpanded.add(truckNumber)
     }
-    setExpandedTrucks(newExpanded);
-  };
+    setExpandedTrucks(newExpanded)
+  }
+
+  // Add new function to handle order changes
+  const initializeOrder = (trucks: WorkDetail[]) => {
+    const order: { [key: string]: number } = {}
+    trucks.forEach((truck, index) => {
+      if (!paymentOrder[truck.id]) {
+        order[truck.id] = index
+      }
+    })
+    return { ...paymentOrder, ...order }
+  }
+
+  const handleMoveRow = async (truckId: string, direction: "up" | "down") => {
+    const sortedTrucks = workDetails
+      .filter((t) => t.loaded && t.truck_number.toLowerCase().includes(truckFilter.toLowerCase()))
+      .sort((a, b) => (paymentOrder[a.id] || 0) - (paymentOrder[b.id] || 0))
+
+    const currentIndex = sortedTrucks.findIndex((t) => t.id === truckId)
+    if (currentIndex === -1) return
+
+    let newOrder = { ...paymentOrder }
+
+    if (direction === "up" && currentIndex > 0) {
+      // Swap with previous truck
+      const prevTruck = sortedTrucks[currentIndex - 1]
+      const currentOrder = paymentOrder[truckId] || currentIndex
+      const prevOrder = paymentOrder[prevTruck.id] || (currentIndex - 1)
+
+      newOrder[truckId] = prevOrder
+      newOrder[prevTruck.id] = currentOrder
+    } else if (direction === "down" && currentIndex < sortedTrucks.length - 1) {
+      // Swap with next truck
+      const nextTruck = sortedTrucks[currentIndex + 1]
+      const currentOrder = paymentOrder[truckId] || currentIndex
+      const nextOrder = paymentOrder[nextTruck.id] || (currentIndex + 1)
+
+      newOrder[truckId] = nextOrder
+      newOrder[nextTruck.id] = currentOrder
+    }
+
+    try {
+      await update(ref(database, `payment_order/${owner}`), newOrder)
+      setPaymentOrder(newOrder)
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to update order",
+        variant: "destructive",
+      })
+    }
+  }
+
+  useEffect(() => {
+    if (workDetails.length > 0) {
+      const initialOrder = initializeOrder(workDetails)
+      setPaymentOrder(initialOrder)
+    }
+  }, [workDetails])
 
   const profilePicUrl = useProfileImage()
 
@@ -1096,7 +1256,7 @@ export default function OwnerDetailsPage() {
                 className="relative hover:bg-emerald-100"
                 title="Add Prepayment"
               >
-                <Wallet2 className="h-4 w-4 sm:h-5 sm:w-5 text-emerald-600" />
+                <Wallet2 className="h-4 w-4 sm:h-5 w-5 text-emerald-600" />
                 <span className="sr-only">Add Prepayment</span>
               </Button>
               <Button
@@ -1146,6 +1306,10 @@ export default function OwnerDetailsPage() {
               <Button variant="outline" onClick={handleDownloadPDF} className="text-xs sm:text-sm">
                 <Download className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
                 Export PDF
+              </Button>
+              <Button variant="outline" onClick={handleDownloadTruckPaymentsPDF} className="text-xs sm:text-sm">
+                <Download className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
+                Export Truck Payments PDF
               </Button>
             </motion.div>
 
@@ -1261,7 +1425,7 @@ export default function OwnerDetailsPage() {
               )}
             </AnimatePresence>
 
-            {/* Financial Summary */}
+            {/* Animate financial summary section */}
             <motion.div variants={slideUp}>
               <Card className="p-3 sm:p-6">
                 <h2 className="text-lg sm:text-xl font-semibold mb-3 sm:mb-4">Financial Summary</h2>
@@ -1339,7 +1503,7 @@ export default function OwnerDetailsPage() {
                               <td className="p-2">{truck.truck_number}</td>
                               <td className="p-2">{truck.product}</td>
                               <td className="p-2">{truck.at20 || '-'}</td>
-                              <td className="p-2">${formatNumber(parseFloat(truck.price))}</td>
+                              <td className="p-2">${formatNumber(Number.parseFloat(truck.price))}</td>
                               <td className="p-2">${formatNumber(totalDue)}</td>
                               <td className="p-2">${formatNumber(totalAllocated)}</td>
                               <td className="p-2">${formatNumber(Math.abs(balance))}</td>
@@ -1410,7 +1574,9 @@ export default function OwnerDetailsPage() {
                           <th className="p-2 text-left">Allocated Trucks</th>
                           <th className="p-2 text-left">Note</th></tr></thead>
                       <tbody>
-                        {ownerPayments.map((payment) => (
+                        {ownerPayments
+                          .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()) // Sort oldest first
+                          .map((payment) => (
                           <tr key={payment.id} className={cn("border-t",payment.corrected && "bg-muted/50")}>
                             <td className="p-2">{payment.id}</td>
                             <td className="p-2">{payment.allocatedTrucks?.map((allocation: any) => {
@@ -1511,7 +1677,11 @@ export default function OwnerDetailsPage() {
                     <tbody>
                       {workDetails
                         .filter(truck => truck.loaded && truck.truck_number.toLowerCase().includes(truckFilter.toLowerCase()))
-                        .sort((a, b) => a.truck_number.localeCompare(b.truck_number))
+                        .sort((a, b) => {
+                          const orderA = paymentOrder[a.id] || 0
+                          const orderB = paymentOrder[b.id] || 0
+                          return orderA - orderB
+                        })
                         .map(truck => {
                           const payments = ownerPayments
                             .flatMap(payment => 
@@ -1521,11 +1691,15 @@ export default function OwnerDetailsPage() {
                                   date: new Date(payment.timestamp),
                                   paymentId: payment.id,
                                   amount: allocation.amount,
-                                  note: payment.note || '—'
+                                  note: payment.note || '—',
+                                  timestamp: payment.timestamp, // Include timestamp for sorting
+                                  paymentTimestamp: payment.timestamp // Keep original payment timestamp
                                 }))
                             )
                             .filter(Boolean)
-                            .sort((a, b) => b.date.getTime() - a.date.getTime()); // Changed sort order here
+                            .sort((a, b) => new Date(a.paymentTimestamp).getTime() - new Date(b.paymentTimestamp).getTime()); // Sort by original payment timestamp
+
+                          console.log("Payments for truck", truck.truck_number, payments.map(p => p.date.toLocaleDateString()));
 
                           const total = payments.reduce((sum, p) => sum + p.amount, 0);
 
@@ -1533,7 +1707,29 @@ export default function OwnerDetailsPage() {
                             <React.Fragment key={truck.id}>
                               <tr className="bg-muted/10 font-medium">
                                 <td className="border p-2" rowSpan={payments.length + 1}>
-                                  {truck.truck_number}
+                                  <div className="flex items-center gap-2 group">
+                                    <div className="opacity-0 group-hover:opacity-100 transition-opacity flex flex-col">
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() => handleMoveRow(truck.id, 'up')}
+                                        className="h-6 w-6 p-0 hover:bg-muted"
+                                        disabled={paymentOrder[truck.id] === 0}
+                                      >
+                                        <ChevronUp className="h-4 w-4 text-muted-foreground hover:text-foreground transition-colors" />
+                                      </Button>
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() => handleMoveRow(truck.id, 'down')}
+                                        className="h-6 w-6 p-0 hover:bg-muted"
+                                        disabled={paymentOrder[truck.id] === workDetails.filter(t => t.loaded).length - 1}
+                                      >
+                                        <ChevronDown className="h-4 w-4 text-muted-foreground hover:text-foreground transition-colors" />
+                                      </Button>
+                                    </div>
+                                    <span>{truck.truck_number}</span>
+                                  </div>
                                 </td>
                                 <td className="border p-2" colSpan={2}>
                                   Total Payments
@@ -1543,7 +1739,7 @@ export default function OwnerDetailsPage() {
                                 </td>
                                 <td className="border p-2"></td>
                               </tr>
-                              {payments.reverse().map((payment, idx) => ( // Added reverse() here
+                              {payments.map((payment, idx) => (
                                 <tr 
                                   key={`${payment.paymentId}-${idx}`}
                                   className={idx % 2 === 0 ? 'bg-background' : 'bg-muted/5'}
@@ -1596,6 +1792,7 @@ export default function OwnerDetailsPage() {
                 animate={{ scale: 1, opacity: 1 }}
                 exit={{ scale: 0.95, opacity: 0 }}
                 transition={{ duration: 0.2 }}
+                
               >
                 <DialogContent className="w-[95vw] sm:max-w-[900px] h-[90vh] overflow-y-auto">
                   <DialogHeader>
@@ -1647,7 +1844,7 @@ export default function OwnerDetailsPage() {
                                   value={paymentFormData.amount}
                                   onChange={(e) => setPaymentFormData(prev => ({
                                     ...prev,
-                                    amount: parseFloat(e.target.value) || 0,
+                                    amount: Number.parseFloat(e.target.value) || 0,
                                     allocatedTrucks: []
                                   }))}
                                   className="text-lg"
