@@ -627,7 +627,6 @@ export default function OwnerDetailsPage() {
 
   // Add this new function after handleDownloadPDF
   const handleDownloadTruckPaymentsPDF = () => {
-    // Create PDF in landscape orientation with bleed
     const doc = new jsPDF({
       orientation: "landscape",
       unit: "mm",
@@ -637,168 +636,140 @@ export default function OwnerDetailsPage() {
 
     const pageWidth = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();
-    const margin = 15; // Increased margin for better spacing
+    const margin = 10;
 
-    // Function to add rounded rectangle
-    const addRoundedRect = (x: number, y: number, width: number, height: number, radius: number, fillColor: any) => {
-      doc.setFillColor(fillColor[0], fillColor[1], fillColor[2]);
-      doc.roundedRect(x, y, width, height, radius, radius, 'F');
+    // Calculate usable width (total width minus margins)
+    const usableWidth = pageWidth - (margin * 2);
+    
+    // Calculate column widths as percentages of usable width
+    const columnWidths = {
+      0: usableWidth * 0.2,  // Truck Number: 20%
+      1: usableWidth * 0.15, // Date: 15%
+      2: usableWidth * 0.15, // Payment ID: 15%
+      3: usableWidth * 0.2,  // Amount: 20%
+      4: usableWidth * 0.3   // Note: 30%
     };
 
-    // Modern header with gradient effect and shadow
-    addRoundedRect(0, 0, pageWidth, 45, 0, [41, 128, 185]); // Primary blue
-
-    // Add company logo space (you can add your logo here)
-    doc.setFillColor(255, 255, 255);
-    doc.circle(25, 22, 10, 'F');
-
-    // Add header text with shadow effect
+    // Header - only at the top of first page
+    doc.setFillColor(41, 128, 185);
+    doc.rect(0, 0, pageWidth, 20, 'F');
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(28);
+    doc.setFontSize(14);
     doc.setTextColor(255, 255, 255);
-    doc.text(`${owner}`, pageWidth / 2, 25, { align: "center" });
-    doc.setFontSize(16);
-    doc.text("Truck Payment Tracker", pageWidth / 2, 38, { align: "center" });
+    doc.text(`${owner} - Truck Payment Tracker`, pageWidth / 2, 13, { align: "center" });
 
-    let startY = 60;
+    let startY = 25;
 
-    // Get filtered and sorted trucks (same order as table)
+    // Create table data matching the UI table structure
+    const tableData: any[] = [];
+    
+    // Get filtered and sorted trucks
     const filteredTrucks = workDetails
       .filter(truck => truck.loaded && truck.truck_number.toLowerCase().includes(truckFilter.toLowerCase()))
       .sort((a, b) => (paymentOrder[a.id] || 0) - (paymentOrder[b.id] || 0));
 
-    // Add summary section with card styling
-    const totalPayments = filteredTrucks.reduce((sum, truck) => {
-      const truckPayments = ownerPayments
-        .flatMap(p => p.allocatedTrucks?.filter((a: any) => a.truckId === truck.id))
-        .reduce((sum, a: any) => sum + (a?.amount || 0), 0);
-      return sum + truckPayments;
-    }, 0);
-
-    addRoundedRect(margin, startY - 5, pageWidth - (margin * 2), 25, 5, [247, 250, 252]); // Light gray background
-    doc.setTextColor(44, 62, 80);
-    doc.setFontSize(14);
-    doc.text("Summary", margin + 10, startY + 8);
-    doc.setFont("helvetica", "normal");
-    doc.text(`Total Payments: $${formatNumber(totalPayments)}`, pageWidth - margin - 10, startY + 8, { align: 'right' });
-
-    startY += 35;
-
-    // Process each truck
+    // Process each truck and its payments
     filteredTrucks.forEach((truck, index) => {
       const payments = ownerPayments
         .flatMap(payment => 
           payment.allocatedTrucks
             ?.filter((allocation: any) => allocation.truckId === truck.id)
             .map((allocation: any) => ({
-              date: new Date(payment.timestamp),
-              paymentId: payment.id,
+              truck: truck.truck_number,
+              date: new Date(payment.timestamp).toLocaleDateString(),
+              paymentId: payment.id.slice(-6),
               amount: allocation.amount,
-              note: payment.note || '—',
-              timestamp: payment.timestamp
+              note: payment.note || '—'
             }))
         )
         .filter(Boolean)
-        .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+        .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
       const total = payments.reduce((sum, p) => sum + p.amount, 0);
 
-      // Add new page if needed
-      if (startY > pageHeight - 80) {
-        doc.addPage();
-        startY = 20;
-      }
+      // Add the truck total row with index number
+      tableData.push([
+        { content: `${index + 1}. ${truck.truck_number}`, styles: { fontStyle: 'bold' } },
+        { content: 'Total Payments', styles: { fontStyle: 'bold' } },
+        { content: '', styles: { fontStyle: 'bold' } },
+        { content: `$${formatNumber(total)}`, styles: { fontStyle: 'bold', textColor: [46, 204, 113], halign: 'right' } },
+        { content: '', styles: { fontStyle: 'bold' } }
+      ]);
 
-      // Add truck header with modern card-like styling
-      addRoundedRect(margin, startY - 5, pageWidth - (margin * 2), 20, 5, [236, 240, 241]); // Very light gray
-      doc.setTextColor(52, 73, 94);
-      doc.setFontSize(14);
-      doc.setFont("helvetica", "bold");
-      doc.text(`${truck.truck_number}`, margin + 10, startY + 7);
-      doc.setTextColor(46, 204, 113); // Green for total
-      doc.text(`$${formatNumber(total)}`, pageWidth - margin - 10, startY + 7, { align: 'right' });
-
-      startY += 25;
-
-      // Add payments table with modern styling
-      if (payments.length > 0) {
-        (doc as any).autoTable({
-          startY: startY,
-          head: [["Date", "Payment ID", "Amount", "Note"]],
-          body: payments.map((payment) => [
-            payment.date.toLocaleDateString(),
-            payment.paymentId.slice(-6),
+      // Add payment rows
+      if (payments.length === 0) {
+        tableData.push([
+          '', // Empty because truck number is in rowSpan
+          '—',
+          '—',
+          '$0.00',
+          'No payments recorded'
+        ]);
+      } else {
+        payments.forEach((payment, idx) => {
+          tableData.push([
+            '', // Empty because truck number is in rowSpan
+            payment.date,
+            payment.paymentId,
             `$${formatNumber(payment.amount)}`,
             payment.note
-          ]),
-          margin: { left: margin, right: margin },
-          styles: {
-            fontSize: 11,
-            cellPadding: 7,
-            lineColor: [189, 195, 199],
-            lineWidth: 0.1,
-          },
-          columnStyles: {
-            0: { cellWidth: 35 },
-            1: { cellWidth: 35 },
-            2: { cellWidth: 35, halign: 'right', textColor: [46, 204, 113] },
-            3: { cellWidth: 'auto' },
-          },
-          headStyles: {
-            fillColor: [52, 152, 219],
-            textColor: [255, 255, 255],
-            fontSize: 12,
-            fontStyle: 'bold',
-            halign: 'left',
-          },
-          alternateRowStyles: {
-            fillColor: [250, 250, 250],
-          },
-          bodyStyles: {
-            fillColor: [255, 255, 255],
-          },
-          didDrawPage: function(data: any) {
-            // Add header to each page
-            doc.setFillColor(41, 128, 185);
-            doc.rect(0, 0, pageWidth, 15, 'F');
-            doc.setTextColor(255, 255, 255);
-            doc.setFontSize(10);
-            doc.text(`${owner} - Truck Payment Tracker`, pageWidth / 2, 10, { align: "center" });
-          },
+          ]);
         });
-
-        startY = (doc as any).lastAutoTable.finalY + 20;
-      } else {
-        doc.setFontSize(12);
-        doc.setTextColor(128, 128, 128);
-        doc.text("No payments recorded", pageWidth / 2, startY + 5, { align: "center" });
-        startY += 30;
       }
+
+      // Add a small spacing after each truck section
+      tableData.push([{ content: '', styles: { cellPadding: 1 } }, '', '', '', '']);
     });
 
-    // Add footer with metadata
-    const totalPages = doc.internal.getNumberOfPages();
-    for (let i = 1; i <= totalPages; i++) {
-      doc.setPage(i);
-
-      // Add gradient-like footer
-      doc.setFillColor(236, 240, 241);
-      doc.rect(0, pageHeight - 20, pageWidth, 20, 'F');
-
-      // Add footer content
-      doc.setFontSize(9);
-      doc.setTextColor(128, 128, 128);
-
-      // Left: timestamp
-      const timestamp = new Date().toLocaleString();
-      doc.text(timestamp, margin, pageHeight - 8);
-
-      // Center: owner name
-      doc.text(owner, pageWidth / 2, pageHeight - 8, { align: 'center' });
-
-      // Right: page numbers
-      doc.text(`Page ${i} of ${totalPages}`, pageWidth - margin, pageHeight - 8, { align: 'right' });
-    }
+    // Add the table with optimized column widths
+    (doc as any).autoTable({
+      startY: startY,
+      head: [[
+        'Truck Number',
+        'Date',
+        'Payment ID',
+        'Amount',
+        'Note'
+      ]],
+      body: tableData,
+      margin: { left: margin, right: margin },
+      styles: {
+        fontSize: 9,
+        cellPadding: 4,
+        lineColor: [189, 195, 199],
+        lineWidth: 0.1,
+        minCellWidth: 20, // Ensure minimum cell width
+        cellWidth: 'wrap', // Allow content wrapping
+      },
+      columnStyles: {
+        0: { cellWidth: columnWidths[0] }, // Truck Number
+        1: { cellWidth: columnWidths[1] }, // Date
+        2: { cellWidth: columnWidths[2] }, // Payment ID
+        3: { cellWidth: columnWidths[3], halign: 'right' }, // Amount
+        4: { cellWidth: columnWidths[4] }  // Note
+      },
+      headStyles: {
+        fillColor: [52, 152, 219],
+        textColor: [255, 255, 255],
+        fontSize: 10,
+        fontStyle: 'bold',
+        halign: 'left',
+      },
+      alternateRowStyles: {
+        fillColor: [250, 250, 250],
+      },
+      // Add page numbers only
+      didDrawPage: function(data: any) {
+        doc.setTextColor(128, 128, 128);
+        doc.setFontSize(8);
+        doc.text(
+          `Page ${data.pageCount}`, 
+          pageWidth - margin, 
+          pageHeight - 10, 
+          { align: 'right' }
+        );
+      }
+    });
 
     doc.save(`${owner}_TruckPayments_${new Date().toISOString().split("T")[0]}.pdf`);
   };
@@ -1310,7 +1281,7 @@ export default function OwnerDetailsPage() {
         initial="hidden"
         animate="visible"
         variants={fadeIn}
-        className="fixed top-0 left=0 w-full border-b z-50 bg-gradient-to-r from-emerald-900/10 via-blue-900/10 to-blue-900/10 backdrop-blur-xl"
+        className="fixed top=0 left=0 w-full border-b z-50 bg-gradient-to-r from-emerald-900/10 via-blue-900/10 to-blue-900/10 backdrop-blur-xl"
       >
         <div className="max-w-7xl mx-auto px-2 sm:px-4 py-2 sm:py-3">
           <div className="flex items-center justify-between">
@@ -1363,7 +1334,21 @@ export default function OwnerDetailsPage() {
               </Button>
               <ThemeToggle />
               <Avatar 
-                className="h-7 w-7 sm:h-8 sm:w-8 ring-2 ring-pink-500/50"
+                className="h-7 w-7 sm:h-8 sm:w-8 ring-2 ring-pink-500/50 cursor-pointer"
+                onClick={(e) => {
+                  // Count clicks within 500ms
+                  const now = Date.now();
+                  if (now - (Number(e.currentTarget.dataset.lastClick) || 0) < 500) {
+                    e.currentTarget.dataset.clicks = String(Number(e.currentTarget.dataset.clicks || 0) + 1);
+                    if (Number(e.currentTarget.dataset.clicks) >= 3) {
+                      // Triple click detected - navigate to playground
+                      router.push(`/dashboard/work/${params.owner}/playground`);
+                    }
+                  } else {
+                    e.currentTarget.dataset.clicks = "1";
+                  }
+                  e.currentTarget.dataset.lastClick = String(now);
+                }}
               >
                 <AvatarImage 
                   src={profilePicUrl || ''} 
@@ -1398,10 +1383,6 @@ export default function OwnerDetailsPage() {
               <Button variant="outline" onClick={handleDownloadPDF} className="text-xs sm:text-sm">
                 <Download className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
                 Export PDF
-              </Button>
-              <Button variant="outline" onClick={handleDownloadTruckPaymentsPDF} className="text-xs sm:text-sm">
-                <Download className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
-                Export Truck Payments PDF
               </Button>
             </motion.div>
 
@@ -1707,34 +1688,115 @@ export default function OwnerDetailsPage() {
             {/* Balance History */}
             <motion.div variants={slideUp}>
               <Card className="p-6 mt-4">
-                <h2 className="text-xl font-semibold mb-4">Balance History</h2>
+                <div className="flex justify-between items-center mb-4">
+                  <h2 className="text-xl font-semibold">Balance History</h2>
+                  <div className="text-sm text-muted-foreground">
+                    Current Balance: ${formatNumber(ownerBalance?.amount || 0)}
+                  </div>
+                </div>
                 <div className="overflow-x-auto">
                   <table className="w-full">
                     <thead>
-                      <tr>
+                      <tr className="bg-muted">
                         <th className="text-left p-2">Date</th>
-                        <th className="text-left p-2">Amount</th>
                         <th className="text-left p-2">Type</th>
-                        <th className="text-left p-2">Note</th>
+                        <th className="text-right p-2">Amount</th>
+                        <th className="text-right p-2">Previous Balance</th>
+                        <th className="text-right p-2">New Balance</th>
+                        <th className="text-left p-2">Details</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {balanceUsageHistory.map((entry) => (
-                        <tr key={entry.timestamp} className="border-t">
-                          <td className="p-2">
-                            {new Date(entry.timestamp).toLocaleDateString()}
-                          </td>
-                          <td className="p-2">
-                            <span className={entry.type === 'deposit' ? 'text-green-600' : 'text-red-600'}>
-                              {entry.type === 'deposit' ? '+' : '-'}${formatNumber(entry.amount)}
-                            </span>
-                          </td>
-                          <td className="p-2">{entry.type}</td>
-                          <td className="p-2">{entry.note || '—'}</td>
-                        </tr>
-                      ))}
+                      {balanceUsageHistory
+                        .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()) // Oldest first
+                        .reduce((acc: any[], entry, index, array) => {
+                          // Calculate running balance forwards
+                          const prevBalance = index === 0 ? 0 : acc[index - 1].newBalance;
+                          const changeAmount = entry.type === 'deposit' ? entry.amount : -entry.amount;
+                          const newBalance = prevBalance + changeAmount;
+
+                          // Get related truck numbers
+                          const relatedTrucks = entry.usedFor?.map(truckId => {
+                            const truck = workDetails.find(t => t.id === truckId);
+                            return truck?.truck_number;
+                          }).filter(Boolean);
+
+                          // Get related payment
+                          const relatedPayment = ownerPayments.find(p => p.id === entry.paymentId);
+
+                          // Build detail message
+                          let details = '';
+                          if (entry.type === 'deposit') {
+                            details = 'Added to balance';
+                          } else if (entry.type === 'usage') {
+                            details = `Used for trucks: ${relatedTrucks?.join(', ')}`;
+                            if (relatedPayment) {
+                              details += ` (Payment: ${relatedPayment.id.slice(-6)})`;
+                            }
+                          } else if (entry.type === 'manual_adjustment') {
+                            details = 'Manual balance adjustment';
+                          }
+
+                          acc.push({
+                            ...entry,
+                            prevBalance,
+                            newBalance,
+                            details,
+                            relatedPayment
+                          });
+
+                          return acc;
+                        }, [])
+                        .map((entry, index) => (
+                          <tr key={entry.timestamp} className={cn(
+                            "border-t transition-colors",
+                            entry.type === 'deposit' ? 'bg-emerald-50/30 hover:bg-emerald-50/50' : 
+                            entry.type === 'manual_adjustment' ? 'bg-amber-50/30 hover:bg-amber-50/50' : 
+                            index % 2 === 0 ? 'bg-muted/5 hover:bg-muted/10' : 'hover:bg-muted/10'
+                          )}>
+                            <td className="p-2 whitespace-nowrap text-sm">
+                              {new Date(entry.timestamp).toLocaleString()}
+                            </td>
+                            <td className="p-2 whitespace-nowrap">
+                              <span className={cn(
+                                "px-2 py-1 rounded-full text-xs font-medium",
+                                entry.type === 'deposit' ? 'bg-emerald-100/50 text-emerald-700' : 
+                                entry.type === 'usage' ? 'bg-blue-100/50 text-blue-700' :
+                                'bg-amber-100/50 text-amber-700'
+                              )}>
+                                {entry.type === 'deposit' ? 'Prepayment' :
+                                 entry.type === 'usage' ? 'Payment' :
+                                 'Adjustment'}
+                              </span>
+                            </td>
+                            <td className="p-2 text-right whitespace-nowrap font-medium">
+                              <span className={entry.type === 'deposit' ? 'text-emerald-600' : 'text-blue-600'}>
+                                {entry.type === 'deposit' ? '+' : '-'}${formatNumber(entry.amount)}
+                              </span>
+                            </td>
+                            <td className="p-2 text-right whitespace-nowrap text-muted-foreground">
+                              ${formatNumber(entry.prevBalance)}
+                            </td>
+                            <td className="p-2 text-right whitespace-nowrap font-medium">
+                              ${formatNumber(entry.newBalance)}
+                            </td>
+                            <td className="p-2 text-sm text-muted-foreground">
+                              {entry.details}
+                              {entry.note && entry.note !== entry.details && (
+                                <span className="ml-2">
+                                  ({entry.note})
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
                     </tbody>
                   </table>
+                  {balanceUsageHistory.length === 0 && (
+                    <div className="text-center py-4 text-muted-foreground">
+                      No balance history available
+                    </div>
+                  )}
                 </div>
               </Card>
             </motion.div>
@@ -1743,7 +1805,13 @@ export default function OwnerDetailsPage() {
             <motion.div variants={slideUp}>
               <Card className="p-3 sm:p-6">
                 <div className="flex justify-between items-center mb-4">
-                  <h2 className="text-lg sm:text-xl font-semibold">Truck Payment Tracker</h2>
+                  <div className="flex items-center gap-4">
+                    <h2 className="text-lg sm:text-xl font-semibold">Truck Payment Tracker</h2>
+                    <Button variant="outline" onClick={handleDownloadTruckPaymentsPDF} className="text-xs sm:text-sm">
+                      <Download className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
+                      Export PDF
+                    </Button>
+                  </div>
                   <div className="relative w-64">
                     <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
                     <Input
@@ -1769,12 +1837,8 @@ export default function OwnerDetailsPage() {
                     <tbody>
                       {workDetails
                         .filter(truck => truck.loaded && truck.truck_number.toLowerCase().includes(truckFilter.toLowerCase()))
-                        .sort((a, b) => {
-                          const orderA = paymentOrder[a.id] || 0
-                          const orderB = paymentOrder[b.id] || 0
-                          return orderA - orderB
-                        })
-                        .map(truck => {
+                        .sort((a, b) => (paymentOrder[a.id] || 0) - (paymentOrder[b.id] || 0))
+                        .map((truck, index) => {
                           const payments = ownerPayments
                             .flatMap(payment => 
                               payment.allocatedTrucks
@@ -1820,7 +1884,7 @@ export default function OwnerDetailsPage() {
                                         <ChevronDown className="h-4 w-4 text-muted-foreground hover:text-foreground transition-colors" />
                                       </Button>
                                     </div>
-                                    <span>{truck.truck_number}</span>
+                                    <span>{index + 1}. {truck.truck_number}</span>
                                   </div>
                                 </td>
                                 <td className="border p-2" colSpan={2}>
