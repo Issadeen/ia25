@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useCallback } from "react"
 import { useSession } from "next-auth/react"
 import { useRouter } from "next/navigation"
 import { database } from "@/lib/firebase"
@@ -27,7 +27,7 @@ import { Dialog, DialogContent, DialogHeader } from "@/components/ui/dialog"
 import { DialogTitle } from "@radix-ui/react-dialog"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
 interface GatePassApproval {
   id: string;
@@ -53,6 +53,23 @@ interface WorkDetail {
   // ...other fields...
 }
 
+interface ApprovalHistory {
+  id: string;
+  truckNumber: string;
+  status: 'approved' | 'rejected' | 'expired';
+  timestamp: string;
+  rejectionReason?: string;
+  requestedBy: string;
+}
+
+interface ApprovalStats {
+  total: number;
+  approved: number;
+  rejected: number;
+  expired: number;
+  averageResponseTime: number;
+}
+
 export default function ApprovalsPage() {
   const { data: session, status } = useSession()
   const router = useRouter()
@@ -70,6 +87,52 @@ export default function ApprovalsPage() {
   const [rejectionReason, setRejectionReason] = useState("");
   const [countdowns, setCountdowns] = useState<{ [key: string]: number }>({}); // Add countdown state
   const [workDetails, setWorkDetails] = useState<{ [key: string]: WorkDetail }>({});
+  const [approvalHistory, setApprovalHistory] = useState<ApprovalHistory[]>([])
+  const [approvalStats, setApprovalStats] = useState<ApprovalStats>({
+    total: 0,
+    approved: 0,
+    rejected: 0,
+    expired: 0,
+    averageResponseTime: 0
+  })
+  const [activeTab, setActiveTab] = useState('pending')
+
+  // Add rejection templates
+  const rejectionTemplates = [
+    "Invalid driver information",
+    "Expired request",
+    "Incorrect truck details",
+    "Documentation incomplete",
+    "Payment pending"
+  ]
+
+  // Add confirmation sound
+  const playConfirmationSound = () => {
+    const audio = new Audio('/sounds/confirmation.mp3');
+    audio.volume = 0.5; // Set volume to 50%
+    
+    // Only play if user has interacted with the page
+    const playPromise = audio.play();
+    if (playPromise !== undefined) {
+      playPromise.catch(error => {
+        console.log("Audio playback failed:", error);
+      });
+    }
+  };
+
+  // Add keyboard shortcuts
+  const handleKeyPress = useCallback((e: KeyboardEvent) => {
+    if (e.key === 'a' && e.ctrlKey) {
+      // Quick approve focused item
+    } else if (e.key === 'r' && e.ctrlKey) {
+      // Quick reject focused item
+    }
+  }, [])
+
+  useEffect(() => {
+    window.addEventListener('keydown', handleKeyPress)
+    return () => window.removeEventListener('keydown', handleKeyPress)
+  }, [handleKeyPress])
 
   useEffect(() => {
     if (status === "unauthenticated") {
@@ -164,6 +227,29 @@ export default function ApprovalsPage() {
     return () => unsubscribe();
   }, [isVerified]);
 
+  useEffect(() => {
+    if (!isVerified) return
+
+    const historyRef = ref(database, 'gatepass_history')
+    const unsubscribe = onValue(historyRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const history = Object.values(snapshot.val()) as ApprovalHistory[]
+        setApprovalHistory(history)
+        
+        // Calculate stats
+        const stats = history.reduce((acc, item) => {
+          acc.total++
+          acc[item.status]++
+          return acc
+        }, { total: 0, approved: 0, rejected: 0, expired: 0, averageResponseTime: 0 })
+        
+        setApprovalStats(stats)
+      }
+    })
+
+    return () => unsubscribe()
+  }, [isVerified])
+
   const handleVerify = async () => {
     setIsVerifying(true);
     try {
@@ -210,8 +296,10 @@ export default function ApprovalsPage() {
   const handleApprove = async (approval: GatePassApproval) => {
     try {
       await update(ref(database, `gatepass_approvals/${approval.id}`), {
-        status: 'approved'
+        status: 'approved',
+        respondedAt: new Date().toISOString()
       })
+      playConfirmationSound()
       toast({
         title: "Approved",
         description: `Gate pass for ${approval.truckNumber} approved`,
@@ -391,90 +479,162 @@ export default function ApprovalsPage() {
         </div>
 
         {/* Update approval cards to be more compact on mobile */}
-        <div className="grid gap-2 sm:gap-4">
-          {getFilteredApprovals().map((approval) => {
-            const gatePassInfo = getGatePassInfo(approval.truckNumber);
-            const workDetail = Object.values(workDetails).find(
-              w => w.truck_number === approval.truckNumber
-            );
-            const owner = workDetail?.owner || 'Unknown Owner';
+        <Tabs defaultValue="pending" className="w-full" value={activeTab} onValueChange={setActiveTab}>
+          <TabsList className="grid w-full grid-cols-2">
+            <TabsTrigger value="pending">
+              Pending ({pendingApprovals.length})
+            </TabsTrigger>
+            <TabsTrigger value="history">
+              History ({approvalHistory.length})
+            </TabsTrigger>
+          </TabsList>
 
-            return (
-              <motion.div
-                key={approval.id}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-              >
-                <Card className={cn(
-                  "p-3 sm:p-4 shadow-lg border-muted/20",
-                  gatePassInfo && "border-l-4 border-l-amber-500"
-                )}>
-                  <div className="space-y-3 sm:space-y-4">
-                    {/* Compact header for mobile */}
-                    <div className="flex flex-col gap-1 sm:gap-2">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2 text-sm sm:text-base">
-                          <span className="font-semibold">{approval.truckNumber}</span>
-                          <Badge variant="outline" className="text-xs">
-                            {owner}
-                          </Badge>
+          <TabsContent value="pending">
+            <div className="grid gap-2 sm:gap-4">
+              {getFilteredApprovals().map((approval) => {
+                const gatePassInfo = getGatePassInfo(approval.truckNumber);
+                const workDetail = Object.values(workDetails).find(
+                  w => w.truck_number === approval.truckNumber
+                );
+                const owner = workDetail?.owner || 'Unknown Owner';
+
+                return (
+                  <motion.div
+                    key={approval.id}
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                  >
+                    <Card className={cn(
+                      "p-3 sm:p-4 shadow-lg border-muted/20",
+                      gatePassInfo && "border-l-4 border-l-amber-500"
+                    )}>
+                      <div className="space-y-3 sm:space-y-4">
+                        {/* Compact header for mobile */}
+                        <div className="flex flex-col gap-1 sm:gap-2">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2 text-sm sm:text-base">
+                              <span className="font-semibold">{approval.truckNumber}</span>
+                              <Badge variant="outline" className="text-xs">
+                                {owner}
+                              </Badge>
+                            </div>
+                            {countdowns[approval.id] > 0 && (
+                              <Badge variant="secondary" className="text-xs animate-pulse">
+                                <Clock className="h-3 w-3 mr-1" />
+                                {countdowns[approval.id]}s
+                              </Badge>
+                            )}
+                          </div>
+
+                          {/* Compact info section */}
+                          <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-xs sm:text-sm text-muted-foreground">
+                            <p>Order: {approval.orderNo}</p>
+                            <p>By: {approval.requestedBy}</p>
+                            {gatePassInfo && (
+                              <p className="col-span-2 text-amber-600">
+                                <AlertTriangle className="inline h-3 w-3 mr-1" />
+                                {gatePassInfo.count} previous {gatePassInfo.count === 1 ? 'generation' : 'generations'}
+                              </p>
+                            )}
+                          </div>
                         </div>
-                        {countdowns[approval.id] > 0 && (
-                          <Badge variant="secondary" className="text-xs animate-pulse">
-                            <Clock className="h-3 w-3 mr-1" />
-                            {countdowns[approval.id]}s
-                          </Badge>
-                        )}
-                      </div>
 
-                      {/* Compact info section */}
-                      <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-xs sm:text-sm text-muted-foreground">
-                        <p>Order: {approval.orderNo}</p>
-                        <p>By: {approval.requestedBy}</p>
-                        {gatePassInfo && (
-                          <p className="col-span-2 text-amber-600">
-                            <AlertTriangle className="inline h-3 w-3 mr-1" />
-                            {gatePassInfo.count} previous {gatePassInfo.count === 1 ? 'generation' : 'generations'}
-                          </p>
+                        {/* Compact driver details */}
+                        {approval.driverDetails && (
+                          <div className="bg-muted/50 p-2 rounded text-xs sm:text-sm">
+                            <div className="grid grid-cols-2 gap-1">
+                              <p>{approval.driverDetails.name}</p>
+                              <p>{approval.driverDetails.phone}</p>
+                            </div>
+                          </div>
                         )}
-                      </div>
-                    </div>
 
-                    {/* Compact driver details */}
-                    {approval.driverDetails && (
-                      <div className="bg-muted/50 p-2 rounded text-xs sm:text-sm">
-                        <div className="grid grid-cols-2 gap-1">
-                          <p>{approval.driverDetails.name}</p>
-                          <p>{approval.driverDetails.phone}</p>
+                        {/* Compact action buttons */}
+                        <div className="flex justify-end gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleApprove(approval)}
+                            className="h-8 px-2 text-emerald-600"
+                          >
+                            <Check className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleReject(approval)}
+                            className="h-8 px-2 text-red-600"
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
                         </div>
                       </div>
-                    )}
+                    </Card>
+                  </motion.div>
+                );
+              })}
+            </div>
+          </TabsContent>
 
-                    {/* Compact action buttons */}
-                    <div className="flex justify-end gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleApprove(approval)}
-                        className="h-8 px-2 text-emerald-600"
-                      >
-                        <Check className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleReject(approval)}
-                        className="h-8 px-2 text-red-600"
-                      >
-                        <X className="h-4 w-4" />
-                      </Button>
+          <TabsContent value="history">
+            <div className="grid gap-4">
+              {/* Stats Card */}
+              <Card className="p-4">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                  <div className="space-y-1">
+                    <p className="text-sm text-muted-foreground">Total Processed</p>
+                    <p className="text-2xl font-bold">{approvalStats.total}</p>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-sm text-emerald-600">Approved</p>
+                    <p className="text-2xl font-bold text-emerald-600">
+                      {approvalStats.approved}
+                    </p>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-sm text-red-600">Rejected</p>
+                    <p className="text-2xl font-bold text-red-600">
+                      {approvalStats.rejected}
+                    </p>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-sm text-amber-600">Expired</p>
+                    <p className="text-2xl font-bold text-amber-600">
+                      {approvalStats.expired}
+                    </p>
+                  </div>
+                </div>
+              </Card>
+
+              {/* History List */}
+              {approvalHistory.map((item) => (
+                <Card key={item.id} className="p-4">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <h3 className="font-medium">{item.truckNumber}</h3>
+                      <p className="text-sm text-muted-foreground">
+                        By: {item.requestedBy}
+                      </p>
+                      {item.rejectionReason && (
+                        <p className="text-sm text-red-600 mt-2">
+                          Reason: {item.rejectionReason}
+                        </p>
+                      )}
                     </div>
+                    <Badge
+                      variant={
+                        item.status === 'approved' ? 'default' :
+                        item.status === 'rejected' ? 'destructive' : 'secondary'
+                      }
+                    >
+                      {item.status}
+                    </Badge>
                   </div>
                 </Card>
-              </motion.div>
-            );
-          })}
-        </div>
+              ))}
+            </div>
+          </TabsContent>
+        </Tabs>
       </div>
 
       {/* Add Rejection Dialog */}
