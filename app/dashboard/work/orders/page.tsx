@@ -26,8 +26,8 @@ import autoTable from 'jspdf-autotable'
 import * as XLSX from 'xlsx' // Add this import for Excel export
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
-import { syncTruckPaymentStatus } from "@/lib/payment-utils";
-import { cn } from '@/lib/utils'
+import { getTruckAllocations, syncTruckPaymentStatus } from "@/lib/payment-utils";
+import { cn, toFixed2 } from '@/lib/utils'
 import { OrderTracker } from '@/src/models/OrderTracker';
 import {
   Form,
@@ -202,6 +202,21 @@ interface EditableWorkDetail extends WorkDetail {
   _editing?: boolean;
 }
 
+// Add new interface for gate pass approval
+interface GatePassApproval {
+  id: string;
+  truckId: string;
+  requestedAt: string;
+  requestedBy: string;
+  status: 'pending' | 'approved' | 'rejected';
+  orderNo: string;
+  truckNumber: string;
+  driverDetails?: {
+    name: string;
+    phone: string;
+  };
+}
+
 export default function WorkManagementPage() {
   // 1. Form initialization
   const form = useForm<z.infer<typeof driverInfoSchema>>({
@@ -294,6 +309,10 @@ export default function WorkManagementPage() {
   const [isDriverDialogOpen, setIsDriverDialogOpen] = useState(false);
   const [currentTruck, setCurrentTruck] = useState<WorkDetail | null>(null);
 
+  // Add new state for approval status
+  const [isAwaitingApproval, setIsAwaitingApproval] = useState(false);
+  const [approvalCountdown, setApprovalCountdown] = useState(60);
+
   // Add this function to calculate new orders
   const getNewOrdersStats = () => {
     const sevenDaysAgo = new Date();
@@ -355,6 +374,17 @@ export default function WorkManagementPage() {
       });
     } else {
       setTitleClickCount(newCount);
+    }
+  };
+
+  // Add click handler for the profile
+  const handleProfileClick = () => {
+    const newCount = profileClickCount + 1;
+    if (newCount === 3) {
+      setShowUnloadedGP(!showUnloadedGP);
+      setProfileClickCount(0);
+    } else {
+      setProfileClickCount(newCount);
     }
   };
 
@@ -871,7 +901,7 @@ const handlePaymentSubmit = async (e: React.FormEvent) => {
       // Update truck payment status
       const truck = workDetails.find(t => t.id === allocation.truckId);
       if (truck && truck.at20) {
-        const { totalAllocated, totalDue } = getTruckAllocations(truck);
+        const { totalAllocated, totalDue } = getTruckAllocations(truck, truckPayments);
         if (totalAllocated + allocation.amount >= totalDue) {
           updates[`work_details/${allocation.truckId}/paid`] = true;
           updates[`work_details/${allocation.truckId}/paymentPending`] = false;
@@ -925,7 +955,7 @@ const calculateOwnerTotals = (owner: string | null) => {
   
   // Calculate total amounts including pending
   const totalAmounts = trucks.reduce((sum, truck) => {
-    const { totalDue, totalAllocated, pendingAmount } = getTruckAllocations(truck);
+    const { totalDue, totalAllocated, pendingAmount } = getTruckAllocations(truck, truckPayments);
     return {
       totalDue: sum.totalDue + totalDue,
       totalPending: sum.totalPending + (pendingAmount || 0),
@@ -1033,7 +1063,7 @@ const calculateOwnerTotals = (owner: string | null) => {
         startY: yPos,
         head: [['Truck', 'Product', 'Quantity', 'At20', 'Price', 'Total Due', 'Status']],
         body: ownerData.loadedTrucks.map(truck => {
-          const { totalDue, totalAllocated, balance } = getTruckAllocations(truck)
+          const { totalDue, totalAllocated, balance } = getTruckAllocations(truck, truckPayments)
           return [truck.truck_number, truck.product, truck.quantity, truck.at20 || '-', `$${formatNumber(parseFloat(truck.price))}`, `$${formatNumber(totalDue)}`, balance <= 0 ? 'Paid' : truck.paymentPending ? 'Payment Pending' : `Due: $${formatNumber(balance)}`]
         }),
         theme: 'grid',
@@ -1248,70 +1278,42 @@ const getFilteredWorkDetails = () => {
 
   // Update handleGenerateGatePass to show warning for unloaded trucks
 const handleGenerateGatePass = async (detail: WorkDetail) => {
-  // Check if this is the first time generating gate pass
-  if (!detail.gatePassGenerated && !detail.driverPhone) {
-    setCurrentTruck(detail);
-    setIsDriverDialogOpen(true);
+  if (isAwaitingApproval) {
+    toast({
+      title: "Please Wait",
+      description: `Approval pending. Try again in ${approvalCountdown} seconds.`,
+    });
     return;
   }
 
-  let shouldProceed = true;
-
-  if (detail.gatePassGenerated) {
-    shouldProceed = window.confirm(
-      "⚠️ WARNING: Gate pass has already been generated!\n\n" +
-      "This should only be done in special circumstances.\n" +
-      "Are you sure you want to continue?"
-    );
+  // For regeneration or when driver info exists
+  if (detail.gatePassGenerated || detail.driverPhone) {
+    await requestGatePassApproval(detail);
+    return;
   }
-  
-  if (!shouldProceed) return;
-  
-  const updates: { [key: string]: any } = {
-    [`work_details/${detail.id}/gatePassGenerated`]: true,
-    [`work_details/${detail.id}/gatePassGeneratedAt`]: detail.gatePassGenerated 
-      ? detail.gatePassGeneratedAt 
-      : new Date().toISOString()
-  };
-  
-  await update(ref(database), updates);
-  
-  const params = new URLSearchParams({
-    orderNo: detail.orderno,
-    destination: detail.destination,
-    truck: detail.truck_number,
-    product: detail.product,
-    quantity: detail.quantity.toString(),
-    at20: detail.at20 || '',
-    isLoaded: detail.loaded ? 'true' : 'false'
-  });
-  
-  router.push(`/dashboard/work/orders/gate-pass?${params.toString()}`);
+
+  // First time generation without driver info
+  setCurrentTruck(detail);
+  setIsDriverDialogOpen(true);
 };
-
-
 
 const handleDriverInfoSubmit = async (data: z.infer<typeof driverInfoSchema>) => {
   if (!currentTruck) return;
 
   try {
-    // First check if driver already exists
+    const updates: { [key: string]: any } = {};
+    
     const driverRef = ref(database, `drivers/${data.phoneNumber}`);
     const driverSnapshot = await get(driverRef);
     
-    let updates: { [key: string]: any } = {};
-    
     if (driverSnapshot.exists()) {
-      // Update existing driver
-      const existingDriver = driverSnapshot.val();
       updates[`drivers/${data.phoneNumber}`] = {
-        ...existingDriver,
-        name: data.name, // Update name in case it changed
-        trucks: updateDriverTrucks(existingDriver.trucks, currentTruck.truck_number),
+        ...driverSnapshot.val(),
+        name: data.name,
+        trucks: updateDriverTrucks(driverSnapshot.val().trucks, currentTruck.truck_number),
         lastUpdated: new Date().toISOString()
       };
     } else {
-      // Create new driver
       updates[`drivers/${data.phoneNumber}`] = {
         phoneNumber: data.phoneNumber,
         name: data.name,
@@ -1320,22 +1322,13 @@ const handleDriverInfoSubmit = async (data: z.infer<typeof driverInfoSchema>) =>
       };
     }
     
-    // Add driver reference to work detail
     updates[`work_details/${currentTruck.id}/driverPhone`] = data.phoneNumber;
-    
-    // Apply all updates atomically
     await update(ref(database), updates);
-
-    // Set gate pass generated flag
-    await update(ref(database, `work_details/${currentTruck.id}`), {
-      gatePassGenerated: true,
-      gatePassGeneratedAt: new Date().toISOString()
-    });
-
+    
     setIsDriverDialogOpen(false);
     form.reset();
-    
-    // Navigate directly to gate pass page instead of calling handleGenerateGatePass
+
+    // Navigate to gate pass page after saving driver info
     const params = new URLSearchParams({
       orderNo: currentTruck.orderno,
       destination: currentTruck.destination,
@@ -1344,198 +1337,22 @@ const handleDriverInfoSubmit = async (data: z.infer<typeof driverInfoSchema>) =>
       quantity: currentTruck.quantity.toString(),
       at20: currentTruck.at20 || '',
       isLoaded: currentTruck.loaded ? 'true' : 'false',
-      driverPhone: data.phoneNumber,
-      driverName: data.name
+      driverPhone: data.phoneNumber
     });
     
     router.push(`/dashboard/work/orders/gate-pass?${params.toString()}`);
     
-    toast({
-      title: "Success",
-      description: "Driver information saved successfully",
-    });
   } catch (error) {
-    console.error('Error saving driver info:', error);
+    console.error('Error processing driver info:', error);
     toast({
       title: "Error",
-      description: "Failed to save driver information",
+      description: "Failed to process driver information",
       variant: "destructive"
     });
   }
 };
 
-// Add new function to handle profile click
-const handleProfileClick = () => {
-  setProfileClickCount(prev => {
-    const newCount = prev + 1;
-    if (newCount === 3) {
-      setShowUnloadedGP(true);
-      return 0; // Reset count
-    }
-    return newCount;
-  });
-};
-
-// Modify the helper function for decimal precision
-const toFixed2 = (num: number) => Number(Math.round(num * 100) / 100);
-
-// Update the calculateOptimalAllocation function to handle exact amounts
-const calculateOptimalAllocation = (
-  totalAmount: number,
-  trucks: WorkDetail[],
-  truckPayments: { [truckId: string]: TruckPayment[] },
-  balanceAmount: number = 0  // Add parameter for balance amount
-) => {
-  const owner = trucks[0]?.owner;
-  const totalAvailable = toFixed2(totalAmount + balanceAmount);
-  const allocations: { truckId: string; amount: number }[] = [];
-
-  // Sort trucks by creation date and balance
-  const trucksWithBalances = trucks
-    .map(truck => {
-      const { balance } = getTruckAllocations(truck);
-      return {
-        truck,
-        balance: toFixed2(balance),
-        createdAt: truck.createdAt || ''
-      };
-    })
-    .sort((a, b) => {
-      if (a.createdAt < b.createdAt) return -1;
-      if (a.createdAt > b.createdAt) return 1;
-      return b.balance - a.balance;
-    })
-    .filter(({ balance }) => balance > 0); // Only include trucks with outstanding balance
-
-  let remainingAmount = totalAvailable;
-
-  // Allocate available amount across trucks
-  for (const { truck, balance } of trucksWithBalances) {
-    if (remainingAmount <= 0) break;
-
-    const allocation = Math.min(balance, remainingAmount);
-    if (allocation > 0) {
-      allocations.push({
-        truckId: truck.id,
-        amount: toFixed2(allocation)
-      });
-      remainingAmount = toFixed2(remainingAmount - allocation);
-    }
-  }
-
-  return allocations;
-};
-
-// Update the getTruckAllocations helper to use precise calculations
-const getTruckAllocations = (truck: WorkDetail) => {
-  // Get actual payments
-  const payments = truckPayments[truck.id] ? Object.values(truckPayments[truck.id]) : [];
-  const totalAllocated = toFixed2(payments.reduce((sum, p) => sum + p.amount, 0));
-  
-  // Calculate total due
-  const totalDue = truck.at20 
-    ? toFixed2(parseFloat(truck.price) * parseFloat(truck.at20))
-    : 0;
-  
-  // Calculate balance
-  const balance = toFixed2(totalDue - totalAllocated);
-  
-  // A truck should only be marked as pending if it has an outstanding balance
-  // and is specifically marked as paymentPending
-  const pendingAmount = (balance > 0 && truck.paymentPending) ? balance : 0;
-  
-  return {
-    totalAllocated,
-    totalDue,
-    balance,
-    pendingAmount
-  };
-};
-
-// Update the payment input handler to use precise calculations
-const handlePaymentInputChange = (e: React.ChangeEvent<HTMLInputElement>, truckId: string) => {
-  const newAmount = toFixed2(parseFloat(e.target.value));
-  const truck = ownerSummary[selectedOwner!].loadedTrucks.find(t => t.id === truckId);
-  
-  if (!truck) return;
-
-  const { balance: outstandingBalance } = getTruckAllocations(truck);
-  const otherAllocations = toFixed2(
-    paymentFormData.allocatedTrucks
-      .filter(t => t.truckId !== truckId)
-      .reduce((sum, t) => sum + t.amount, 0)
-  );
-  
-  const remainingPayment = toFixed2(paymentFormData.amount - otherAllocations);
-  const maxAllowed = Math.min(
-    remainingPayment,
-    toFixed2(outstandingBalance)
-  );
-
-  if (newAmount >= 0 && newAmount <= maxAllowed) {
-    setPaymentFormData(prev => ({
-      ...prev,
-      allocatedTrucks: prev.allocatedTrucks.map(t =>
-        t.truckId === truckId
-          ? { ...t, amount: newAmount }
-          : t
-      )
-    }));
-  }
-};
-
-// Update the truck selection handler
-const handleTruckSelection = (checked: boolean, truck: WorkDetail) => {
-  if (checked) {
-    const currentAllocated = toFixed2(
-      paymentFormData.allocatedTrucks.reduce((sum, t) => sum + t.amount, 0)
-    );
-    
-    const remainingAmount = toFixed2(paymentFormData.amount - currentAllocated);
-    const { balance: outstandingBalance } = getTruckAllocations(truck);
-    
-    // Calculate optimal amount with precise decimal handling
-    const optimalAmount = toFixed2(Math.min(outstandingBalance, remainingAmount));
-
-    setPaymentFormData(prev => ({
-      ...prev,
-      allocatedTrucks: [
-        ...prev.allocatedTrucks,
-        { truckId: truck.id, amount: optimalAmount }
-      ]
-    }));
-  } else {
-    setPaymentFormData(prev => ({
-      ...prev,
-      allocatedTrucks: prev.allocatedTrucks.filter(t => t.truckId !== truck.id)
-    }));
-  }
-};
-
-// Update the calculateRemainingAmount helper
-const calculateRemainingAmount = (totalAmount: number, allocations: { truckId: string, amount: number }[]) => {
-  const totalAllocated = toFixed2(allocations.reduce((sum, allocation) => sum + allocation.amount, 0));
-  return toFixed2(totalAmount - totalAllocated);
-};
-
-// Update the balance checkbox handler
-const handleBalanceUseChange = (checked: boolean) => {
-  if (!selectedOwner) return;
-  
-  const isChecked = checked as boolean;
-  const availableBalance = ownerBalances[selectedOwner]?.amount || 0;
-  
-  setPaymentFormData(prev => ({
-    ...prev,
-    useExistingBalance: isChecked,
-    // When checked, add balance to amount field instead of separate balance field
-    amount: isChecked ? (prev.amount + availableBalance) : (prev.amount - (prev.balanceToUse || 0)),
-    balanceToUse: isChecked ? availableBalance : 0,
-    allocatedTrucks: [] // Reset allocations when changing balance use
-  }));
-};
-
-  // Add this function to your component
+// Add this function to your component
 const handleSyncStatus = async (truck: WorkDetail) => {
   try {
     const updates = await syncTruckPaymentStatus(database, truck, truckPayments);
@@ -1560,12 +1377,12 @@ const getUnpaidSummary = () => {
   const summary = workDetails
     .filter(detail => {
       // Only include loaded trucks with actual unpaid balances
-      const { balance } = getTruckAllocations(detail);
+      const { balance } = getTruckAllocations(detail, truckPayments);
       return detail.loaded && balance > 0;
     })
     .reduce((acc, detail) => {
       const owner = detail.owner;
-      const { balance } = getTruckAllocations(detail);
+      const { balance } = getTruckAllocations(detail, truckPayments);
       
       // Skip if balance is 0 or negative
       if (balance <= 0) return acc;
@@ -1754,6 +1571,82 @@ const getActiveOwnerSummary = () => {
     }
   };
 
+  // Add function to request gate pass approval
+  const requestGatePassApproval = async (detail: WorkDetail, driverInfo?: { name: string, phoneNumber: string }) => {
+    // Create base approval object without driverDetails
+    const approval: Omit<GatePassApproval, 'driverDetails'> = {
+      id: crypto.randomUUID(),
+      truckId: detail.id,
+      requestedAt: new Date().toISOString(),
+      requestedBy: session?.user?.email || 'unknown',
+      status: 'pending',
+      orderNo: detail.orderno,
+      truckNumber: detail.truck_number,
+    };
+  
+    // Only add driverDetails if they exist
+    const approvalWithDriver = driverInfo 
+      ? {
+          ...approval,
+          driverDetails: {
+            name: driverInfo.name,
+            phone: driverInfo.phoneNumber
+          }
+        }
+      : approval;
+  
+    await set(ref(database, `gatepass_approvals/${approval.id}`), approvalWithDriver);
+    setIsAwaitingApproval(true);
+  
+    // Start countdown
+    let countdown = 60;
+    const timer = setInterval(() => {
+      countdown--;
+      setApprovalCountdown(countdown);
+      if (countdown <= 0) {
+        clearInterval(timer);
+        setIsAwaitingApproval(false);
+      }
+    }, 1000);
+  
+    // Check approval status
+    const approvalRef = ref(database, `gatepass_approvals/${approval.id}`);
+    const unsubscribe = onValue(approvalRef, (snapshot) => {
+      const data = snapshot.val();
+      if (data?.status === 'approved') {
+        unsubscribe();
+        clearInterval(timer);
+        setIsAwaitingApproval(false);
+        
+        // For unloaded trucks without driver info, request driver details first
+        if (!detail.loaded && !detail.driverPhone) {
+          setCurrentTruck(detail);
+          setIsDriverDialogOpen(true);
+          return;
+        }
+        
+        // For loaded trucks or trucks with driver info, navigate directly
+        const params = new URLSearchParams({
+          orderNo: detail.orderno,
+          destination: detail.destination,
+          truck: detail.truck_number,
+          product: detail.product,
+          quantity: detail.quantity.toString(),
+          at20: detail.at20 || '',
+          isLoaded: detail.loaded ? 'true' : 'false'
+        });
+        
+        if (detail.driverPhone) {
+          params.append('driverPhone', detail.driverPhone);
+        }
+        
+        router.push(`/dashboard/work/orders/gate-pass?${params.toString()}`);
+      }
+    });
+  
+    return approval.id;
+  };
+
   return (
     <div className="min-h-screen">
       <header className="fixed top-0 left-0 w-full border-b z-50 bg-gradient-to-r from-emerald-900/10 via-blue-900/10 to-blue-900/10 backdrop-blur-xl">
@@ -1901,10 +1794,10 @@ const getActiveOwnerSummary = () => {
                       <SelectValue placeholder="Queue Status" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="ALL">All Status</SelectItem>
-                      <SelectItem value="QUEUED">Queued</SelectItem>
-                      <SelectItem value="UNQUEUED">Unqueued</SelectItem>
-                    </SelectContent>
+                        <SelectItem value="ALL">All Status</SelectItem>
+                        <SelectItem value="QUEUED">Queued</SelectItem>
+                        <SelectItem value="UNQUEUED">Unqueued</SelectItem>
+                      </SelectContent>
                   </Select>
                 </div>
                 <div className="max-w-xs w-full sm:w-auto">
@@ -2187,14 +2080,42 @@ const getActiveOwnerSummary = () => {
                                             {/* Gate Pass Generation - Only show if paid */}
                                             {detail.paid && (
                                               !detail.gatePassGenerated ? (
-                                                <DropdownMenuItem onClick={() => handleGenerateGatePass(detail)}>
+                                                <DropdownMenuItem 
+                                                  onClick={() => handleGenerateGatePass(detail)}
+                                                  disabled={isAwaitingApproval}
+                                                  className="relative"
+                                                >
                                                   <FileText className="mr-2 h-4 w-4" />
-                                                  Generate Gate Pass
+                                                  {isAwaitingApproval ? (
+                                                    <div className="flex items-center gap-2">
+                                                      <span className="text-amber-600">Awaiting Approval</span>
+                                                      <span className="text-xs text-muted-foreground">
+                                                        ({approvalCountdown}s)
+                                                      </span>
+                                                      <Loader2 className="h-3 w-3 animate-spin ml-auto text-amber-600" />
+                                                    </div>
+                                                  ) : (
+                                                    "Generate Gate Pass"
+                                                  )}
                                                 </DropdownMenuItem>
                                               ) : (
-                                                <DropdownMenuItem onClick={() => handleGenerateGatePass(detail)}>
+                                                <DropdownMenuItem 
+                                                  onClick={() => handleGenerateGatePass(detail)}
+                                                  disabled={isAwaitingApproval}
+                                                  className="relative"
+                                                >
                                                   <FileText className="mr-2 h-4 w-4" />
-                                                  Regenerate Gate Pass
+                                                  {isAwaitingApproval ? (
+                                                    <div className="flex items-center gap-2">
+                                                      <span className="text-amber-600">Awaiting Approval</span>
+                                                      <span className="text-xs text-muted-foreground">
+                                                        ({approvalCountdown}s)
+                                                      </span>
+                                                      <Loader2 className="h-3 w-3 animate-spin ml-auto text-amber-600" />
+                                                    </div>
+                                                  ) : (
+                                                    "Regenerate Gate Pass"
+                                                  )}
                                                 </DropdownMenuItem>
                                               )
                                             )}
@@ -2203,9 +2124,23 @@ const getActiveOwnerSummary = () => {
                                         
                                         {/* Unloaded Gate Pass (Dev Mode) */}
                                         {!detail.loaded && showUnloadedGP && (
-                                          <DropdownMenuItem onClick={() => handleGenerateGatePass(detail)}>
+                                          <DropdownMenuItem 
+                                            onClick={() => handleGenerateGatePass(detail)}
+                                            disabled={isAwaitingApproval}
+                                            className="relative"
+                                          >
                                             <FileText className="mr-2 h-4 w-4" />
-                                            Generate Unloaded Gate Pass
+                                            {isAwaitingApproval ? (
+                                              <div className="flex items-center gap-2">
+                                                <span className="text-amber-600">Awaiting Approval</span>
+                                                <span className="text-xs text-muted-foreground">
+                                                  ({approvalCountdown}s)
+                                                </span>
+                                                <Loader2 className="h-3 w-3 animate-spin ml-auto text-amber-600" />
+                                              </div>
+                                            ) : (
+                                              "Generate Unloaded Gate Pass"
+                                            )}
                                           </DropdownMenuItem>
                                         )}
 

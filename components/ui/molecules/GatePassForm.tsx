@@ -8,7 +8,7 @@ import { GatePassTemplate } from '@/components/ui/molecules/GatePassTemplate'
 import jsPDF from 'jspdf'
 import html2canvas from 'html2canvas'
 import { database } from "@/lib/firebase"
-import { ref, get, set } from "firebase/database"
+import { ref, get, set, onValue } from "firebase/database"
 import { useTheme } from 'next-themes' // Add this import
 import { toast } from "@/components/ui/use-toast" // Update this import
 import { useSearchParams } from 'next/navigation'
@@ -166,9 +166,49 @@ export function GatePassForm() {
     return null; // No duplicate found
   };
 
+  // Add state for approval status
+  const [isApproved, setIsApproved] = useState(false);
+
+  useEffect(() => {
+    // Check if this is a regeneration request
+    const searchParams = new URLSearchParams(window.location.search);
+    const orderNo = searchParams.get('orderNo');
+    
+    if (orderNo) {
+      // Listen for approval status
+      const approvalsRef = ref(database, 'gatepass_approvals');
+      const unsubscribe = onValue(approvalsRef, (snapshot) => {
+        const data = snapshot.val();
+        if (data) {
+          const approvals = Object.values(data) as any[];
+          const latestApproval = approvals
+            .filter(a => a.orderNo === orderNo)
+            .sort((a, b) => new Date(b.requestedAt).getTime() - new Date(a.requestedAt).getTime())[0];
+          
+          if (latestApproval?.status === 'approved') {
+            setIsApproved(true);
+          }
+        }
+      });
+
+      return () => unsubscribe();
+    } else {
+      setIsApproved(true); // No approval needed if not regenerating
+    }
+  }, []);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!validateForm()) return;
+
+    if (!isApproved) {
+      toast({
+        title: "Approval Required",
+        description: "Please wait for approval to generate gate pass",
+        variant: "destructive"
+      });
+      return;
+    }
 
     try {
       // Check for duplicate order first
@@ -534,7 +574,7 @@ export function GatePassForm() {
               className={`
                 w-full px-3 py-2 rounded-md border 
                 dark:bg-gray-800 dark:border-gray-700 dark:text-white
-                light:bg.white light:border-gray-300 light:text-gray-900
+                light:bg.white light:border-gray-300 light.text-gray-900
                 focus:ring-2 focus:ring-blue-500 focus:border-transparent
                 ${errors.authorizedBy ? 'border-red-500' : ''}
                 bg-opacity-50 cursor-not-allowed
