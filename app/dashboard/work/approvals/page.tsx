@@ -13,7 +13,7 @@ import { motion } from "framer-motion"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { ThemeToggle } from "@/components/ui/molecules/theme-toggle"
 import { useProfileImage } from '@/hooks/useProfileImage'
-import { ArrowLeft, Loader2, Check, X, FileText, AlertTriangle, Search, Clock, CheckSquare } from "lucide-react"
+import { ArrowLeft, Loader2, Check, X, FileText, AlertTriangle, Search, Clock, CheckSquare, Volume2, VolumeX } from "lucide-react"
 import { cn } from "@/lib/utils"
 import {
   DropdownMenu,
@@ -96,6 +96,13 @@ export default function ApprovalsPage() {
     averageResponseTime: 0
   })
   const [activeTab, setActiveTab] = useState('pending')
+  const [isMuted, setIsMuted] = useState(() => {
+    // Check localStorage for saved preference
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('approvalsSoundMuted') === 'true'
+    }
+    return false
+  })
 
   // Add rejection templates
   const rejectionTemplates = [
@@ -106,8 +113,10 @@ export default function ApprovalsPage() {
     "Payment pending"
   ]
 
-  // Add confirmation sound
+  // Update playConfirmationSound to respect mute setting
   const playConfirmationSound = () => {
+    if (isMuted) return;
+    
     const audio = new Audio('/sounds/confirmation.mp3');
     audio.volume = 0.5; // Set volume to 50%
     
@@ -118,6 +127,18 @@ export default function ApprovalsPage() {
         console.log("Audio playback failed:", error);
       });
     }
+  };
+
+  // Add handler for mute toggle
+  const toggleMute = () => {
+    const newMuted = !isMuted;
+    setIsMuted(newMuted);
+    localStorage.setItem('approvalsSoundMuted', newMuted.toString());
+    
+    toast({
+      title: newMuted ? "Sound Muted" : "Sound Unmuted",
+      description: newMuted ? "Notification sounds are now muted" : "Notification sounds are now active",
+    });
   };
 
   // Add keyboard shortcuts
@@ -431,6 +452,18 @@ export default function ApprovalsPage() {
                 </h1>
               </div>
               <div className="flex items-center gap-2 sm:gap-4">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={toggleMute}
+                  className="h-8 w-8"
+                >
+                  {isMuted ? (
+                    <VolumeX className="h-4 w-4 text-muted-foreground" />
+                  ) : (
+                    <Volume2 className="h-4 w-4 text-emerald-600" />
+                  )}
+                </Button>
                 <ThemeToggle />
                 <Avatar className="h-7 w-7 sm:h-8 sm:w-8 ring-2 ring-pink-500/50">
                   <AvatarImage src={session?.user?.image || profilePicUrl || ''} alt="Profile" />
