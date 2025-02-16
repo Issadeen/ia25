@@ -1584,16 +1584,24 @@ const getActiveOwnerSummary = () => {
       truckNumber: detail.truck_number,
     };
   
+    // Add expiration time (60 seconds from now)
+    const expirationTime = new Date();
+    expirationTime.setSeconds(expirationTime.getSeconds() + 60);
+  
     // Only add driverDetails if they exist
     const approvalWithDriver = driverInfo 
       ? {
           ...approval,
+          expiresAt: expirationTime.toISOString(),
           driverDetails: {
             name: driverInfo.name,
             phone: driverInfo.phoneNumber
           }
         }
-      : approval;
+      : {
+          ...approval,
+          expiresAt: expirationTime.toISOString()
+        };
   
     await set(ref(database, `gatepass_approvals/${approval.id}`), approvalWithDriver);
     setIsAwaitingApproval(true);

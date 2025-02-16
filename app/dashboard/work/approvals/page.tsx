@@ -13,8 +13,21 @@ import { motion } from "framer-motion"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { ThemeToggle } from "@/components/ui/molecules/theme-toggle"
 import { useProfileImage } from '@/hooks/useProfileImage'
-import { ArrowLeft, Loader2, Check, X, FileText, AlertTriangle } from "lucide-react"
+import { ArrowLeft, Loader2, Check, X, FileText, AlertTriangle, Search, Clock, CheckSquare } from "lucide-react"
 import { cn } from "@/lib/utils"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import { Badge } from "@/components/ui/badge"
+import { Dialog, DialogContent, DialogHeader } from "@/components/ui/dialog"
+import { DialogTitle } from "@radix-ui/react-dialog"
+import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
+
 
 interface GatePassApproval {
   id: string;
@@ -24,10 +37,20 @@ interface GatePassApproval {
   status: 'pending' | 'approved' | 'rejected';
   orderNo: string;
   truckNumber: string;
+  owner: string; // Add owner field
+  rejectionReason?: string; // Add rejection reason field
   driverDetails?: {
     name: string;
     phone: string;
   };
+  expiresAt?: string; // Add expiration field
+}
+
+interface WorkDetail {
+  id: string;
+  owner: string;
+  truck_number: string;
+  // ...other fields...
 }
 
 export default function ApprovalsPage() {
@@ -39,6 +62,14 @@ export default function ApprovalsPage() {
   const [pendingApprovals, setPendingApprovals] = useState<GatePassApproval[]>([])
   const [gatePassHistory, setGatePassHistory] = useState<{[key: string]: { count: number, lastGenerated: string }}>({})
   const profilePicUrl = useProfileImage()
+  const [searchFilter, setSearchFilter] = useState("")
+  const [rejectionDialog, setRejectionDialog] = useState<{
+    open: boolean;
+    approvalId: string | null;
+  }>({ open: false, approvalId: null });
+  const [rejectionReason, setRejectionReason] = useState("");
+  const [countdowns, setCountdowns] = useState<{ [key: string]: number }>({}); // Add countdown state
+  const [workDetails, setWorkDetails] = useState<{ [key: string]: WorkDetail }>({});
 
   useEffect(() => {
     if (status === "unauthenticated") {
@@ -68,6 +99,65 @@ export default function ApprovalsPage() {
     const unsubscribe = onValue(historyRef, (snapshot) => {
       if (snapshot.exists()) {
         setGatePassHistory(snapshot.val());
+      }
+    });
+
+    return () => unsubscribe();
+  }, [isVerified]);
+
+  // Add function to calculate remaining time
+  const calculateRemainingTime = (expiresAt: string) => {
+    const now = new Date().getTime();
+    const expiration = new Date(expiresAt).getTime();
+    return Math.max(0, Math.floor((expiration - now) / 1000));
+  };
+
+  // Add effect to handle countdowns
+  useEffect(() => {
+    if (!pendingApprovals.length) return;
+
+    const timer = setInterval(() => {
+      const now = new Date().getTime();
+      const updates: { [key: string]: number } = {};
+      let hasExpired = false;
+
+      pendingApprovals.forEach(approval => {
+        if (approval.expiresAt) {
+          const remaining = calculateRemainingTime(approval.expiresAt);
+          updates[approval.id] = remaining;
+          
+          // If timer expired, remove the approval
+          if (remaining <= 0) {
+            hasExpired = true;
+            update(ref(database, `gatepass_approvals/${approval.id}`), {
+              status: 'expired'
+            });
+          }
+        }
+      });
+
+      setCountdowns(updates);
+
+      // If any approval expired, show toast
+      if (hasExpired) {
+        toast({
+          title: "Approval Expired",
+          description: "One or more approval requests have expired",
+          variant: "destructive"
+        });
+      }
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [pendingApprovals]);
+
+  useEffect(() => {
+    if (!isVerified) return;
+
+    const workDetailsRef = ref(database, 'work_details');
+    const unsubscribe = onValue(workDetailsRef, (snapshot) => {
+      if (snapshot.exists()) {
+        setWorkDetails(snapshot.val());
       }
     });
 
@@ -136,22 +226,49 @@ export default function ApprovalsPage() {
   }
 
   const handleReject = async (approval: GatePassApproval) => {
+    setRejectionDialog({ open: true, approvalId: approval.id });
+  }
+
+  const handleRejectionConfirm = async () => {
+    if (!rejectionDialog.approvalId) return;
+
     try {
-      await update(ref(database, `gatepass_approvals/${approval.id}`), {
-        status: 'rejected'
-      })
+      await update(ref(database, `gatepass_approvals/${rejectionDialog.approvalId}`), {
+        status: 'rejected',
+        rejectionReason,
+        rejectedAt: new Date().toISOString()
+      });
+
+      // Notify the requestor (you can implement email/notification system here)
       toast({
         title: "Rejected",
-        description: `Gate pass for ${approval.truckNumber} rejected`,
-      })
+        description: "Gate pass request has been rejected",
+      });
     } catch (error) {
       toast({
         title: "Error",
         description: "Failed to reject gate pass",
         variant: "destructive"
-      })
+      });
+    } finally {
+      setRejectionDialog({ open: false, approvalId: null });
+      setRejectionReason("");
     }
-  }
+  };
+
+  const getSortedApprovals = () => {
+    return [...pendingApprovals].sort((a, b) => 
+      new Date(b.requestedAt).getTime() - new Date(a.requestedAt).getTime()
+    );
+  };
+
+  const getFilteredApprovals = () => {
+    return getSortedApprovals().filter(approval => 
+      approval.truckNumber.toLowerCase().includes(searchFilter.toLowerCase()) ||
+      approval.orderNo.toLowerCase().includes(searchFilter.toLowerCase()) ||
+      approval.requestedBy.toLowerCase().includes(searchFilter.toLowerCase())
+    );
+  };
 
   if (!isVerified) {
     return (
@@ -237,86 +354,167 @@ export default function ApprovalsPage() {
       </header>
 
       <div className="container mx-auto py-8 pt-24 space-y-6">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <Badge variant="secondary" className="h-6">
+              {pendingApprovals.length} Pending
+            </Badge>
+          </div>
+          <div className="flex items-center gap-4">
+            <div className="relative">
+              <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Search approvals..."
+                value={searchFilter}
+                onChange={(e) => setSearchFilter(e.target.value)}
+                className="pl-8 w-[200px]"
+              />
+            </div>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm">
+                  <Clock className="mr-2 h-4 w-4" />
+                  Sort
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent>
+                <DropdownMenuLabel>Sort by</DropdownMenuLabel>
+                <DropdownMenuItem>Newest First</DropdownMenuItem>
+                <DropdownMenuItem>Oldest First</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </div>
+
         <div className="grid gap-4">
-          {pendingApprovals.length === 0 ? (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              className="text-center py-12 text-muted-foreground"
-            >
-              No pending approvals
-            </motion.div>
-          ) : (
-            pendingApprovals.map((approval) => {
-              const gatePassInfo = getGatePassInfo(approval.truckNumber);
-              return (
-                <motion.div
-                  key={approval.id}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                >
-                  <Card className={cn(
+          {getFilteredApprovals().map((approval) => {
+            const gatePassInfo = getGatePassInfo(approval.truckNumber);
+            const workDetail = Object.values(workDetails).find(
+              w => w.truck_number === approval.truckNumber
+            );
+            const owner = workDetail?.owner || 'Unknown Owner';
+
+            return (
+              <motion.div
+                key={approval.id}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+              >
+                <Card 
+                  className={cn(
                     "p-4 shadow-lg border-muted/20",
                     gatePassInfo && "border-l-4 border-l-amber-500"
-                  )}>
-                    <div className="flex justify-between items-start">
-                      <div className="space-y-2">
+                  )}
+                >
+                  <div className="flex justify-between items-start">
+                    <div className="space-y-2">
+                      <div className="flex flex-col gap-1">
                         <div className="flex items-center gap-2">
                           <h2 className="font-semibold text-lg">
-                            Truck: {approval.truckNumber}
+                            {approval.truckNumber}
                           </h2>
+                          <Badge variant="outline" className="font-normal">
+                            Owner: {owner}
+                          </Badge>
+                          {countdowns[approval.id] > 0 && (
+                            <Badge variant="secondary" className="font-medium animate-pulse">
+                              <Clock className="h-3 w-3 mr-1" />
+                              Expires in {countdowns[approval.id]}s
+                            </Badge>
+                          )}
                           {gatePassInfo && (
                             <div className="flex items-center gap-1 text-amber-600 text-xs bg-amber-50 px-2 py-1 rounded-full">
                               <AlertTriangle className="h-3 w-3" />
-                              Previously generated {gatePassInfo.count} time(s)
+                              Generated {gatePassInfo.count} {gatePassInfo.count === 1 ? 'time' : 'times'} previously
                             </div>
                           )}
                         </div>
-                        <p className="text-sm text-muted-foreground">
-                          Order: {approval.orderNo}
-                        </p>
-                        <p className="text-sm text-muted-foreground">
-                          Requested by: {approval.requestedBy}
-                        </p>
-                        {approval.driverDetails && (
-                          <div className="mt-2 space-y-1 bg-muted/50 p-2 rounded-lg">
-                            <p className="text-sm font-medium">Driver Details:</p>
-                            <p className="text-sm">{approval.driverDetails.name}</p>
-                            <p className="text-sm">{approval.driverDetails.phone}</p>
-                          </div>
-                        )}
-                        {gatePassInfo && (
-                          <p className="text-xs text-amber-600">
-                            Last generated: {gatePassInfo.lastGenerated}
-                          </p>
-                        )}
                       </div>
-                      <div className="flex gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleApprove(approval)}
-                          className="text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50"
-                        >
-                          <Check className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleReject(approval)}
-                          className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                        >
-                          <X className="h-4 w-4" />
-                        </Button>
+                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <span>Requested: {new Date(approval.requestedAt).toLocaleString()}</span>
                       </div>
+                      <p className="text-sm text-muted-foreground">
+                        Order: {approval.orderNo}
+                      </p>
+                      <p className="text-sm text-muted-foreground">
+                        Requested by: {approval.requestedBy}
+                      </p>
+                      {approval.driverDetails && (
+                        <div className="mt-2 space-y-1 bg-muted/50 p-2 rounded-lg">
+                          <p className="text-sm font-medium">Driver Details:</p>
+                          <p className="text-sm">{approval.driverDetails.name}</p>
+                          <p className="text-sm">{approval.driverDetails.phone}</p>
+                        </div>
+                      )}
+                      {gatePassInfo && (
+                        <p className="text-xs text-amber-600">
+                          Last generated: {gatePassInfo.lastGenerated}
+                        </p>
+                      )}
                     </div>
-                  </Card>
-                </motion.div>
-              );
-            })
-          )}
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleApprove(approval)}
+                        className="text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50"
+                      >
+                        <Check className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleReject(approval)}
+                        className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                </Card>
+              </motion.div>
+            );
+          })}
         </div>
       </div>
+
+      {/* Add Rejection Dialog */}
+      <Dialog 
+        open={rejectionDialog.open} 
+        onOpenChange={() => setRejectionDialog({ open: false, approvalId: null })}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Reject Gate Pass Request</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Reason for Rejection</Label>
+              <Textarea
+                placeholder="Enter reason for rejection..."
+                value={rejectionReason}
+                onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setRejectionReason(e.target.value)}
+                rows={3}
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button
+                variant="outline"
+                onClick={() => setRejectionDialog({ open: false, approvalId: null })}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={handleRejectionConfirm}
+                disabled={!rejectionReason}
+              >
+                Confirm Rejection
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
