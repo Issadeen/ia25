@@ -353,26 +353,27 @@ export default function ApprovalsPage() {
         </div>
       </header>
 
-      <div className="container mx-auto py-8 pt-24 space-y-6">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <Badge variant="secondary" className="h-6">
-              {pendingApprovals.length} Pending
-            </Badge>
-          </div>
-          <div className="flex items-center gap-4">
-            <div className="relative">
-              <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+      <div className="container mx-auto py-8 pt-24 space-y-6 px-4 sm:px-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          {/* Left side with badge */}
+          <Badge variant="secondary" className="h-6 w-fit">
+            {pendingApprovals.length} Pending
+          </Badge>
+
+          {/* Right side with search and sort - stacked on mobile */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4 w-full sm:w-auto">
+            <div className="relative flex-1 sm:flex-initial">
+              <Search className="absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 placeholder="Search approvals..."
                 value={searchFilter}
                 onChange={(e) => setSearchFilter(e.target.value)}
-                className="pl-8 w-[200px]"
+                className="pl-8 w-full"
               />
             </div>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm">
+                <Button variant="outline" className="w-full sm:w-auto">
                   <Clock className="mr-2 h-4 w-4" />
                   Sort
                 </Button>
@@ -400,66 +401,75 @@ export default function ApprovalsPage() {
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
               >
-                <Card 
-                  className={cn(
-                    "p-4 shadow-lg border-muted/20",
-                    gatePassInfo && "border-l-4 border-l-amber-500"
-                  )}
-                >
-                  <div className="flex justify-between items-start">
-                    <div className="space-y-2">
-                      <div className="flex flex-col gap-1">
-                        <div className="flex items-center gap-2">
-                          <h2 className="font-semibold text-lg">
-                            {approval.truckNumber}
-                          </h2>
-                          <Badge variant="outline" className="font-normal">
-                            Owner: {owner}
+                <Card className={cn(
+                  "p-4 shadow-lg border-muted/20",
+                  gatePassInfo && "border-l-4 border-l-amber-500"
+                )}>
+                  {/* Card Content */}
+                  <div className="space-y-4">
+                    {/* Header Section */}
+                    <div className="flex flex-col gap-2">
+                      {/* Truck and Owner Info */}
+                      <div className="flex flex-wrap items-start gap-2">
+                        <h2 className="font-semibold text-lg">
+                          {approval.truckNumber}
+                        </h2>
+                        <Badge variant="outline" className="font-normal">
+                          {owner}
+                        </Badge>
+                      </div>
+                      
+                      {/* Countdown and Previous Generations */}
+                      <div className="flex flex-wrap items-center gap-2">
+                        {countdowns[approval.id] > 0 && (
+                          <Badge variant="secondary" className="font-medium animate-pulse">
+                            <Clock className="h-3 w-3 mr-1" />
+                            {countdowns[approval.id]}s
                           </Badge>
-                          {countdowns[approval.id] > 0 && (
-                            <Badge variant="secondary" className="font-medium animate-pulse">
-                              <Clock className="h-3 w-3 mr-1" />
-                              Expires in {countdowns[approval.id]}s
-                            </Badge>
-                          )}
-                          {gatePassInfo && (
-                            <div className="flex items-center gap-1 text-amber-600 text-xs bg-amber-50 px-2 py-1 rounded-full">
-                              <AlertTriangle className="h-3 w-3" />
-                              Generated {gatePassInfo.count} {gatePassInfo.count === 1 ? 'time' : 'times'} previously
-                            </div>
-                          )}
-                        </div>
+                        )}
+                        {gatePassInfo && (
+                          <div className="flex items-center gap-1 text-amber-600 text-xs bg-amber-50 px-2 py-1 rounded-full">
+                            <AlertTriangle className="h-3 w-3" />
+                            {gatePassInfo.count} previous {gatePassInfo.count === 1 ? 'generation' : 'generations'}
+                          </div>
+                        )}
                       </div>
-                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                        <span>Requested: {new Date(approval.requestedAt).toLocaleString()}</span>
-                      </div>
-                      <p className="text-sm text-muted-foreground">
+                    </div>
+
+                    {/* Details Section */}
+                    <div className="space-y-2 text-sm">
+                      <p className="text-muted-foreground">
                         Order: {approval.orderNo}
                       </p>
-                      <p className="text-sm text-muted-foreground">
+                      <p className="text-muted-foreground">
                         Requested by: {approval.requestedBy}
                       </p>
-                      {approval.driverDetails && (
-                        <div className="mt-2 space-y-1 bg-muted/50 p-2 rounded-lg">
-                          <p className="text-sm font-medium">Driver Details:</p>
-                          <p className="text-sm">{approval.driverDetails.name}</p>
-                          <p className="text-sm">{approval.driverDetails.phone}</p>
-                        </div>
-                      )}
-                      {gatePassInfo && (
-                        <p className="text-xs text-amber-600">
-                          Last generated: {gatePassInfo.lastGenerated}
-                        </p>
-                      )}
+                      <p className="text-muted-foreground">
+                        {new Date(approval.requestedAt).toLocaleString()}
+                      </p>
                     </div>
-                    <div className="flex gap-2">
+
+                    {/* Driver Details */}
+                    {approval.driverDetails && (
+                      <div className="bg-muted/50 p-3 rounded-lg space-y-1">
+                        <p className="text-sm font-medium">Driver Details</p>
+                        <div className="grid grid-cols-2 gap-2 text-sm">
+                          <p>{approval.driverDetails.name}</p>
+                          <p>{approval.driverDetails.phone}</p>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Action Buttons */}
+                    <div className="flex justify-end gap-2 pt-2">
                       <Button
                         variant="outline"
                         size="sm"
                         onClick={() => handleApprove(approval)}
                         className="text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50"
                       >
-                        <Check className="h-4 w-4" />
+                        <Check className="h-4 w-4 sm:mr-2" />
+                        <span className="hidden sm:inline">Approve</span>
                       </Button>
                       <Button
                         variant="outline"
@@ -467,7 +477,8 @@ export default function ApprovalsPage() {
                         onClick={() => handleReject(approval)}
                         className="text-red-600 hover:text-red-700 hover:bg-red-50"
                       >
-                        <X className="h-4 w-4" />
+                        <X className="h-4 w-4 sm:mr-2" />
+                        <span className="hidden sm:inline">Reject</span>
                       </Button>
                     </div>
                   </div>
