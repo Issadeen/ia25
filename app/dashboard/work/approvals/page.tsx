@@ -324,58 +324,61 @@ export default function ApprovalsPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-background to-muted/50">
+      {/* Update header to be more compact on mobile */}
       <header className="fixed top-0 left-0 w-full border-b z-50 bg-gradient-to-r from-emerald-900/10 via-blue-900/10 to-blue-900/10 backdrop-blur-xl">
         <div className="w-full">
-          <div className="max-w-7xl mx-auto px-4 py-3 flex justify-between items-center">
-            <div className="flex items-center gap-4">
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => router.push('/dashboard/work')}
-                className="text-emerald-700 hover:text-emerald-800 hover:bg-emerald-100"
-              >
-                <ArrowLeft className="h-5 w-5" />
-              </Button>
-              <h1 className="text-xl font-semibold bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">
-                Gate Pass Approvals
-              </h1>
-            </div>
-            <div className="flex items-center gap-4">
-              <ThemeToggle />
-              <Avatar className="h-8 w-8 ring-2 ring-pink-500/50">
-                <AvatarImage src={session?.user?.image || profilePicUrl || ''} alt="Profile" />
-                <AvatarFallback className="bg-pink-100 text-pink-700">
-                  {session?.user?.email?.[0]?.toUpperCase() || 'U'}
-                </AvatarFallback>
-              </Avatar>
+          <div className="max-w-7xl mx-auto px-2 py-2 sm:px-4 sm:py-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 sm:gap-4">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => router.push('/dashboard/work')}
+                  className="h-8 w-8"
+                >
+                  <ArrowLeft className="h-4 w-4" />
+                </Button>
+                <h1 className="text-sm sm:text-xl font-semibold bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">
+                  Gate Pass Approvals
+                </h1>
+              </div>
+              <div className="flex items-center gap-2 sm:gap-4">
+                <ThemeToggle />
+                <Avatar className="h-7 w-7 sm:h-8 sm:w-8 ring-2 ring-pink-500/50">
+                  <AvatarImage src={session?.user?.image || profilePicUrl || ''} alt="Profile" />
+                  <AvatarFallback className="text-xs">
+                    {session?.user?.email?.[0]?.toUpperCase() || 'U'}
+                  </AvatarFallback>
+                </Avatar>
+              </div>
             </div>
           </div>
         </div>
       </header>
 
-      <div className="container mx-auto py-8 pt-24 space-y-6 px-4 sm:px-6">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          {/* Left side with badge */}
-          <Badge variant="secondary" className="h-6 w-fit">
+      {/* Update main content area spacing */}
+      <div className="container mx-auto py-4 pt-16 sm:py-8 sm:pt-24 space-y-4 sm:space-y-6 px-2 sm:px-6">
+        {/* Make the controls more compact on mobile */}
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+          <Badge variant="secondary" className="h-6 w-fit text-xs sm:text-sm">
             {pendingApprovals.length} Pending
           </Badge>
 
-          {/* Right side with search and sort - stacked on mobile */}
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4 w-full sm:w-auto">
+          <div className="flex flex-col sm:flex-row items-stretch gap-2 w-full sm:w-auto">
             <div className="relative flex-1 sm:flex-initial">
-              <Search className="absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Search className="absolute left-2 top-1/2 h-3 w-3 sm:h-4 sm:w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
-                placeholder="Search approvals..."
+                placeholder="Search..."
                 value={searchFilter}
                 onChange={(e) => setSearchFilter(e.target.value)}
-                className="pl-8 w-full"
+                className="pl-7 sm:pl-8 h-8 sm:h-10 text-sm"
               />
             </div>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="outline" className="w-full sm:w-auto">
-                  <Clock className="mr-2 h-4 w-4" />
-                  Sort
+                <Button variant="outline" size="sm" className="h-8 sm:h-10">
+                  <Clock className="h-3 w-3 sm:h-4 sm:w-4 sm:mr-2" />
+                  <span className="hidden sm:inline">Sort</span>
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent>
@@ -387,7 +390,8 @@ export default function ApprovalsPage() {
           </div>
         </div>
 
-        <div className="grid gap-4">
+        {/* Update approval cards to be more compact on mobile */}
+        <div className="grid gap-2 sm:gap-4">
           {getFilteredApprovals().map((approval) => {
             const gatePassInfo = getGatePassInfo(approval.truckNumber);
             const workDetail = Object.values(workDetails).find(
@@ -402,83 +406,67 @@ export default function ApprovalsPage() {
                 animate={{ opacity: 1, y: 0 }}
               >
                 <Card className={cn(
-                  "p-4 shadow-lg border-muted/20",
+                  "p-3 sm:p-4 shadow-lg border-muted/20",
                   gatePassInfo && "border-l-4 border-l-amber-500"
                 )}>
-                  {/* Card Content */}
-                  <div className="space-y-4">
-                    {/* Header Section */}
-                    <div className="flex flex-col gap-2">
-                      {/* Truck and Owner Info */}
-                      <div className="flex flex-wrap items-start gap-2">
-                        <h2 className="font-semibold text-lg">
-                          {approval.truckNumber}
-                        </h2>
-                        <Badge variant="outline" className="font-normal">
-                          {owner}
-                        </Badge>
-                      </div>
-                      
-                      {/* Countdown and Previous Generations */}
-                      <div className="flex flex-wrap items-center gap-2">
+                  <div className="space-y-3 sm:space-y-4">
+                    {/* Compact header for mobile */}
+                    <div className="flex flex-col gap-1 sm:gap-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2 text-sm sm:text-base">
+                          <span className="font-semibold">{approval.truckNumber}</span>
+                          <Badge variant="outline" className="text-xs">
+                            {owner}
+                          </Badge>
+                        </div>
                         {countdowns[approval.id] > 0 && (
-                          <Badge variant="secondary" className="font-medium animate-pulse">
+                          <Badge variant="secondary" className="text-xs animate-pulse">
                             <Clock className="h-3 w-3 mr-1" />
                             {countdowns[approval.id]}s
                           </Badge>
                         )}
+                      </div>
+
+                      {/* Compact info section */}
+                      <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-xs sm:text-sm text-muted-foreground">
+                        <p>Order: {approval.orderNo}</p>
+                        <p>By: {approval.requestedBy}</p>
                         {gatePassInfo && (
-                          <div className="flex items-center gap-1 text-amber-600 text-xs bg-amber-50 px-2 py-1 rounded-full">
-                            <AlertTriangle className="h-3 w-3" />
+                          <p className="col-span-2 text-amber-600">
+                            <AlertTriangle className="inline h-3 w-3 mr-1" />
                             {gatePassInfo.count} previous {gatePassInfo.count === 1 ? 'generation' : 'generations'}
-                          </div>
+                          </p>
                         )}
                       </div>
                     </div>
 
-                    {/* Details Section */}
-                    <div className="space-y-2 text-sm">
-                      <p className="text-muted-foreground">
-                        Order: {approval.orderNo}
-                      </p>
-                      <p className="text-muted-foreground">
-                        Requested by: {approval.requestedBy}
-                      </p>
-                      <p className="text-muted-foreground">
-                        {new Date(approval.requestedAt).toLocaleString()}
-                      </p>
-                    </div>
-
-                    {/* Driver Details */}
+                    {/* Compact driver details */}
                     {approval.driverDetails && (
-                      <div className="bg-muted/50 p-3 rounded-lg space-y-1">
-                        <p className="text-sm font-medium">Driver Details</p>
-                        <div className="grid grid-cols-2 gap-2 text-sm">
+                      <div className="bg-muted/50 p-2 rounded text-xs sm:text-sm">
+                        <div className="grid grid-cols-2 gap-1">
                           <p>{approval.driverDetails.name}</p>
                           <p>{approval.driverDetails.phone}</p>
                         </div>
                       </div>
                     )}
 
-                    {/* Action Buttons */}
-                    <div className="flex justify-end gap-2 pt-2">
+                    {/* Compact action buttons */}
+                    <div className="flex justify-end gap-2">
                       <Button
                         variant="outline"
                         size="sm"
                         onClick={() => handleApprove(approval)}
-                        className="text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50"
+                        className="h-8 px-2 text-emerald-600"
                       >
-                        <Check className="h-4 w-4 sm:mr-2" />
-                        <span className="hidden sm:inline">Approve</span>
+                        <Check className="h-4 w-4" />
                       </Button>
                       <Button
                         variant="outline"
                         size="sm"
                         onClick={() => handleReject(approval)}
-                        className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                        className="h-8 px-2 text-red-600"
                       >
-                        <X className="h-4 w-4 sm:mr-2" />
-                        <span className="hidden sm:inline">Reject</span>
+                        <X className="h-4 w-4" />
                       </Button>
                     </div>
                   </div>
