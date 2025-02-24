@@ -1288,7 +1288,15 @@ const handleGenerateGatePass = async (detail: WorkDetail) => {
 
   // For regeneration or when driver info exists
   if (detail.gatePassGenerated || detail.driverPhone) {
-    await requestGatePassApproval(detail);
+    const approvalId = await requestGatePassApproval(detail);
+    if (approvalId) {
+      // Instead of navigating directly, wait for approval
+      setIsAwaitingApproval(true);
+      toast({
+        title: "Approval Requested",
+        description: "Please wait for approval to generate gate pass",
+      });
+    }
     return;
   }
 
@@ -1328,20 +1336,20 @@ const handleDriverInfoSubmit = async (data: z.infer<typeof driverInfoSchema>) =>
     setIsDriverDialogOpen(false);
     form.reset();
 
-    // Navigate to gate pass page after saving driver info
-    const params = new URLSearchParams({
-      orderNo: currentTruck.orderno,
-      destination: currentTruck.destination,
-      truck: currentTruck.truck_number,
-      product: currentTruck.product,
-      quantity: currentTruck.quantity.toString(),
-      at20: currentTruck.at20 || '',
-      isLoaded: currentTruck.loaded ? 'true' : 'false',
-      driverPhone: data.phoneNumber
+    // After saving driver info, request approval
+    const approvalId = await requestGatePassApproval(currentTruck, {
+      name: data.name,
+      phoneNumber: data.phoneNumber
     });
-    
-    router.push(`/dashboard/work/orders/gate-pass?${params.toString()}`);
-    
+
+    if (approvalId) {
+      setIsAwaitingApproval(true);
+      toast({
+        title: "Approval Requested",
+        description: "Please wait for approval to generate gate pass",
+      });
+    }
+
   } catch (error) {
     console.error('Error processing driver info:', error);
     toast({
