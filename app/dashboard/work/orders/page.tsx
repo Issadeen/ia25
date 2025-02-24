@@ -49,6 +49,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { useProfileImage } from '@/hooks/useProfileImage'
+import { Badge } from "@/components/ui/badge"
 
 // Add new interfaces
 interface Payment {
@@ -1223,6 +1224,99 @@ const calculateOwnerTotals = (owner: string | null) => {
     }
   }, [showUnloadedGP]);
 
+  // Add to the existing state declarations
+const [showPrices, setShowPrices] = useState(false)
+const [priceEditMode, setPriceEditMode] = useState(false)
+const [priceEditPassword, setPriceEditPassword] = useState("")
+
+// Add this function near other handlers
+const handlePriceVisibilityToggle = (e: KeyboardEvent) => {
+  // Ctrl + Alt + P to toggle price visibility
+  if (e.ctrlKey && e.altKey && e.key === 'p') {
+    e.preventDefault()
+    if (!showPrices) {
+      const password = prompt("Enter admin password to view prices:")
+      if (password === process.env.NEXT_PUBLIC_PRICE_VIEW_PASSWORD) {
+        setShowPrices(true)
+        toast({
+          title: "Prices Visible",
+          description: "Prices are now visible. Press Ctrl+Alt+P to hide.",
+        })
+      }
+    } else {
+      setShowPrices(false)
+      setPriceEditMode(false)
+    }
+  }
+  
+  // Ctrl + Alt + E to enable price editing
+  if (e.ctrlKey && e.altKey && e.key === 'e' && showPrices) {
+    e.preventDefault()
+    const password = prompt("Enter admin password to edit prices:")
+    if (password === process.env.NEXT_PUBLIC_PRICE_EDIT_PASSWORD) {
+      setPriceEditMode(true)
+      toast({
+        title: "Price Edit Mode",
+        description: "You can now edit prices. Press Ctrl+Alt+E to disable.",
+      })
+    }
+  }
+}
+
+// Add useEffect for keyboard shortcuts
+useEffect(() => {
+  window.addEventListener('keydown', handlePriceVisibilityToggle)
+  return () => window.removeEventListener('keydown', handlePriceVisibilityToggle)
+}, [showPrices])
+
+// Add price editing function
+const handlePriceEdit = async (id: string, newPrice: string) => {
+  try {
+    if (!priceEditMode) return;
+    
+    const numPrice = parseFloat(newPrice);
+    if (isNaN(numPrice)) {
+      toast({
+        title: "Invalid Price",
+        description: "Please enter a valid number",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    const workDetail = workDetails.find(d => d.id === id);
+    if (!workDetail) return;
+
+    // Record the price change in audit log
+    const auditRef = push(ref(database, 'price_audit_log'));
+    await set(auditRef, {
+      truckId: id,
+      truckNumber: workDetail.truck_number,
+      oldPrice: workDetail.price,
+      newPrice: numPrice,
+      changedBy: session?.user?.email,
+      changedAt: new Date().toISOString(),
+      reason: prompt("Please enter reason for price change:")
+    });
+
+    // Update the price
+    await update(ref(database, `work_details/${id}`), {
+      price: numPrice
+    });
+
+    toast({
+      title: "Price Updated",
+      description: "Price has been updated and logged",
+    });
+  } catch (error) {
+    toast({
+      title: "Error",
+      description: "Failed to update price",
+      variant: "destructive"
+    });
+  }
+};
+
   // 4. Early return after hooks
   if (!mounted) {
     return null
@@ -1867,6 +1961,11 @@ const getActiveOwnerSummary = () => {
                       <th className="p-3 text-left font-medium bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">Order No</th>
                       <th className="p-3 text-left font-medium bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">Depot</th>
                       <th className="p-3 text-left font-medium bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">Destination</th>
+                      {showPrices && (
+                        <th className="p-3 text-left font-medium bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">
+                          Price
+                        </th>
+                      )}
                       <th className="p-3 text-left font-medium bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">Actions</th>
                     </tr>
                   </thead>
@@ -2023,6 +2122,26 @@ const getActiveOwnerSummary = () => {
                                 detail.destination
                               )}
                             </td>
+                            {showPrices && (
+                              <td className="p-2 sm:p-3">
+                                {isEditing || priceEditMode ? (
+                                  <Input
+                                    type="number"
+                                    value={editedDetail.price}
+                                    onChange={(e) => handleEditChange(detail.id, 'price', e.target.value)}
+                                    onBlur={(e) => priceEditMode && handlePriceEdit(detail.id, e.target.value)}
+                                    className="w-24"
+                                  />
+                                ) : (
+                                  <span className="font-mono">
+                                    ${parseFloat(detail.price).toLocaleString('en-US', {
+                                      minimumFractionDigits: 2,
+                                      maximumFractionDigits: 2
+                                    })}
+                                  </span>
+                                )}
+                              </td>
+                            )}
                             <td className="p-2 sm:p-3">
                               <div className="flex gap-2">
                                 {isEditing ? (
@@ -2450,6 +2569,12 @@ const getActiveOwnerSummary = () => {
           </Form>
         </DialogContent>
       </Dialog>
+
+      {showPrices && (
+        <><div className="fixed bottom-4 right-4"></div><Badge variant="outline" className="bg-background">
+          {priceEditMode ? "Price Edit Mode" : "Prices Visible"}
+        </Badge></>
+      )}
     </div>
   )
 }
