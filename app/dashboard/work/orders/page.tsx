@@ -1380,23 +1380,59 @@ const handleGenerateGatePass = async (detail: WorkDetail) => {
     return;
   }
 
-  // For regeneration or when driver info exists
-  if (detail.gatePassGenerated || detail.driverPhone) {
-    const approvalId = await requestGatePassApproval(detail);
-    if (approvalId) {
-      // Instead of navigating directly, wait for approval
-      setIsAwaitingApproval(true);
-      toast({
-        title: "Approval Requested",
-        description: "Please wait for approval to generate gate pass",
-      });
-    }
-    return;
-  }
+  try {
+    // For regeneration or when driver info exists
+    if (detail.gatePassGenerated || detail.driverPhone) {
+      const approvalId = await requestGatePassApproval(detail);
+      if (approvalId) {
+        // Instead of navigating directly, wait for approval
+        setIsAwaitingApproval(true);
+        toast({
+          title: "Approval Requested",
+          description: "Please wait for approval to generate gate pass",
+        });
 
-  // First time generation without driver info
-  setCurrentTruck(detail);
-  setIsDriverDialogOpen(true);
+        // Add URL parameters
+        const params = new URLSearchParams({
+          orderNo: detail.orderno,
+          destination: detail.destination,
+          truck: detail.truck_number,
+          product: detail.product,
+          quantity: detail.quantity.toString(),
+          at20: detail.at20 || '',
+          isLoaded: detail.loaded ? 'true' : 'false',
+          approvalId: approvalId // Add approval ID to params
+        });
+
+        if (detail.driverPhone) {
+          params.append('driverPhone', detail.driverPhone);
+        }
+
+        // Set up listener for approval status
+        const approvalRef = ref(database, `gatepass_approvals/${approvalId}`);
+        const unsubscribe = onValue(approvalRef, (snapshot) => {
+          const data = snapshot.val();
+          if (data?.status === 'approved') {
+            unsubscribe();
+            setIsAwaitingApproval(false);
+            router.push(`/dashboard/work/orders/gate-pass?${params.toString()}`);
+          }
+        });
+      }
+      return;
+    }
+
+    // First time generation without driver info
+    setCurrentTruck(detail);
+    setIsDriverDialogOpen(true);
+  } catch (error) {
+    console.error('Error generating gate pass:', error);
+    toast({
+      title: "Error",
+      description: "Failed to generate gate pass",
+      variant: "destructive"
+    });
+  }
 };
 
 const handleDriverInfoSubmit = async (data: z.infer<typeof driverInfoSchema>) => {
@@ -1675,86 +1711,103 @@ const getActiveOwnerSummary = () => {
 
   // Add function to request gate pass approval
   const requestGatePassApproval = async (detail: WorkDetail, driverInfo?: { name: string, phoneNumber: string }) => {
-    // Create base approval object without driverDetails
-    const approval: Omit<GatePassApproval, 'driverDetails'> = {
-      id: crypto.randomUUID(),
-      truckId: detail.id,
-      requestedAt: new Date().toISOString(),
-      requestedBy: session?.user?.email || 'unknown',
-      status: 'pending',
-      orderNo: detail.orderno,
-      truckNumber: detail.truck_number,
-    };
+    try {
+      // Create base approval object without driverDetails
+      const approval: Omit<GatePassApproval, 'driverDetails'> = {
+        id: crypto.randomUUID(),
+        truckId: detail.id,
+        requestedAt: new Date().toISOString(),
+        requestedBy: session?.user?.email || 'unknown',
+        status: 'pending',
+        orderNo: detail.orderno,
+        truckNumber: detail.truck_number,
+      };
   
-    // Add expiration time (60 seconds from now)
-    const expirationTime = new Date();
-    expirationTime.setSeconds(expirationTime.getSeconds() + 60);
+      // Add expiration time (60 seconds from now)
+      const expirationTime = new Date();
+      expirationTime.setSeconds(expirationTime.getSeconds() + 60);
   
-    // Only add driverDetails if they exist
-    const approvalWithDriver = driverInfo 
-      ? {
-          ...approval,
-          expiresAt: expirationTime.toISOString(),
-          driverDetails: {
-            name: driverInfo.name,
-            phone: driverInfo.phoneNumber
+      // Only add driverDetails if they exist
+      const approvalWithDriver = driverInfo 
+        ? {
+            ...approval,
+            expiresAt: expirationTime.toISOString(),
+            driverDetails: {
+              name: driverInfo.name,
+              phone: driverInfo.phoneNumber
+            }
           }
+        : {
+            ...approval,
+            expiresAt: expirationTime.toISOString()
+          };
+  
+      await set(ref(database, `gatepass_approvals/${approval.id}`), approvalWithDriver);
+      setIsAwaitingApproval(true);
+  
+      // Start countdown
+      let countdown = 60;
+      const timer = setInterval(() => {
+        countdown--;
+        setApprovalCountdown(countdown);
+        if (countdown <= 0) {
+          clearInterval(timer);
+          setIsAwaitingApproval(false);
         }
-      : {
-          ...approval,
-          expiresAt: expirationTime.toISOString()
-        };
+      }, 1000);
   
-    await set(ref(database, `gatepass_approvals/${approval.id}`), approvalWithDriver);
-    setIsAwaitingApproval(true);
-  
-    // Start countdown
-    let countdown = 60;
-    const timer = setInterval(() => {
-      countdown--;
-      setApprovalCountdown(countdown);
-      if (countdown <= 0) {
-        clearInterval(timer);
-        setIsAwaitingApproval(false);
-      }
-    }, 1000);
-  
-    // Check approval status
-    const approvalRef = ref(database, `gatepass_approvals/${approval.id}`);
-    const unsubscribe = onValue(approvalRef, (snapshot) => {
-      const data = snapshot.val();
-      if (data?.status === 'approved') {
-        unsubscribe();
-        clearInterval(timer);
-        setIsAwaitingApproval(false);
+      // Listen for approval status changes
+      const approvalRef = ref(database, `gatepass_approvals/${approval.id}`);
+      const unsubscribe = onValue(approvalRef, (snapshot) => {
+        if (!snapshot.exists()) return;
         
-        // For unloaded trucks without driver info, request driver details first
-        if (!detail.loaded && !detail.driverPhone) {
-          setCurrentTruck(detail);
-          setIsDriverDialogOpen(true);
-          return;
+        const data = snapshot.val();
+        if (data?.status === 'approved') {
+          unsubscribe();
+          clearInterval(timer);
+          setIsAwaitingApproval(false);
+  
+          // Construct URL parameters
+          const params = new URLSearchParams({
+            orderNo: detail.orderno,
+            destination: detail.destination,
+            truck: detail.truck_number,
+            product: detail.product,
+            quantity: detail.quantity.toString(),
+            at20: detail.at20 || '',
+            isLoaded: detail.loaded ? 'true' : 'false',
+            approvalId: approval.id
+          });
+  
+          if (detail.driverPhone) {
+            params.append('driverPhone', detail.driverPhone);
+          }
+  
+          // Perform the navigation
+          router.push(`/dashboard/work/orders/gate-pass?${params.toString()}`);
+        } else if (data?.status === 'rejected') {
+          unsubscribe();
+          clearInterval(timer);
+          setIsAwaitingApproval(false);
+          toast({
+            title: "Approval Rejected",
+            description: data.rejectionReason || "Gate pass request was rejected",
+            variant: "destructive"
+          });
         }
-        
-        // For loaded trucks or trucks with driver info, navigate directly
-        const params = new URLSearchParams({
-          orderNo: detail.orderno,
-          destination: detail.destination,
-          truck: detail.truck_number,
-          product: detail.product,
-          quantity: detail.quantity.toString(),
-          at20: detail.at20 || '',
-          isLoaded: detail.loaded ? 'true' : 'false'
-        });
-        
-        if (detail.driverPhone) {
-          params.append('driverPhone', detail.driverPhone);
-        }
-        
-        router.push(`/dashboard/work/orders/gate-pass?${params.toString()}`);
-      }
-    });
+      });
   
-    return approval.id;
+      return approval.id;
+    } catch (error) {
+      console.error('Error requesting approval:', error);
+      setIsAwaitingApproval(false);
+      toast({
+        title: "Error",
+        description: "Failed to request gate pass approval",
+        variant: "destructive"
+      });
+      return null;
+    }
   };
 
   return (

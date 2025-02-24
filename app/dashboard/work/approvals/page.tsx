@@ -351,11 +351,19 @@ export default function ApprovalsPage() {
         }
       }
   
-      // Proceed with approval
-      await update(ref(database, `gatepass_approvals/${approval.id}`), {
-        status: 'approved',
-        respondedAt: new Date().toISOString()
-      });
+      // Update approval status
+      const updates: { [key: string]: any } = {
+        [`gatepass_approvals/${approval.id}/status`]: 'approved',
+        [`gatepass_approvals/${approval.id}/respondedAt`]: new Date().toISOString(),
+        [`gatepass_approvals/${approval.id}/approvedBy`]: session?.user?.email,
+      };
+  
+      // Also update the work detail to mark gate pass as generated
+      updates[`work_details/${approval.truckId}/gatePassGenerated`] = true;
+      updates[`work_details/${approval.truckId}/gatePassGeneratedAt`] = new Date().toISOString();
+  
+      // Apply all updates atomically
+      await update(ref(database), updates);
   
       playConfirmationSound();
       toast({
@@ -363,6 +371,7 @@ export default function ApprovalsPage() {
         description: `Gate pass for ${approval.truckNumber} approved`,
       });
     } catch (error) {
+      console.error('Approval error:', error);
       toast({
         title: "Error",
         description: "Failed to approve gate pass",
