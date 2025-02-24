@@ -314,25 +314,62 @@ export default function ApprovalsPage() {
     }
   };
 
+  // Add function to verify driver info
+  const verifyDriverDetails = async (approval: GatePassApproval) => {
+    if (!approval.driverDetails?.phone) return false;
+  
+    try {
+      // Check driver record in database
+      const driverRef = ref(database, `drivers/${approval.driverDetails.phone}`);
+      const snapshot = await get(driverRef);
+      
+      if (snapshot.exists()) {
+        const driverData = snapshot.val();
+        // Verify if this truck is associated with this driver
+        return driverData.trucks.includes(approval.truckNumber);
+      }
+      return false;
+    } catch (error) {
+      console.error('Driver verification error:', error);
+      return false;
+    }
+  };
+
+  // Update handleApprove to include driver verification
   const handleApprove = async (approval: GatePassApproval) => {
     try {
+      // Verify driver details if they exist
+      if (approval.driverDetails) {
+        const isDriverVerified = await verifyDriverDetails(approval);
+        if (!isDriverVerified) {
+          toast({
+            title: "Verification Failed",
+            description: "Driver details do not match our records",
+            variant: "destructive"
+          });
+          return;
+        }
+      }
+  
+      // Proceed with approval
       await update(ref(database, `gatepass_approvals/${approval.id}`), {
         status: 'approved',
         respondedAt: new Date().toISOString()
-      })
-      playConfirmationSound()
+      });
+  
+      playConfirmationSound();
       toast({
         title: "Approved",
         description: `Gate pass for ${approval.truckNumber} approved`,
-      })
+      });
     } catch (error) {
       toast({
         title: "Error",
         description: "Failed to approve gate pass",
         variant: "destructive"
-      })
+      });
     }
-  }
+  };
 
   const handleReject = async (approval: GatePassApproval) => {
     setRejectionDialog({ open: true, approvalId: approval.id });
