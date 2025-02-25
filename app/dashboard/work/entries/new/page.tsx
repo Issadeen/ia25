@@ -20,9 +20,27 @@ import { auth, storage } from "@/lib/firebase"
 import { getDownloadURL, ref as storageRef } from "firebase/storage"
 import { useToast } from "@/components/ui/use-toast"
 import { useProfileImage } from '@/hooks/useProfileImage'
+import { Badge } from "@/components/ui/badge"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Switch } from "@/components/ui/switch"
+import { Label } from "@/components/ui/label"
+import { cn } from '@/lib/utils'
 
 const AddEntriesPage: React.FC = () => {
-  // State management
+  // 1. Declare hooks first
+  const { data: session, status } = useSession()
+  const router = useRouter()
+  const { theme, setTheme } = useTheme()
+  const { toast } = useToast()
+  const profilePicUrl = useProfileImage()
+
+  // 2. Declare all state
   const [tr800Number, setTr800Number] = useState('')
   const [tr800Quantity, setTr800Quantity] = useState('')
   const [product, setProduct] = useState('')
@@ -31,25 +49,72 @@ const AddEntriesPage: React.FC = () => {
   const [mounted, setMounted] = useState(false)
   const [lastUploadedImage, setLastUploadedImage] = useState<string | null>(null)
   const [isSaving, setIsSaving] = useState(false)
+  const [showEntries, setShowEntries] = useState(false)
+  const [editMode, setEditMode] = useState(false)
+  const [entries, setEntries] = useState<any[]>([])
+  const [editingEntry, setEditingEntry] = useState<any>(null)
+  const [showEditDialog, setShowEditDialog] = useState(false)
+  const [showAllEntries, setShowAllEntries] = useState(false)
 
-  // Hooks
-  const { data: session, status } = useSession()
-  const router = useRouter()
-  const { theme, setTheme } = useTheme()
-  const { toast } = useToast()
-  const profilePicUrl = useProfileImage()
-
-  // Authentication check
-  useEffect(() => {
-    setMounted(true)
-    if (status === "unauthenticated") {
-      router.push("/login")
+  // 3. Define helper functions before useEffect
+  const fetchEntries = async () => {
+    const db = getDatabase()
+    const entriesRef = ref(db, 'tr800')
+    const snapshot = await get(entriesRef)
+    if (snapshot.exists()) {
+      const entriesData = Object.entries(snapshot.val())
+        .map(([key, value]: [string, any]) => ({
+          id: key,
+          ...value
+        }))
+        .filter(entry => showAllEntries || entry.remainingQuantity > 0)
+        .sort((a, b) => b.timestamp - a.timestamp) // Sort by newest first
+      
+      setEntries(entriesData)
     }
-  }, [status, router])
+  }
 
-  if (!mounted || status === "loading") return null
+  const handleEditSave = async () => {
+    if (!editingEntry) return
 
-  // Form submission handler
+    try {
+      const db = getDatabase()
+      const entryRef = ref(db, `tr800/${editingEntry.id}`)
+      
+      // Create audit log
+      const auditRef = push(ref(db, 'entries_audit_log'))
+      await set(auditRef, {
+        entryId: editingEntry.id,
+        oldData: entries.find(e => e.id === editingEntry.id),
+        newData: editingEntry,
+        changedBy: session?.user?.email,
+        changedAt: new Date().toISOString()
+      })
+
+      // Update entry
+      await set(entryRef, {
+        ...editingEntry,
+        lastModifiedBy: session?.user?.email,
+        lastModifiedAt: new Date().toISOString()
+      })
+
+      toast({
+        title: "Entry Updated",
+        description: "Changes have been saved and logged",
+      })
+
+      setShowEditDialog(false)
+      setEditingEntry(null)
+      fetchEntries()
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to update entry",
+        variant: "destructive"
+      })
+    }
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setIsSaving(true)
@@ -141,8 +206,63 @@ const AddEntriesPage: React.FC = () => {
     }
   }
 
+  // 4. Define useEffect hooks
+  useEffect(() => {
+    setMounted(true)
+    if (status === "unauthenticated") {
+      router.push("/login")
+    }
+  }, [status, router])
+
+  useEffect(() => {
+    const handleKeyPress = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.altKey && e.key === 'v') {
+        e.preventDefault()
+        if (!showEntries) {
+          const password = prompt("Enter admin password to view entries:")
+          if (password === process.env.NEXT_PUBLIC_PRICE_VIEW_PASSWORD) {
+            setShowEntries(true)
+            fetchEntries()
+            toast({
+              title: "Entries Visible",
+              description: "Entries are now visible. Press Ctrl+Alt+V to hide.",
+            })
+          }
+        } else {
+          setShowEntries(false)
+          setEditMode(false)
+        }
+      }
+
+      if (e.ctrlKey && e.altKey && e.key === 'e' && showEntries) {
+        e.preventDefault()
+        const password = prompt("Enter admin password to edit entries:")
+        if (password === process.env.NEXT_PUBLIC_PRICE_EDIT_PASSWORD) {
+          setEditMode(true)
+          toast({
+            title: "Edit Mode",
+            description: "You can now edit entries. Press Ctrl+Alt+E to disable.",
+          })
+        }
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyPress)
+    return () => window.removeEventListener('keydown', handleKeyPress)
+  }, [showEntries, toast])
+
+  useEffect(() => {
+    if (showEntries) {
+      fetchEntries()
+    }
+  }, [showAllEntries, showEntries])
+
+  // 5. Handle early return
+  if (!mounted || status === "loading") return null
+
   const avatarSrc = session?.user?.image || profilePicUrl || ''
 
+  // 6. Render component
   return (
     <div className="min-h-screen">
       <header className="sticky top-0 z-50 w-full border-b bg-background/80 backdrop-blur-sm supports-[backdrop-filter]:bg-background/60">
@@ -257,6 +377,146 @@ const AddEntriesPage: React.FC = () => {
             </div>
           </div>
         </motion.div>
+
+        {showEntries && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="mt-8"
+          >
+            <Card>
+              <CardHeader>
+                <div className="flex justify-between items-center">
+                  <CardTitle>TR830 Entries</CardTitle>
+                  <div className="flex items-center gap-6">
+                    <div className="flex items-center space-x-2">
+                      <Switch
+                        id="show-all"
+                        checked={showAllEntries}
+                        onCheckedChange={setShowAllEntries}
+                      />
+                      <Label htmlFor="show-all" className="text-sm">
+                        Show All Entries
+                      </Label>
+                    </div>
+                    {editMode && (
+                      <Badge variant="outline">Edit Mode</Badge>
+                    )}
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="rounded-md border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Number</TableHead>
+                        <TableHead>Product</TableHead>
+                        <TableHead>Destination</TableHead>
+                        <TableHead>Initial Qty</TableHead>
+                        <TableHead>Remaining Qty</TableHead>
+                        <TableHead>Created By</TableHead>
+                        <TableHead>Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {entries.map((entry) => (
+                        <TableRow 
+                          key={entry.id}
+                          className={cn(
+                            entry.remainingQuantity === 0 && "opacity-60"
+                          )}
+                        >
+                          <TableCell>{entry.number}</TableCell>
+                          <TableCell>{entry.product}</TableCell>
+                          <TableCell>{entry.destination}</TableCell>
+                          <TableCell>{entry.initialQuantity}</TableCell>
+                          <TableCell>{entry.remainingQuantity}</TableCell>
+                          <TableCell>{entry.createdBy}</TableCell>
+                          <TableCell>
+                            {editMode && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => {
+                                  setEditingEntry(entry)
+                                  setShowEditDialog(true)
+                                }}
+                              >
+                                Edit
+                              </Button>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </CardContent>
+            </Card>
+          </motion.div>
+        )}
+
+        <Dialog open={showEditDialog} onOpenChange={setShowEditDialog}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Edit Entry</DialogTitle>
+            </DialogHeader>
+            {editingEntry && (
+              <div className="space-y-4">
+                <div>
+                  <label className="text-sm font-medium">TR830 Number</label>
+                  <Input
+                    value={editingEntry.number}
+                    onChange={(e) => setEditingEntry({
+                      ...editingEntry,
+                      number: e.target.value
+                    })}
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-medium">Product</label>
+                  <Input
+                    value={editingEntry.product}
+                    onChange={(e) => setEditingEntry({
+                      ...editingEntry,
+                      product: e.target.value.toLowerCase()
+                    })}
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-medium">Destination</label>
+                  <Input
+                    value={editingEntry.destination}
+                    onChange={(e) => setEditingEntry({
+                      ...editingEntry,
+                      destination: e.target.value.toLowerCase()
+                    })}
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-medium">Initial Quantity</label>
+                  <Input
+                    type="number"
+                    value={editingEntry.initialQuantity}
+                    onChange={(e) => setEditingEntry({
+                      ...editingEntry,
+                      initialQuantity: parseFloat(e.target.value)
+                    })}
+                  />
+                </div>
+                <div className="flex justify-end gap-2">
+                  <Button variant="outline" onClick={() => setShowEditDialog(false)}>
+                    Cancel
+                  </Button>
+                  <Button onClick={handleEditSave}>
+                    Save Changes
+                  </Button>
+                </div>
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
       </main>
     </div>
   )

@@ -13,10 +13,12 @@ import { GatePassForm } from "@/components/ui/molecules/GatePassForm"
 import { ThemeProvider } from '@/components/theme-provider'
 import { Toaster } from "@/components/ui/toaster"
 import { useProfileImage } from '@/hooks/useProfileImage'
-import { useIdleTimer } from 'react-idle-timer' // Add this import
+import { useIdleTimer } from 'react-idle-timer'
 import { toast } from "@/components/ui/use-toast"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { AlertTriangle } from "lucide-react"
 
 export default function GatePassPage() {
   const { data: session, status } = useSession()
@@ -34,6 +36,11 @@ export default function GatePassPage() {
 
   // Add a countdown timer state
   const [timeLeft, setTimeLeft] = useState(IDLE_TIMEOUT / 1000)
+
+  // Add new states for security dialog
+  const [showSecurityDialog, setShowSecurityDialog] = useState(false);
+  const [sessionWarningShown, setSessionWarningShown] = useState(false);
+  const [isUserActive, setIsUserActive] = useState(true);
 
   // Update countdown effect with fixed redirect handling
   useEffect(() => {
@@ -107,6 +114,92 @@ export default function GatePassPage() {
     leaderElection: true,
     syncTimers: 100
   });
+
+  // Add user activity tracking
+  useEffect(() => {
+    const activityEvents = ['mousedown', 'mousemove', 'keydown', 'scroll', 'touchstart'];
+    
+    const handleUserActivity = () => {
+      setIsUserActive(true);
+      setSessionWarningShown(false);
+    };
+
+    activityEvents.forEach(event => {
+      window.addEventListener(event, handleUserActivity);
+    });
+
+    return () => {
+      activityEvents.forEach(event => {
+        window.removeEventListener(event, handleUserActivity);
+      });
+    };
+  }, []);
+
+  // Add session warning
+  useEffect(() => {
+    if (!isApproved) return;
+
+    const warningTimer = setTimeout(() => {
+      if (!sessionWarningShown && timeLeft <= 30) {
+        setSessionWarningShown(true);
+        setShowSecurityDialog(true);
+        playWarningSound();
+      }
+    }, (IDLE_TIMEOUT - 30000)); // Show warning 30 seconds before timeout
+
+    return () => clearTimeout(warningTimer);
+  }, [isApproved, timeLeft, sessionWarningShown]);
+
+  // Add warning sound
+  const playWarningSound = () => {
+    const audio = new Audio('/sounds/warning.mp3');
+    audio.volume = 0.3;
+    audio.play().catch(() => {});
+  };
+
+  // Add function to extend session
+  const extendSession = () => {
+    if (redirectingRef.current) return;
+    setTimeLeft(IDLE_TIMEOUT / 1000);
+    setSessionWarningShown(false);
+    setShowSecurityDialog(false);
+    toast({
+      title: "Session Extended",
+      description: "Your session has been extended by 1 minute 20 seconds",
+    });
+  };
+
+  // Add printability check
+  useEffect(() => {
+    const handlePrint = (e: KeyboardEvent) => {
+      if ((e.ctrlKey && e.key === 'p') || (e.metaKey && e.key === 'p')) {
+        e.preventDefault();
+        toast({
+          title: "Print Restricted",
+          description: "Printing is disabled for security reasons",
+          variant: "destructive"
+        });
+      }
+    };
+
+    window.addEventListener('keydown', handlePrint);
+    return () => window.removeEventListener('keydown', handlePrint);
+  }, []);
+
+  // Add copy protection
+  useEffect(() => {
+    const handleCopy = (e: ClipboardEvent) => {
+      e.preventDefault();
+      toast({
+        title: "Copy Restricted",
+        description: "Copying is disabled for security reasons",
+        variant: "destructive"
+      });
+    };
+
+    document.addEventListener('copy', handleCopy);
+    return () => document.removeEventListener('copy', handleCopy);
+  }, []);
 
   useEffect(() => {
     setMounted(true)
@@ -223,6 +316,36 @@ export default function GatePassPage() {
         <GatePassForm />
         <Toaster />
       </div>
+
+      <Dialog open={showSecurityDialog} onOpenChange={setShowSecurityDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-amber-500" />
+              Session Expiring Soon
+            </DialogTitle>
+            <DialogDescription>
+              Your session will expire in {timeLeft} seconds due to inactivity.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => router.push('/dashboard/work')}>
+              Exit
+            </Button>
+            <Button onClick={extendSession}>
+              Extend Session
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <style jsx global>{`
+        @media print {
+          body {
+            display: none;
+          }
+        }
+      `}</style>
     </ThemeProvider>
   )
 }
