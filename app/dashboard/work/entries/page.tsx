@@ -755,6 +755,7 @@ export default function EntriesPage() {
     try {
       const snapshot = await get(dbRef(db, 'tr800'))
       if (snapshot.exists()) {
+        // Get entries from TR800
         const entries = Object.entries(snapshot.val())
           .map(([key, value]: [string, any]) => ({
             key,
@@ -765,9 +766,33 @@ export default function EntriesPage() {
             entry.destination.toLowerCase() === destination.toLowerCase() &&
             entry.remainingQuantity > 0
           )
-          .sort((a, b) => a.timestamp - b.timestamp) // Sort by timestamp
-  
-        setAvailableEntries(entries)
+          .sort((a, b) => a.timestamp - b.timestamp)
+
+        // If we're handling SSD entries, fetch pre-allocated entries that are used
+        // This is to provide visual indicators
+        let usedEntries: { [key: string]: string } = {}; // entryId -> truckNumber
+        
+        if (destination.toLowerCase() === 'ssd') {
+          const permitAllocationsRef = dbRef(db, 'permitPreAllocations');
+          const permitAllocationsSnapshot = await get(permitAllocationsRef);
+          
+          if (permitAllocationsSnapshot.exists()) {
+            permitAllocationsSnapshot.forEach((childSnapshot) => {
+              const allocation = childSnapshot.val();
+              if (allocation.used && allocation.permitEntryId) {
+                usedEntries[allocation.permitEntryId] = allocation.truckNumber;
+              }
+            });
+          }
+        }
+        
+        // Mark entries that have been used in permits
+        const entriesWithUsageInfo = entries.map(entry => ({
+          ...entry,
+          usedByTruck: usedEntries[entry.key] || null
+        }));
+
+        setAvailableEntries(entriesWithUsageInfo)
         
         // Update toast implementation to use conditional logic
         if (entries.length > 0) {
@@ -1081,7 +1106,7 @@ export default function EntriesPage() {
       if (!entryUsedInPermit) {
         addNotification(
           "Permit Entry Required",
-          "Please select an entry used in the permit",
+          "Please select a permit entry for SSD allocation",
           "error"
         );
         return;
@@ -1094,18 +1119,47 @@ export default function EntriesPage() {
     try {
       // Check for pre-allocated permit if destination is SSD
       if (destination.toLowerCase() === 'ssd') {
-        const preAllocated = await getPreAllocatedPermit(db, truckNumber);
+        const permitPreAllocationsRef = dbRef(db, 'permitPreAllocations');
+        const permitSnapshot = await get(permitPreAllocationsRef);
         
-        if (preAllocated) {
-          setEntryUsedInPermit(preAllocated.permitEntryId);
-          addNotification(
-            "Pre-allocated Permit Found",
-            `Using pre-allocated permit entry ${preAllocated.permitEntryNumber}`,
-            "info"
-          );
+        if (permitSnapshot.exists()) {
+          // Find if there's a pre-allocation for this truck
+          let matchingAllocation: any = null;
+          
+          permitSnapshot.forEach((childSnapshot) => {
+            const allocation = childSnapshot.val();
+            
+            // Check direct match
+            if (allocation.truckNumber === truckNumber && 
+                allocation.product.toLowerCase() === product.toLowerCase() &&
+                !allocation.used) {
+              matchingAllocation = {
+                id: childSnapshot.key,
+                ...allocation
+              };
+              return true; // Break the loop
+            }
+          });
+          
+          if (matchingAllocation) {
+            // We found a pre-allocation, mark it as used
+            await update(dbRef(db, `permitPreAllocations/${matchingAllocation.id}`), {
+              used: true,
+              usedAt: new Date().toISOString()
+            });
+            
+            // Set the entryUsedInPermit to the pre-allocated permit entry
+            setEntryUsedInPermit(matchingAllocation.permitEntryId || entryUsedInPermit);
+            
+            addNotification(
+              "Pre-allocation Found",
+              "Using pre-allocated permit entry",
+              "info"
+            );
+          }
         }
       }
-
+  
       const requiredQuantity = parseFloat(at20Quantity);
       const updates: { [key: string]: any } = {};
       const tempOriginalData: { [key: string]: Entry } = {};
@@ -1266,6 +1320,22 @@ export default function EntriesPage() {
         entryDestination: destination
       }
   
+      // After creating truck entry, also record the permit number used for this allocation
+      if (destination.toLowerCase() === 'ssd' && entryUsedInPermit) {
+        // Get the permit entry details
+        const permitEntryRef = dbRef(db, `tr800/${entryUsedInPermit}`);
+        const permitEntrySnapshot = await get(permitEntryRef);
+        
+        if (permitEntrySnapshot.exists()) {
+          const permitEntry = permitEntrySnapshot.val();
+          updates[`truckEntries/${truckEntryKey}/permitEntry`] = {
+            id: entryUsedInPermit,
+            number: permitEntry.number,
+            usedAt: new Date().toISOString()
+          };
+        }
+      }
+
       // Apply all updates in one transaction
       await update(dbRef(db), updates)
 

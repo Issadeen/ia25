@@ -33,6 +33,7 @@ import { findAvailablePermitEntries, type EntryAllocation } from '@/utils/permit
 import { cleanupOrphanedAllocations, consolidatePermitAllocations } from '@/lib/permit-allocation';
 import { cleanupDuplicateAllocations, validateAllocations } from '@/lib/permit-cleanup';
 import { resetPermitSystem } from '@/lib/permit-reset';
+import { Badge } from '@/components/ui/badge'
 
 interface WorkDetailWithPermit {
   id: string
@@ -63,6 +64,18 @@ interface ExtendedWorkDetail extends WorkDetailWithPermit {
   permitNumber?: string;
 }
 
+// Add this new interface to track truck loading status
+interface LoadedTruckInfo {
+  truckId: string;
+  truckNumber: string;
+  allocationId: string;
+  loadedAt: string;
+  product: string;
+  owner: string;
+  permitNumber?: string; // Add permit number field
+  previousTruckNumber?: string; // Add previous truck number field
+}
+
 export default function PermitsPage() {
   const { data: session, status } = useSession()
   const router = useRouter()
@@ -86,6 +99,8 @@ export default function PermitsPage() {
   const [selectedForCleanup, setSelectedForCleanup] = useState<string[]>([]);
   const [editingAllocation, setEditingAllocation] = useState<string | null>(null);
   const [editQuantity, setEditQuantity] = useState<number>(0);
+  const [loadedTrucks, setLoadedTrucks] = useState<LoadedTruckInfo[]>([]);
+  const [showLoadedHistory, setShowLoadedHistory] = useState(false);
 
   // Add title click handler
   const handleTitleClick = () => {
@@ -128,10 +143,21 @@ export default function PermitsPage() {
     if (workDetailsRef.exists()) {
       // Get all pre-allocations first
       const existingAllocations = preAllocationsRef.exists() 
-        ? Object.values(preAllocationsRef.val()).map((pa: any) => pa.truckNumber)
+        ? Object.entries(preAllocationsRef.val()).map(([id, pa]: [string, any]) => ({
+          truckNumber: pa.truckNumber,
+          used: pa.used
+        }))
         : [];
-
-      // Filter work details to exclude already allocated trucks
+        
+      // Create a map of truck numbers to loaded status
+      const loadedStatus = new Map<string, boolean>();
+      Object.values(workDetailsRef.val()).forEach((detail: any) => {
+        if (detail.truck_number) {
+          loadedStatus.set(detail.truck_number, !!detail.loaded);
+        }
+      });
+        
+      // Filter work details to exclude already allocated trucks AND loaded trucks
       const details = Object.entries(workDetailsRef.val())
         .map(([id, detail]: [string, any]) => ({
           id,
@@ -140,10 +166,12 @@ export default function PermitsPage() {
         }))
         .filter((detail: ExtendedWorkDetail) => 
           detail.permitRequired && 
-          !detail.loaded && 
+          !detail.loaded && // Exclude loaded trucks
           detail.status === 'queued' &&
-          !detail.permitAllocated && // Check permitAllocated flag
-          !existingAllocations.includes(detail.truck_number) // Exclude trucks that already have allocations
+          !detail.permitAllocated && 
+          !existingAllocations.some(a => 
+            a.truckNumber === detail.truck_number && !a.used // Only exclude if not used
+          )
         );
       
       setPendingPermits(details);
@@ -352,10 +380,13 @@ Entry: ${allocation.permitNumber}`;
 
   // Add filter function for pre-allocations
   const getFilteredPreAllocations = () => {
-    if (!preAllocationSearch) return preAllocations;
+    // Filter out used allocations first
+    const unusedPreAllocations = preAllocations.filter(allocation => !allocation.used);
+
+    if (!preAllocationSearch) return unusedPreAllocations;
     
     const searchLower = preAllocationSearch.toLowerCase();
-    return preAllocations.filter(allocation => 
+    return unusedPreAllocations.filter(allocation => 
       allocation.truckNumber.toLowerCase().includes(searchLower) ||
       allocation.product.toLowerCase().includes(searchLower) ||
       allocation.permitNumber.toLowerCase().includes(searchLower)
@@ -701,6 +732,21 @@ const handleReset = async () => {
       );
     }
 
+    // Check if this allocation belongs to a truck that was changed
+    const usedByDifferentTruck = loadedTrucks.find(truck => 
+      truck.allocationId === allocation.id && truck.truckNumber !== allocation.truckNumber
+    );
+
+    if (usedByDifferentTruck) {
+      return (
+        <div className="flex items-center gap-2">
+          <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200">
+            Used by {usedByDifferentTruck.truckNumber}
+          </Badge>
+        </div>
+      );
+    }
+
     if (editingAllocation === allocation.id) {
       return (
         <div className="flex items-center gap-2">
@@ -731,6 +777,160 @@ const handleReset = async () => {
       >
         {((allocation.quantity || 0) / 1000).toFixed(1)}K
       </Button>
+    );
+  };
+
+  // Add function to fetch loaded trucks that had pre-allocated permits
+  const fetchLoadedTrucks = async () => {
+    try {
+      const db = getDatabase();
+      
+      // Get all work details
+      const workDetailsRef = ref(db, 'work_details');
+      const workSnapshot = await get(workDetailsRef);
+      
+      if (!workSnapshot.exists()) return;
+      
+      // Get pre-allocations
+      const preAllocationsRef = ref(db, 'permitPreAllocations');
+      const preAllocationsSnapshot = await get(preAllocationsRef);
+      const preAllocations = preAllocationsSnapshot.exists() ? preAllocationsSnapshot.val() : {};
+
+      // Create a map of truck numbers to pre-allocations
+      const truckAllocations: { [truckNumber: string]: any } = {};
+      Object.entries(preAllocations).forEach(([id, alloc]: [string, any]) => {
+        truckAllocations[alloc.truckNumber] = {
+          id,
+          ...alloc
+        };
+      });
+      
+      // Find loaded trucks that had pre-allocations
+      const loaded: LoadedTruckInfo[] = [];
+      
+      Object.entries(workSnapshot.val()).forEach(([id, work]: [string, any]) => {
+        if (work.loaded) {
+          // Check if this truck has an allocation
+          let allocation = truckAllocations[work.truck_number];
+          
+          // If no direct allocation, check if this truck was changed from another one
+          if (!allocation && work.previous_trucks && work.previous_trucks.length > 0) {
+            for (const prevTruck of work.previous_trucks) {
+              if (truckAllocations[prevTruck]) {
+                allocation = truckAllocations[prevTruck];
+                allocation.previousTruckNumber = prevTruck;
+                break;
+              }
+            }
+          }
+          
+          if (allocation) {
+            loaded.push({
+              truckId: id,
+              truckNumber: work.truck_number,
+              allocationId: allocation.id,
+              loadedAt: work.loadedAt || new Date().toISOString(),
+              product: work.product,
+              owner: work.owner,
+              permitNumber: allocation.permitNumber,
+              previousTruckNumber: allocation.previousTruckNumber
+            });
+          }
+        }
+      });
+      
+      setLoadedTrucks(loaded);
+      
+      // Mark these allocations as used in the database
+      const updates: { [key: string]: any } = {};
+      for (const truck of loaded) {
+        if (preAllocations[truck.allocationId] && !preAllocations[truck.allocationId].used) {
+          updates[`permitPreAllocations/${truck.allocationId}/used`] = true;
+          updates[`permitPreAllocations/${truck.allocationId}/loadedAt`] = truck.loadedAt;
+          updates[`permitPreAllocations/${truck.allocationId}/actualTruckNumber`] = truck.truckNumber;
+          
+          if (truck.previousTruckNumber) {
+            updates[`permitPreAllocations/${truck.allocationId}/previousTruckNumber`] = truck.previousTruckNumber;
+          }
+        }
+      }
+      
+      if (Object.keys(updates).length > 0) {
+        await update(ref(db), updates);
+      }
+      
+    } catch (error) {
+      console.error('Error fetching loaded trucks:', error);
+      toast({
+        title: "Error",
+        description: "Failed to fetch loaded trucks data",
+        variant: "destructive"
+      });
+    }
+  };
+
+  // Add this hook to fetch loaded trucks periodically
+  useEffect(() => {
+    // Initial fetch
+    fetchLoadedTrucks();
+    
+    // Fetch every minute
+    const interval = setInterval(fetchLoadedTrucks, 60000);
+    
+    return () => clearInterval(interval);
+  }, []);
+
+  // Add a section to display loaded trucks with their allocations
+  const renderLoadedTrucksSection = () => {
+    if (loadedTrucks.length === 0) return null;
+    
+    return (
+      <Card className="mb-6 border-emerald-500/20">
+        <CardHeader>
+          <div className="flex justify-between items-center">
+            <CardTitle className="text-xl font-semibold bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">
+              Recently Loaded Trucks
+            </CardTitle>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowLoadedHistory(!showLoadedHistory)}
+            >
+              {showLoadedHistory ? "Hide History" : "Show History"}
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {showLoadedHistory ? (
+            <div className="space-y-4">
+              {loadedTrucks.map((truck) => (
+                <div key={truck.truckId} className="flex flex-col sm:flex-row sm:items-center sm:justify-between p-4 border rounded-lg space-y-4 sm:space-y-0">
+                  <div>
+                    <div className="font-medium">{truck.truckNumber}</div>
+                    {truck.previousTruckNumber && (
+                      <div className="text-xs text-orange-600 font-medium">
+                        Previous: {truck.previousTruckNumber}
+                      </div>
+                    )}
+                    <div className="text-sm text-muted-foreground">
+                      {truck.owner} - {truck.product} - Loaded at: {new Date(truck.loadedAt).toLocaleString()}
+                    </div>
+                  </div>
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-4">
+                    <Badge variant="secondary" className="flex gap-2 items-center">
+                      <span>Permit Used: {truck.permitNumber}</span>
+                    </Badge>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-center text-muted-foreground py-4">
+              {loadedTrucks.length} loaded truck(s) with allocated permits
+            </div>
+          )}
+        </CardContent>
+      </Card>
     );
   };
 
@@ -841,6 +1041,9 @@ const handleReset = async () => {
       </header>
 
       <main className="max-w-7xl mx-auto px-2 sm:px-4 pt-28 sm:pt-24 pb-6 sm:pb-8">
+        {/* Loaded Trucks Section - Add this before the Pending Permits section */}
+        {renderLoadedTrucksSection()}
+        
         {/* Pending Permits Section */}
         <Card className="mb-6 border-emerald-500/20">
           <CardHeader>
