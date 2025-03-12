@@ -233,7 +233,7 @@ export default function WorkManagementPage() {
   const router = useRouter()
 
   // 3. All useState declarations grouped together at the top
-  // Add the new state variables at the beginning with other state declarations
+  // Add the new state variables here, with the rest of the state declarations
   const [loadedFilter, setLoadedFilter] = useState("ALL")
   const [queueFilter, setQueueFilter] = useState("ALL")
   const [mounted, setMounted] = useState(false)
@@ -313,6 +313,13 @@ export default function WorkManagementPage() {
   // Add new state for approval status
   const [isAwaitingApproval, setIsAwaitingApproval] = useState(false);
   const [approvalCountdown, setApprovalCountdown] = useState(60);
+
+  // Add these new state variables with the other state declarations
+  const [showStats, setShowStats] = useState(true);
+  const [bulkActionMode, setBulkActionMode] = useState(false);
+  const [selectedRows, setSelectedRows] = useState<string[]>([]);
+  const [quickViewData, setQuickViewData] = useState<WorkDetail | null>(null);
+  const [isQuickViewOpen, setIsQuickViewOpen] = useState(false);
 
   // Add this function to calculate new orders
   const getNewOrdersStats = () => {
@@ -1907,6 +1914,70 @@ const getActiveOwnerSummary = () => {
     }
   };
 
+
+
+// Add this function to handle bulk queue status change
+const handleBulkStatusChange = async () => {
+  if (selectedRows.length === 0) {
+    toast({
+      title: "No trucks selected",
+      description: "Please select at least one truck to update",
+      variant: "destructive"
+    });
+    return;
+  }
+
+  const targetStatus = prompt("Enter target status (queued or not queued):");
+  if (targetStatus !== "queued" && targetStatus !== "not queued") {
+    toast({
+      title: "Invalid status",
+      description: "Status must be 'queued' or 'not queued'",
+      variant: "destructive"
+    });
+    return;
+  }
+
+  try {
+    const updates: { [path: string]: any } = {};
+    
+    selectedRows.forEach(id => {
+      updates[`work_details/${id}/status`] = targetStatus;
+    });
+    
+    await update(ref(database), updates);
+    
+    toast({
+      title: "Status Updated",
+      description: `${selectedRows.length} trucks updated to "${targetStatus}"`,
+    });
+    
+    // Clear selection after successful update
+    setSelectedRows([]);
+    setBulkActionMode(false);
+  } catch (error) {
+    toast({
+      title: "Error",
+      description: "Failed to update statuses",
+      variant: "destructive"
+    });
+  }
+};
+
+// Add this function to toggle truck selection
+const toggleTruckSelection = (id: string) => {
+  setSelectedRows(prev => 
+    prev.includes(id) 
+      ? prev.filter(rowId => rowId !== id)
+      : [...prev, id]
+  );
+};
+
+// Add function to show truck quick view
+const showTruckQuickView = (detail: WorkDetail) => {
+  setQuickViewData(detail);
+  setIsQuickViewOpen(true);
+};
+
   return (
     <div className="min-h-screen">
       <header className="fixed top-0 left-0 w-full border-b z-50 bg-gradient-to-r from-emerald-900/10 via-blue-900/10 to-blue-900/10 backdrop-blur-xl">
@@ -2089,6 +2160,54 @@ const getActiveOwnerSummary = () => {
             )}
           </AnimatePresence>
 
+          {/* Add collapsible stats toggle */}
+          <div className="flex justify-end mb-2">
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              onClick={() => setShowStats(!showStats)} 
+              className="text-xs"
+            >
+              {showStats ? "Hide Stats" : "Show Stats"}
+            </Button>
+          </div>
+
+          {/* Add bulk actions bar */}
+          {bulkActionMode && (
+            <motion.div
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="flex items-center justify-between p-2 bg-yellow-50 dark:bg-yellow-900/20 rounded-md border border-yellow-200 dark:border-yellow-800"
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium">
+                  {selectedRows.length} trucks selected
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button 
+                  size="sm" 
+                  variant="outline" 
+                  onClick={handleBulkStatusChange}
+                  disabled={selectedRows.length === 0}
+                >
+                  Update Status
+                </Button>
+                <Button 
+                  size="sm" 
+                  variant="ghost" 
+                  onClick={() => {
+                    setSelectedRows([]);
+                    setBulkActionMode(false);
+                  }}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </motion.div>
+          )}
+
           {isLoading ? (
             <motion.div
               initial={{ opacity: 0 }}
@@ -2100,9 +2219,36 @@ const getActiveOwnerSummary = () => {
           ) : (
             <div className="overflow-x-auto -mx-4 sm:mx-0">
               <div className="min-w-[800px] p-4 sm:p-0">
+                <div className="flex justify-between items-center mb-2">
+                  <span className="text-sm text-muted-foreground">
+                    {getFilteredWorkDetails().length} orders found
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setBulkActionMode(!bulkActionMode)}
+                  >
+                    {bulkActionMode ? "Exit Bulk Mode" : "Bulk Actions"}
+                  </Button>
+                </div>
                 <table className="w-full text-sm sm:text-base">
                   <thead>
                     <tr className="border-b">
+                      {/* Add checkbox column when in bulk action mode */}
+                      {bulkActionMode && (
+                        <th className="p-3 text-left">
+                          <Checkbox 
+                            checked={selectedRows.length > 0 && selectedRows.length === getFilteredWorkDetails().length}
+                            onCheckedChange={(checked) => {
+                              if (checked) {
+                                setSelectedRows(getFilteredWorkDetails().map(d => d.id));
+                              } else {
+                                setSelectedRows([]);
+                              }
+                            }}
+                          />
+                        </th>
+                      )}
                       <th className="p-3 text-left font-medium bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">Owner</th>
                       <th className="p-3 text-left font-medium bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">Product</th>
                       <th className="p-3 text-left font-medium bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">Truck Number</th>
@@ -2138,9 +2284,21 @@ const getActiveOwnerSummary = () => {
                               detail.id === lastAddedId && 'highlight-new-record',
                               highlightUnqueued && detail.status !== "queued" && detail.status !== "completed" && 'bg-yellow-50 dark:bg-yellow-950/20',
                               isNewOrder(detail.createdAt) && 'bg-emerald-50/50 dark:bg-emerald-950/20',
-                              isEditing && 'bg-blue-50/50 dark:bg-blue-950/20' // Highlight row being edited
+                              isEditing && 'bg-blue-50/50 dark:bg-blue-950/20', // Highlight row being edited
+                              selectedRows.includes(detail.id) && 'bg-blue-100 dark:bg-blue-900/30'
                             )}
+                            // Add double-click handler for quick view
+                            onDoubleClick={() => showTruckQuickView(detail)}
                           >
+                            {/* Add checkbox cell when in bulk mode */}
+                            {bulkActionMode && (
+                              <td className="p-2 sm:p-3">
+                                <Checkbox 
+                                  checked={selectedRows.includes(detail.id)}
+                                  onCheckedChange={() => toggleTruckSelection(detail.id)}
+                                />
+                              </td>
+                            )}
                             <td className="p-2 sm:p-3">
                               {isEditing ? (
                                 <Input
@@ -2468,87 +2626,90 @@ const getActiveOwnerSummary = () => {
             </div>
           )}
 
-          <div className="mt-8 space-y-8">
-            {/* Summary Stats */}
-            <motion.div
-              variants={cardVariants}
-              initial="hidden"
-              animate="visible"
-            >
-              {renderSummaryCard()}
-            </motion.div>
+          {/* Conditionally render stats based on showStats */}
+          {showStats && (
+            <div className="mt-8 space-y-8">
+              {/* Summary Stats */}
+              <motion.div
+                variants={cardVariants}
+                initial="hidden"
+                animate="visible"
+              >
+                {renderSummaryCard()}
+              </motion.div>
 
-            {/* Owner Summary */} 
-            <motion.div
-              variants={cardVariants}
-              initial="hidden"
-              animate="visible"
-              transition={{ delay: 0.2 }}
-            >
-              <Card className="p-6">
-                <div className="flex justify-between items-center">
-                  <h2 className="text-xl font-semibold mb-4 bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">
-                    Active Owner Summary
-                  </h2>
-                  <Button variant="ghost" onClick={handleCopySummary}>
-                    <Copy className="h-5 w-5" />
-                  </Button>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {Object.entries(getActiveOwnerSummary()).map(([owner, data], index) => {
-                    const newStats = getNewOwnerOrdersStats(owner);
-                    return (
-                      <motion.div
-                        key={`owner-${owner}`}
-                        variants={cardVariants}
-                        initial="hidden"
-                        animate="visible"
-                        transition={{ delay: index * 0.1 }}
-                      >
-                        <Card className="p-4">
-                          <div className="flex justify-between items-start">
-                            <h3 className="text-lg font-semibold mb-2 bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">
-                              {owner}
-                            </h3>
-                            <Button 
-                              variant="ghost" 
-                              size="sm"
-                              onClick={() => handleOwnerInfo(owner)}
-                            >
-                              Info
-                            </Button>
-                          </div>
-                          <div className="space-y-1">
-                            <div>Total Orders: {data.totalOrders}</div>
-                            <div>Queued Orders: {data.queuedOrders}</div>
-                            <div>Loaded Orders: {data.loadedOrders}</div>
-                            <div>Pending Orders: {data.pendingOrders}</div>
-                            <div>AGO Orders: {data.agoOrders}</div>
-                            <div>PMS Orders: {data.pmsOrders}</div>
-                            
-                            {/* Enhanced New Orders Summary */}
-                            {newStats.total > 0 && (
-                              <div className="mt-2 pt-2 border-t">
-                                <div className="text-sm font-medium text-emerald-600">New Orders (7 Days):</div>
-                                <div className="grid grid-cols-2 gap-x-4 gap-y-1 mt-1">
-                                  <div className="text-sm">Total: {newStats.total}</div>
-                                  <div className="text-sm">AGO: {newStats.ago}</div>
-                                  <div className="text-sm">PMS: {newStats.pms}</div>
-                                  <div className="text-sm text-yellow-600">Pending: {newStats.pending}</div>
-                                  <div className="text-sm text-orange-600">Unqueued: {newStats.unqueued}</div>
-                                  <div className="text-sm text-green-600">Loaded: {newStats.loaded}</div>
+              {/* Owner Summary */} 
+              <motion.div
+                variants={cardVariants}
+                initial="hidden"
+                animate="visible"
+                transition={{ delay: 0.2 }}
+              >
+                <Card className="p-6">
+                  <div className="flex justify-between items-center">
+                    <h2 className="text-xl font-semibold mb-4 bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">
+                      Active Owner Summary
+                    </h2>
+                    <Button variant="ghost" onClick={handleCopySummary}>
+                      <Copy className="h-5 w-5" />
+                    </Button>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {Object.entries(getActiveOwnerSummary()).map(([owner, data], index) => {
+                      const newStats = getNewOwnerOrdersStats(owner);
+                      return (
+                        <motion.div
+                          key={`owner-${owner}`}
+                          variants={cardVariants}
+                          initial="hidden"
+                          animate="visible"
+                          transition={{ delay: index * 0.1 }}
+                        >
+                          <Card className="p-4">
+                            <div className="flex justify-between items-start">
+                              <h3 className="text-lg font-semibold mb-2 bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">
+                                {owner}
+                              </h3>
+                              <Button 
+                                variant="ghost" 
+                                size="sm"
+                                onClick={() => handleOwnerInfo(owner)}
+                              >
+                                Info
+                              </Button>
+                            </div>
+                            <div className="space-y-1">
+                              <div>Total Orders: {data.totalOrders}</div>
+                              <div>Queued Orders: {data.queuedOrders}</div>
+                              <div>Loaded Orders: {data.loadedOrders}</div>
+                              <div>Pending Orders: {data.pendingOrders}</div>
+                              <div>AGO Orders: {data.agoOrders}</div>
+                              <div>PMS Orders: {data.pmsOrders}</div>
+                              
+                              {/* Enhanced New Orders Summary */}
+                              {newStats.total > 0 && (
+                                <div className="mt-2 pt-2 border-t">
+                                  <div className="text-sm font-medium text-emerald-600">New Orders (7 Days):</div>
+                                  <div className="grid grid-cols-2 gap-x-4 gap-y-1 mt-1">
+                                    <div className="text-sm">Total: {newStats.total}</div>
+                                    <div className="text-sm">AGO: {newStats.ago}</div>
+                                    <div className="text-sm">PMS: {newStats.pms}</div>
+                                    <div className="text-sm text-yellow-600">Pending: {newStats.pending}</div>
+                                    <div className="text-sm text-orange-600">Unqueued: {newStats.unqueued}</div>
+                                    <div className="text-sm text-green-600">Loaded: {newStats.loaded}</div>
+                                  </div>
                                 </div>
-                              </div>
-                            )}
-                          </div>
-                        </Card>
-                      </motion.div>
-                    );
-                  })}
-                </div>
-              </Card>
-            </motion.div>
-          </div>
+                              )}
+                            </div>
+                          </Card>
+                        </motion.div>
+                      );
+                    })}
+                  </div>
+                </Card>
+              </motion.div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -2725,6 +2886,103 @@ const getActiveOwnerSummary = () => {
           {priceEditMode ? "Price Edit Mode" : "Prices Visible"}
         </Badge></>
       )}
+
+      {/* Add Quick View Dialog */}
+      <Dialog open={isQuickViewOpen} onOpenChange={setIsQuickViewOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Truck Quick View</DialogTitle>
+          </DialogHeader>
+          {quickViewData && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <h4 className="text-sm font-medium text-muted-foreground">Owner</h4>
+                  <p>{quickViewData.owner}</p>
+                </div>
+                <div>
+                  <h4 className="text-sm font-medium text-muted-foreground">Truck Number</h4>
+                  <p>{quickViewData.truck_number}</p>
+                </div>
+                <div>
+                  <h4 className="text-sm font-medium text-muted-foreground">Product</h4>
+                  <p>{quickViewData.product}</p>
+                </div>
+                <div>
+                  <h4 className="text-sm font-medium text-muted-foreground">Quantity</h4>
+                  <p>{quickViewData.quantity}</p>
+                </div>
+                <div>
+                  <h4 className="text-sm font-medium text-muted-foreground">Order No</h4>
+                  <p>{quickViewData.orderno}</p>
+                </div>
+                <div>
+                  <h4 className="text-sm font-medium text-muted-foreground">Status</h4>
+                  <Badge variant={quickViewData.status === "queued" ? "default" : "secondary"}>
+                    {quickViewData.status}
+                  </Badge>
+                </div>
+                <div>
+                  <h4 className="text-sm font-medium text-muted-foreground">Loaded</h4>
+                  <Badge variant={quickViewData.loaded ? "default" : "outline"}>
+                    {quickViewData.loaded ? "Yes" : "No"}
+                  </Badge>
+                </div>
+                <div>
+                  <h4 className="text-sm font-medium text-muted-foreground">Payment</h4>
+                  <Badge 
+                    variant={
+                      quickViewData.paid 
+                        ? "default" 
+                        : quickViewData.paymentPending 
+                          ? "secondary"
+                          : "destructive"
+                    }
+                  >
+                    {quickViewData.paid ? "Paid" : quickViewData.paymentPending ? "Pending" : "Unpaid"}
+                  </Badge>
+                </div>
+                {quickViewData.loaded && quickViewData.at20 && (
+                  <>
+                    <div>
+                      <h4 className="text-sm font-medium text-muted-foreground">AT20</h4>
+                      <p>{quickViewData.at20}</p>
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-medium text-muted-foreground">Total Due</h4>
+                      <p>${formatNumber(parseFloat(quickViewData.price) * parseFloat(quickViewData.at20))}</p>
+                    </div>
+                  </>
+                )}
+              </div>
+              
+              <div className="flex justify-between pt-4 border-t">
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={() => {
+                    setIsQuickViewOpen(false);
+                    startEditing(quickViewData);
+                  }}
+                  disabled={quickViewData.loaded}
+                >
+                  Edit
+                </Button>
+                <Button 
+                  variant="default" 
+                  size="sm"
+                  onClick={() => {
+                    setIsQuickViewOpen(false);
+                    router.push(`/dashboard/work/${encodeURIComponent(quickViewData.owner)}`);
+                  }}
+                >
+                  View Owner
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
