@@ -714,17 +714,71 @@ export default function WorkManagementPage() {
   }
 
   const handleCopySummary = () => {
-    let summaryText = `Summary:\n` +
-      `1. Total Orders: ${summaryStats.totalOrders}\n` +
-      `2. Queued Orders: ${summaryStats.queuedOrders}\n` +
-      `3. Unqueued Orders: ${summaryStats.unqueuedOrders}\n` +
-      `4. Loaded Orders: ${summaryStats.loadedOrders}\n` +
-      `5. Pending Orders: ${summaryStats.pendingOrders}\n` +
-      `6. AGO Orders: ${summaryStats.agoOrders}\n` +
-      `7. PMS Orders: ${summaryStats.pmsOrders}\n\n` +
+    // Get the filtered data that's currently displayed in the table
+    const filteredData = getFilteredWorkDetails();
+    
+    // Calculate summary stats based on filtered data
+    const filteredStats = {
+      totalOrders: filteredData.length,
+      queuedOrders: filteredData.filter(d => d.status === "queued" || d.status === "completed").length,
+      unqueuedOrders: filteredData.filter(d => d.status !== "queued" && d.status !== "completed").length,
+      loadedOrders: filteredData.filter(d => d.loaded).length,
+      pendingOrders: filteredData.filter(d => d.status === "queued" && !d.loaded).length,
+      agoOrders: filteredData.filter(d => d.product === "AGO").length,
+      pmsOrders: filteredData.filter(d => d.product === "PMS").length
+    };
+    
+    // Generate summary text from filtered data
+    let summaryText = `Summary (Filtered View):\n` +
+      `1. Total Orders: ${filteredStats.totalOrders}\n` +
+      `2. Queued Orders: ${filteredStats.queuedOrders}\n` +
+      `3. Unqueued Orders: ${filteredStats.unqueuedOrders}\n` +
+      `4. Loaded Orders: ${filteredStats.loadedOrders}\n` +
+      `5. Pending Orders: ${filteredStats.pendingOrders}\n` +
+      `6. AGO Orders: ${filteredStats.agoOrders}\n` +
+      `7. PMS Orders: ${filteredStats.pmsOrders}\n\n` +
       `Owner Summary:\n`;
 
-    Object.entries(ownerSummary).forEach(([owner, data], index) => {
+    // Group filtered data by owner
+    const filteredOwnerSummary: OwnerSummary = {};
+    filteredData.forEach(detail => {
+      if (!filteredOwnerSummary[detail.owner]) {
+        filteredOwnerSummary[detail.owner] = {
+          totalOrders: 0,
+          agoOrders: 0,
+          pmsOrders: 0,
+          queuedOrders: 0,
+          unqueuedOrders: 0,
+          loadedOrders: 0,
+          pendingOrders: 0,
+          products: {},
+          loadedTrucks: [],
+          pendingTrucks: []
+        };
+      }
+      
+      const ownerData = filteredOwnerSummary[detail.owner];
+      ownerData.totalOrders++;
+      
+      if (detail.product === "AGO") ownerData.agoOrders++;
+      if (detail.product === "PMS") ownerData.pmsOrders++;
+      
+      if (detail.status === "queued" || detail.status === "completed") ownerData.queuedOrders++;
+      else ownerData.unqueuedOrders++;
+      
+      if (detail.loaded) {
+        ownerData.loadedOrders++;
+        ownerData.loadedTrucks.push(detail);
+      }
+      
+      if (detail.status === "queued" && !detail.loaded) {
+        ownerData.pendingOrders++;
+        ownerData.pendingTrucks.push(detail);
+      }
+    });
+
+    // Add filtered owner summary to text
+    Object.entries(filteredOwnerSummary).forEach(([owner, data], index) => {
       summaryText += `${index + 1}. ${owner}:\n` +
         `   a. Total Orders: ${data.totalOrders}\n` +
         `   b. Queued Orders: ${data.queuedOrders}\n` +
@@ -747,11 +801,19 @@ export default function WorkManagementPage() {
       summaryText += `\n`;
     });
 
+    // Add current filters information
+    summaryText += `Applied Filters:\n` +
+      `Owner Filter: ${ownerFilter || "None"}\n` +
+      `Product Filter: ${productFilter}\n` +
+      `Queue Status: ${queueFilter}\n` +
+      `Load Status: ${loadedFilter}\n` +
+      `Search Term: ${searchTerm || "None"}\n`;
+
     navigator.clipboard.writeText(summaryText)
       .then(() => {
         toast({
           title: "Copied",
-          description: "Summary copied to clipboard",
+          description: "Filtered summary copied to clipboard",
         });
       })
       .catch(() => {
