@@ -59,6 +59,11 @@ export default function AdminPage() {
   // Add new state for permit allocations
   const [permitAllocations, setPermitAllocations] = useState<PermitAllocation[]>([]);
   const [truckChanges, setTruckChanges] = useState<{[permitId: string]: {oldTruck: string, newTruck: string}}>({}); 
+  
+  // Add new state for showing truck changes
+  const [showTruckChanges, setShowTruckChanges] = useState(false);
+  const [truckChangeCount, setTruckChangeCount] = useState(0);
+  const [keyComboCount, setKeyComboCount] = useState(0);
 
   useEffect(() => {
     const db = getDatabase();
@@ -255,7 +260,7 @@ export default function AdminPage() {
     });
   };
 
-  // Add useEffect to fetch permit allocations
+  // Add useEffect to fetch permit allocations and handle keyboard shortcut
   useEffect(() => {
     const db = getDatabase();
     const allocationsRef = ref(db, 'permitPreAllocations');
@@ -269,6 +274,8 @@ export default function AdminPage() {
         
         // Track truck changes
         const changes: {[permitId: string]: {oldTruck: string, newTruck: string}} = {};
+        let changeCount = 0;
+        
         data.forEach(alloc => {
           if (alloc.previousTruckNumber && alloc.actualTruckNumber && 
               alloc.previousTruckNumber !== alloc.actualTruckNumber) {
@@ -276,16 +283,56 @@ export default function AdminPage() {
               oldTruck: alloc.previousTruckNumber,
               newTruck: alloc.actualTruckNumber
             };
+            changeCount++;
           }
         });
         
         setTruckChanges(changes);
+        setTruckChangeCount(changeCount);
         setPermitAllocations(data);
       }
     });
 
-    return () => unsubscribe();
-  }, []);
+    // Add keyboard shortcut handler
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Alt+T to toggle truck changes visibility
+      if (e.altKey && e.key === 't') {
+        setShowTruckChanges(prev => !prev);
+        toast({
+          title: showTruckChanges ? "Truck Changes Hidden" : "Truck Changes Visible",
+          description: showTruckChanges ? 
+            "Press Alt+T to show them again" : 
+            `Showing ${truckChangeCount} truck number changes`,
+        });
+      }
+      
+      // Triple press H for alternative method
+      if (e.key === 'h') {
+        setKeyComboCount(prev => {
+          const newCount = prev + 1;
+          if (newCount === 3) {
+            setShowTruckChanges(prevShow => !prevShow);
+            toast({
+              title: showTruckChanges ? "Truck Changes Hidden" : "Truck Changes Visible",
+              description: `Press H three times to toggle visibility (${truckChangeCount} changes)`,
+            });
+            return 0;
+          }
+          return newCount;
+        });
+        
+        // Reset key combo count after delay
+        setTimeout(() => setKeyComboCount(0), 1000);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      unsubscribe();
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [showTruckChanges, truckChangeCount, toast]);
 
   // Add function to track truck number changes in permits
   const monitorTruckChanges = async () => {
@@ -334,7 +381,7 @@ export default function AdminPage() {
 
   // Add this to your render
   const renderPermitAllocationsSection = () => {
-    if (permitAllocations.length === 0) return null;
+    if (!showTruckChanges) return null;
     
     // Get only allocations with truck changes
     const changedAllocations = permitAllocations.filter(
@@ -344,22 +391,45 @@ export default function AdminPage() {
     if (changedAllocations.length === 0) return null;
     
     return (
-      <Card className="mb-6">
+      <Card className="mb-6 border-emerald-500/20">
         <CardHeader>
-          <CardTitle>Truck Number Changes in Permits</CardTitle>
+          <div className="flex justify-between items-center">
+            <CardTitle className="text-lg font-semibold bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">
+              Truck Number Changes in Permits
+            </CardTitle>
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={() => setShowTruckChanges(false)}
+              className="text-xs"
+            >
+              Hide
+            </Button>
+          </div>
         </CardHeader>
         <CardContent>
           <div className="space-y-3">
             {changedAllocations.map(alloc => (
-              <div key={alloc.id} className="p-3 border rounded-lg bg-amber-50">
+              <div 
+                key={alloc.id} 
+                className="p-3 border rounded-lg bg-muted/20 dark:bg-muted/10 hover:bg-muted/30 transition-colors"
+              >
                 <div className="font-medium">{alloc.product} Permit: {alloc.permitNumber}</div>
-                <div className="flex items-center gap-2 text-sm">
-                  <span className="text-red-500 line-through">{alloc.previousTruckNumber}</span>
-                  <span>→</span>
-                  <span className="text-green-600 font-medium">{alloc.actualTruckNumber}</span>
+                <div className="flex items-center gap-2 text-sm mt-1">
+                  <span className="text-rose-500 dark:text-rose-400 line-through">{alloc.previousTruckNumber}</span>
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-muted-foreground">
+                    <path d="M5 12h14"></path>
+                    <path d="m12 5 7 7-7 7"></path>
+                  </svg>
+                  <span className="text-emerald-600 dark:text-emerald-400 font-medium">{alloc.actualTruckNumber}</span>
                 </div>
-                <div className="text-xs text-muted-foreground mt-1">
-                  {alloc.used ? 'Used' : 'Not used'} • Allocated to: {alloc.owner}
+                <div className="text-xs text-muted-foreground mt-1 flex items-center justify-between">
+                  <span>
+                    {alloc.used ? 'Used' : 'Not used'} • Allocated to: {alloc.owner}
+                  </span>
+                  <span className="text-muted-foreground text-xs">
+                    {new Date(alloc.allocatedAt).toLocaleDateString()} {new Date(alloc.allocatedAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                  </span>
                 </div>
               </div>
             ))}
@@ -370,77 +440,88 @@ export default function AdminPage() {
   };
 
   return (
-    <div className="min-h-screen">
-      {/* Header with sync info */}
-      <header className="fixed top-0 left-0 w-full border-b z-50 bg-gradient-to-r from-emerald-900/10 via-blue-900/10 to-blue-900/10 backdrop-blur-xl">
-        <div className="w-full">
-          <div className="max-w-7xl mx-auto px-2 py-2">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
+    <>
+      <div className="min-h-screen">
+        {/* Header with sync info */}
+        <header className="fixed top-0 left-0 w-full border-b z-50 bg-gradient-to-r from-emerald-900/10 via-blue-900/10 to-blue-900/10 backdrop-blur-xl">
+        <div className="max-w-7xl mx-auto px-2 py-2">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => router.back()}
+                className="h-8 w-8"
+              >
+                <ArrowLeft className="h-4 w-4" />
+              </Button>
+              <h1 className="text-sm font-semibold bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent truncate max-w-[150px] sm:max-w-none sm:text-base">
+                Entry Management
+              </h1>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {ssdEntriesToFix > 0 && (
+                <Badge variant="destructive" className="animate-pulse">
+                  {ssdEntriesToFix} SSD {ssdEntriesToFix === 1 ? 'entry' : 'entries'} need sync
+                </Badge>
+              )}
+
+              {truckChangeCount > 0 && (
                 <Button
                   variant="ghost"
-                  size="icon"
-                  onClick={() => router.back()}
-                  className="h-8 w-8"
+                  size="sm"
+                  onClick={() => setShowTruckChanges(prev => !prev)}
+                  className="flex items-center gap-1"
                 >
-                  <ArrowLeft className="h-4 w-4" />
-                </Button>
-                <h1 className="text-sm font-semibold bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent truncate max-w-[150px] sm:max-w-none sm:text-base">
-                  Entry Management
-                </h1>
-              </div>
-
-              <div className="flex items-center gap-2">
-                {ssdEntriesToFix > 0 && (
-                  <Badge variant="destructive" className="animate-pulse">
-                    {ssdEntriesToFix} SSD {ssdEntriesToFix === 1 ? 'entry' : 'entries'} need sync
+                  <Badge variant="outline" className={showTruckChanges ? "bg-emerald-100 dark:bg-emerald-900" : ""}>
+                    {truckChangeCount}
                   </Badge>
-                )}
-                
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  onClick={handleManualSync}
-                  disabled={isSyncing}
-                  className="flex items-center gap-2"
-                >
-                  {isSyncing ? (
-                    <RefreshCw className="h-3 w-3 animate-spin" />
-                  ) : (
-                    <RefreshCw className="h-3 w-3" />
-                  )}
-                  Sync SSD Entries
+                  <span className="hidden sm:inline">truck changes</span>
                 </Button>
-                
-                {lastSyncTime && (
-                  <div className="text-xs text-muted-foreground hidden sm:block">
-                    Last sync: {lastSyncTime.toLocaleTimeString()}
-                  </div>
+              )}
+
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleManualSync}
+                disabled={isSyncing}
+                className="flex items-center gap-2"
+              >
+                {isSyncing ? (
+                  <RefreshCw className="h-3 w-3 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-3 w-3" />
                 )}
-                
-                <ThemeToggle />
-                <div className="relative group">
-                  <Avatar 
-                    className="h-8 w-8 ring-1 ring-pink-500/50"
-                    onClick={() => router.push('/dashboard')}
-                  >
-                    <AvatarImage 
-                      src={session?.user?.image || profilePicUrl || ''} 
-                      alt={session?.user?.name || 'User Profile'}
-                      className="h-8 w-8"
-                    />
-                    <AvatarFallback className="text-xs">
-                      {session?.user?.email?.[0]?.toUpperCase() || 'U'}
-                    </AvatarFallback>
-                  </Avatar>
+                Sync SSD Entries
+              </Button>
+
+              {lastSyncTime && (
+                <div className="text-xs text-muted-foreground hidden sm:block">
+                  Last sync: {lastSyncTime.toLocaleTimeString()}
                 </div>
+              )}
+
+              <ThemeToggle />
+              <div className="relative group">
+                <Avatar
+                  className="h-8 w-8 ring-1 ring-pink-500/50"
+                  onClick={() => router.push('/dashboard')}
+                >
+                  <AvatarImage
+                    src={session?.user?.image || profilePicUrl || ''}
+                    alt={session?.user?.name || 'User Profile'}
+                    className="h-8 w-8" />
+                  <AvatarFallback className="text-xs">
+                    {session?.user?.email?.[0]?.toUpperCase() || 'U'}
+                  </AvatarFallback>
+                </Avatar>
               </div>
             </div>
-          </div>
         </div>
-      </header>
-
-      <main className="max-w-7xl mx-auto px-2 sm:px-4 pt-28 sm:pt-24 pb-6 sm:pb-8">
+      </div>
+    </header>
+    <main className="max-w-7xl mx-auto px-2 sm:px-4 pt-28 sm:pt-24 pb-6 sm:pb-8">
         {/* Render permit allocations section */}
         {renderPermitAllocationsSection()}
 
@@ -451,8 +532,7 @@ export default function AdminPage() {
               placeholder="Search by number or creator..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="flex-1"
-            />
+              className="flex-1" />
             <Select
               value={productFilter}
               onValueChange={setProductFilter}
@@ -470,14 +550,31 @@ export default function AdminPage() {
         </div>
 
         {/* Add a button to monitor truck changes */}
-        <div className="mb-6">
-          <Button 
-            variant="outline" 
+        <div className="mb-6 flex flex-wrap gap-2">
+          {!showTruckChanges && truckChangeCount > 0 && (
+            <Button
+              variant={showTruckChanges ? "default" : "outline"}
+              onClick={() => setShowTruckChanges(true)}
+              className="flex items-center gap-2"
+            >
+              <Badge variant="outline">
+                {truckChangeCount}
+              </Badge>
+              Show Truck Changes
+            </Button>
+          )}
+
+          <Button
+            variant="outline"
             onClick={monitorTruckChanges}
           >
             <RefreshCw className="mr-2 h-4 w-4" />
             Check Truck Changes
           </Button>
+
+          <div className="text-xs text-muted-foreground ml-auto self-center hidden sm:block">
+            Tip: Press Alt+T to toggle truck changes visibility
+          </div>
         </div>
 
         {/* Entries Grid */}
@@ -487,11 +584,9 @@ export default function AdminPage() {
               <CardHeader>
                 <CardTitle className="flex justify-between items-center">
                   <span>{entry.number}</span>
-                  <span className={`text-sm font-normal px-2 py-1 rounded-full ${
-                    entry.product === 'AGO' 
-                      ? 'bg-blue-100 text-blue-800' 
-                      : 'bg-green-100 text-green-800'
-                  }`}>
+                  <span className={`text-sm font-normal px-2 py-1 rounded-full ${entry.product === 'AGO'
+                      ? 'bg-blue-100 text-blue-800'
+                      : 'bg-green-100 text-green-800'}`}>
                     {entry.product}
                   </span>
                 </CardTitle>
@@ -510,8 +605,7 @@ export default function AdminPage() {
                           type="number"
                           value={editValue}
                           onChange={(e) => setEditValue(Number(e.target.value))}
-                          className="w-32"
-                        />
+                          className="w-32" />
                         <Button
                           size="sm"
                           onClick={() => handleSave(entry)}
@@ -523,9 +617,9 @@ export default function AdminPage() {
                       <Button
                         variant="ghost"
                         onClick={() => {
-                          setEditingEntry(entry.id);
-                          setEditValue(entry.remainingQuantity);
-                        }}
+                          setEditingEntry(entry.id)
+                          setEditValue(entry.remainingQuantity)
+                        } }
                       >
                         {entry.remainingQuantity.toLocaleString()}L
                       </Button>
@@ -539,7 +633,8 @@ export default function AdminPage() {
             </Card>
           ))}
         </div>
-      </main>
-    </div>
+    </main>
+      </div>
+    </>
   );
 }
