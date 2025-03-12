@@ -725,7 +725,9 @@ export default function WorkManagementPage() {
       loadedOrders: filteredData.filter(d => d.loaded).length,
       pendingOrders: filteredData.filter(d => d.status === "queued" && !d.loaded).length,
       agoOrders: filteredData.filter(d => d.product === "AGO").length,
-      pmsOrders: filteredData.filter(d => d.product === "PMS").length
+      pmsOrders: filteredData.filter(d => d.product === "PMS").length,
+      unqueuedAgoOrders: filteredData.filter(d => d.product === "AGO" && d.status !== "queued" && d.status !== "completed").length,
+      unqueuedPmsOrders: filteredData.filter(d => d.product === "PMS" && d.status !== "queued" && d.status !== "completed").length
     };
     
     // Generate summary text from filtered data
@@ -733,6 +735,8 @@ export default function WorkManagementPage() {
       `1. Total Orders: ${filteredStats.totalOrders}\n` +
       `2. Queued Orders: ${filteredStats.queuedOrders}\n` +
       `3. Unqueued Orders: ${filteredStats.unqueuedOrders}\n` +
+      `   a. Unqueued AGO: ${filteredStats.unqueuedAgoOrders}\n` +
+      `   b. Unqueued PMS: ${filteredStats.unqueuedPmsOrders}\n` +
       `4. Loaded Orders: ${filteredStats.loadedOrders}\n` +
       `5. Pending Orders: ${filteredStats.pendingOrders}\n` +
       `6. AGO Orders: ${filteredStats.agoOrders}\n` +
@@ -779,24 +783,55 @@ export default function WorkManagementPage() {
 
     // Add filtered owner summary to text
     Object.entries(filteredOwnerSummary).forEach(([owner, data], index) => {
+      const unqueuedAgoCount = filteredData.filter(d => 
+        d.owner === owner && 
+        d.product === "AGO" && 
+        d.status !== "queued" && 
+        d.status !== "completed"
+      ).length;
+      
+      const unqueuedPmsCount = filteredData.filter(d => 
+        d.owner === owner && 
+        d.product === "PMS" && 
+        d.status !== "queued" && 
+        d.status !== "completed"
+      ).length;
+      
       summaryText += `${index + 1}. ${owner}:\n` +
         `   a. Total Orders: ${data.totalOrders}\n` +
         `   b. Queued Orders: ${data.queuedOrders}\n` +
-        `   c. Loaded Orders: ${data.loadedOrders}\n` +
-        `   d. Pending Orders: ${data.pendingOrders}\n` +
-        `   e. AGO Orders: ${data.agoOrders}\n` +
-        `   f. PMS Orders: ${data.pmsOrders}\n` +
-        `   g. Loaded Trucks:\n`;
+        `   c. Unqueued Orders: ${data.unqueuedOrders}\n` +
+        `      - Unqueued AGO: ${unqueuedAgoCount}\n` +
+        `      - Unqueued PMS: ${unqueuedPmsCount}\n` +
+        `   d. Loaded Orders: ${data.loadedOrders}\n` +
+        `   e. Pending Orders: ${data.pendingOrders}\n` +
+        `   f. AGO Orders: ${data.agoOrders}\n` +
+        `   g. PMS Orders: ${data.pmsOrders}\n` +
+        `   h. Loaded Trucks:\n`;
 
       data.loadedTrucks.forEach((truck, truckIndex) => {
         summaryText += `      ${truckIndex + 1}. Truck Number: ${truck.truck_number}, Quantity: ${truck.quantity}, Product: ${truck.product}, Loaded: Yes\n`;
       });
 
-      summaryText += `   h. Pending Trucks:\n`;
+      summaryText += `   i. Pending Trucks:\n`;
 
       data.pendingTrucks.forEach((truck, truckIndex) => {
         summaryText += `      ${truckIndex + 1}. Truck Number: ${truck.truck_number}, Quantity: ${truck.quantity}, Product: ${truck.product}, Loaded: No\n`;
       });
+      
+      // Add unqueued trucks explicitly
+      const unqueuedTrucks = filteredData.filter(d => 
+        d.owner === owner && 
+        d.status !== "queued" && 
+        d.status !== "completed"
+      );
+      
+      if (unqueuedTrucks.length > 0) {
+        summaryText += `   j. Unqueued Trucks:\n`;
+        unqueuedTrucks.forEach((truck, truckIndex) => {
+          summaryText += `      ${truckIndex + 1}. Truck Number: ${truck.truck_number}, Quantity: ${truck.quantity}, Product: ${truck.product}, Status: ${truck.status}\n`;
+        });
+      }
 
       summaryText += `\n`;
     });
