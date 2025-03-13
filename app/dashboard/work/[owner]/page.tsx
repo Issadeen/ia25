@@ -330,17 +330,6 @@ export default function OwnerDetailsPage() {
     return itemDate.getFullYear() === year && itemDate.getMonth() + 1 === month;
   };
 
-  const getFilteredWorkDetails = () => {
-    return workDetails.filter(truck => {
-      // If truck has a createdAt date, filter by it
-      if (truck.createdAt) {
-        return filterByMonth(truck.createdAt, selectedYear, selectedMonth);
-      }
-      // Otherwise include it (could be replaced with a different default behavior)
-      return true;
-    });
-  };
-
   const getFilteredOwnerPayments = () => {
     return ownerPayments.filter(payment => 
       filterByMonth(payment.timestamp, selectedYear, selectedMonth)
@@ -351,6 +340,34 @@ export default function OwnerDetailsPage() {
     return balanceUsageHistory.filter(entry => 
       filterByMonth(entry.timestamp, selectedYear, selectedMonth)
     );
+  };
+
+  // Update the getFilteredWorkDetails function to only fetch due and pending payments
+  const getFilteredWorkDetails = () => {
+    return workDetails.filter(truck => {
+      // Only include loaded trucks that aren't fully paid
+      if (truck.loaded) {
+        const { balance } = getTruckAllocations(truck, truckPayments);
+        
+        // If the truck has a positive balance (due or pending), include it regardless of date
+        if (balance > 0) {
+          return true;
+        }
+        
+        // For fully paid trucks, only include if they match the month filter
+        if (balance <= 0 && truck.createdAt) {
+          return filterByMonth(truck.createdAt, selectedYear, selectedMonth);
+        }
+      }
+      
+      // Include pending orders (not loaded) if they match the month filter
+      if (!truck.loaded && truck.createdAt) {
+        return filterByMonth(truck.createdAt, selectedYear, selectedMonth);
+      }
+      
+      // Default: exclude
+      return false;
+    });
   };
 
   // Update calculateTotals to use filtered data
@@ -632,7 +649,7 @@ export default function OwnerDetailsPage() {
       if (sortConfig.direction === "asc") {
         return a[key] > b[key] ? 1 : -1
       }
-      return a[key] < b[key] ? 1 : -1
+      return a[key] < b[key] ? -1 : 1
     })
   }
 
