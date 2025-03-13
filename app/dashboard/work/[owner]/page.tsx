@@ -234,17 +234,25 @@ export default function OwnerDetailsPage() {
   const [isReconciliationDialogOpen, setIsReconciliationDialogOpen] = useState(false)
   const [reconciliationFormData, setReconciliationFormData] = useState({
     theirBalance: 0,
-    note: ""
+    note: "",
+    amountOwed: 0,
+    amountToPay: 0
   })
   const [activeBalanceView, setActiveBalanceView] = useState<'ours' | 'theirs' | 'difference'>('ours')
   const [showReconciliationHistory, setShowReconciliationHistory] = useState(false)
+
+  // Add new state for monthly data
+  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear())
+  const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1)
 
   // Fetch data when component mounts
   useEffect(() => {
     const fetchOwnerData = async () => {
       try {
+        const yearMonth = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}`
+
         // Fetch work details
-        const workDetailsRef = ref(database, "work_details")
+        const workDetailsRef = ref(database, `work_details`)
         onValue(workDetailsRef, (snapshot) => {
           if (snapshot.exists()) {
             const data = Object.entries(snapshot.val())
@@ -314,30 +322,59 @@ export default function OwnerDetailsPage() {
     }
 
     fetchOwnerData()
-  }, [owner])
+  }, [owner, selectedYear, selectedMonth])
 
-  // Update calculateTotals with proper typing
+  // Add these helper functions to filter data by date
+  const filterByMonth = (date: string, year: number, month: number) => {
+    const itemDate = new Date(date);
+    return itemDate.getFullYear() === year && itemDate.getMonth() + 1 === month;
+  };
+
+  const getFilteredWorkDetails = () => {
+    return workDetails.filter(truck => {
+      // If truck has a createdAt date, filter by it
+      if (truck.createdAt) {
+        return filterByMonth(truck.createdAt, selectedYear, selectedMonth);
+      }
+      // Otherwise include it (could be replaced with a different default behavior)
+      return true;
+    });
+  };
+
+  const getFilteredOwnerPayments = () => {
+    return ownerPayments.filter(payment => 
+      filterByMonth(payment.timestamp, selectedYear, selectedMonth)
+    );
+  };
+
+  const getFilteredBalanceHistory = () => {
+    return balanceUsageHistory.filter(entry => 
+      filterByMonth(entry.timestamp, selectedYear, selectedMonth)
+    );
+  };
+
+  // Update calculateTotals to use filtered data
   const calculateTotals = (): OwnerTotals => {
-    const loadedTrucks = workDetails.filter((truck) => truck.loaded)
+    const loadedTrucks = getFilteredWorkDetails().filter((truck) => truck.loaded);
 
     const totals = loadedTrucks.reduce(
       (sum, truck) => {
-        const { totalDue, totalAllocated, pendingAmount } = getTruckAllocations(truck, truckPayments)
+        const { totalDue, totalAllocated, pendingAmount } = getTruckAllocations(truck, truckPayments);
         return {
           totalDue: sum.totalDue + totalDue,
           totalPaid: sum.totalPaid + totalAllocated,
           pendingTotal: sum.pendingTotal + (pendingAmount || 0),
-        }
+        };
       },
       { totalDue: 0, totalPaid: 0, pendingTotal: 0 },
-    )
+    );
 
     return {
       ...totals,
       balance: totals.totalDue - totals.totalPaid,
       existingBalance: ownerBalance?.amount || 0,
-    }
-  }
+    };
+  };
 
   // Payment handling functions
   const handleAddPayment = () => {
@@ -626,7 +663,7 @@ export default function OwnerDetailsPage() {
     autoTable(doc, {
       startY: (doc as any).lastAutoTable?.finalY + 10 || 45,
       head: [["Truck", "Product", "At20", "Price", "Total Due", "Paid", "Balance", "Status"]],
-      body: workDetails
+      body: getFilteredWorkDetails()
         .filter((truck) => truck.loaded)
         .map((truck) => {
           const { totalDue, totalAllocated, balance } = getTruckAllocations(truck, truckPayments)
@@ -685,13 +722,13 @@ export default function OwnerDetailsPage() {
     const tableData: any[] = [];
     
     // Get filtered and sorted trucks
-    const filteredTrucks = workDetails
+    const filteredTrucks = getFilteredWorkDetails()
       .filter(truck => truck.loaded && truck.truck_number.toLowerCase().includes(truckFilter.toLowerCase()))
       .sort((a, b) => (paymentOrder[a.id] || 0) - (paymentOrder[b.id] || 0));
 
     // Process each truck and its payments
     filteredTrucks.forEach((truck, index) => {
-      const payments = ownerPayments
+      const payments = getFilteredOwnerPayments()
         .flatMap(payment => 
           payment.allocatedTrucks
             ?.filter((allocation: any) => allocation.truckId === truck.id)
@@ -815,7 +852,7 @@ export default function OwnerDetailsPage() {
 
     // Trucks worksheet
     const trucksData = [["Truck", "Product", "At20", "Price", "Total Due", "Paid", "Balance", "Status", "Date Loaded"]]
-    workDetails
+    getFilteredWorkDetails()
       .filter((truck) => truck.loaded)
       .forEach((truck) => {
         const { totalDue, totalAllocated, balance } = getTruckAllocations(truck, truckPayments)
@@ -836,7 +873,7 @@ export default function OwnerDetailsPage() {
 
     // Payments worksheet
     const paymentsData = [["Date", "Amount", "Type", "Note", "Allocated Trucks"]]
-    ownerPayments.forEach((payment) => {
+    getFilteredOwnerPayments().forEach((payment) => {
       paymentsData.push([
         new Date(payment.timestamp).toLocaleString(),
         `$${formatNumber(payment.amount)}`,
@@ -855,7 +892,7 @@ export default function OwnerDetailsPage() {
 
     // Balance History worksheet
     const balanceData = [["Date", "Amount", "Type", "Note"]]
-    balanceUsageHistory.forEach((entry) => {
+    getFilteredBalanceHistory().forEach((entry) => {
       balanceData.push([
         new Date(entry.timestamp).toLocaleDateString(),
         `${entry.type === "deposit" ? "+" : "-"}$${formatNumber(entry.amount)}`,
@@ -1187,7 +1224,7 @@ export default function OwnerDetailsPage() {
 
   // Add new function to filter trucks
   const getFilteredTrucks = () => {
-    return workDetails
+    return getFilteredWorkDetails()
       .filter((truck) => truck.loaded && truck.truck_number.toLowerCase().includes(truckFilter.toLowerCase()))
       .sort((a, b) => a.truck_number.localeCompare(b.truck_number))
   }
@@ -1196,7 +1233,7 @@ export default function OwnerDetailsPage() {
   const groupPaymentsByTruck = () => {
     const grouped: { [key: string]: GroupedTruckPayment } = {}
 
-    ownerPayments
+    getFilteredOwnerPayments()
       .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
       .forEach((payment) => {
         payment.allocatedTrucks?.forEach((allocation: any) => {
@@ -1247,7 +1284,7 @@ export default function OwnerDetailsPage() {
   }
 
   const handleMoveRow = async (truckId: string, direction: "up" | "down") => {
-    const sortedTrucks = workDetails
+    const sortedTrucks = getFilteredWorkDetails()
       .filter((t) => t.loaded && t.truck_number.toLowerCase().includes(truckFilter.toLowerCase()))
       .sort((a, b) => (paymentOrder[a.id] || 0) - (paymentOrder[b.id] || 0))
 
@@ -1348,7 +1385,9 @@ export default function OwnerDetailsPage() {
       setIsReconciliationDialogOpen(false)
       setReconciliationFormData({
         theirBalance: 0,
-        note: ""
+        note: "",
+        amountOwed: 0,
+        amountToPay: 0
       })
     } catch (error) {
       toast({
@@ -1544,6 +1583,40 @@ export default function OwnerDetailsPage() {
             variants={staggeredList}
             className="space-y-4 sm:space-y-6"
           >
+            {/* Add year and month selection */}
+            <div className="flex justify-end gap-2">
+              <Select
+                value={String(selectedYear)}
+                onValueChange={(value) => setSelectedYear(Number(value))}
+              >
+                <SelectTrigger className="w-[120px] h-8 text-xs">
+                  <SelectValue placeholder="Select Year" />
+                </SelectTrigger>
+                <SelectContent>
+                  {Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - i).map((year) => (
+                    <SelectItem key={year} value={String(year)}>
+                      {year}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select
+                value={String(selectedMonth)}
+                onValueChange={(value) => setSelectedMonth(Number(value))}
+              >
+                <SelectTrigger className="w-[120px] h-8 text-xs">
+                  <SelectValue placeholder="Select Month" />
+                </SelectTrigger>
+                <SelectContent>
+                  {Array.from({ length: 12 }, (_, i) => i + 1).map((month) => (
+                    <SelectItem key={month} value={String(month)}>
+                      {new Date(2000, month - 1, 1).toLocaleString('default', { month: 'long' })}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
             {/* Export button */}
             <motion.div variants={fadeIn} className="flex justify-end gap-2">
               <Button variant="outline" onClick={handleDownloadExcel} className="text-xs sm:text-sm">
@@ -1571,7 +1644,7 @@ export default function OwnerDetailsPage() {
                     )}
                   </div>
                   <div className="text-lg sm:text-2xl font-bold">
-                    {workDetails.length}
+                    {getFilteredWorkDetails().length}
                   </div>
                 </Card>
               </motion.div>
@@ -1579,7 +1652,7 @@ export default function OwnerDetailsPage() {
                 <Card className="p-2 sm:p-4">
                   <div className="text-xs sm:text-sm font-medium text-muted-foreground">Loaded Trucks</div>
                   <div className="text-lg sm:text-2xl font-bold">
-                    {workDetails.filter(t => t.loaded).length}
+                    {getFilteredWorkDetails().filter(t => t.loaded).length}
                   </div>
                 </Card>
               </motion.div>
@@ -1587,7 +1660,7 @@ export default function OwnerDetailsPage() {
                 <Card className="p-2 sm:p-4">
                   <div className="text-xs sm:text-sm font-medium text-muted-foreground">AGO Orders</div>
                   <div className="text-lg sm:text-2xl font-bold">
-                    {workDetails.filter(t => t.product === 'AGO').length}
+                    {getFilteredWorkDetails().filter(t => t.product === 'AGO').length}
                   </div>
                 </Card>
               </motion.div>
@@ -1595,7 +1668,7 @@ export default function OwnerDetailsPage() {
                 <Card className="p-2 sm:p-4">
                   <div className="text-xs sm:text-sm font-medium text-muted-foreground">PMS Orders</div>
                   <div className="text-lg sm:text-2xl font-bold">
-                    {workDetails.filter(t => t.product === 'PMS').length}
+                    {getFilteredWorkDetails().filter(t => t.product === 'PMS').length}
                   </div>
                 </Card>
               </motion.div>
@@ -1636,7 +1709,7 @@ export default function OwnerDetailsPage() {
                           </tr>
                         </thead>
                         <tbody>
-                          {workDetails
+                          {getFilteredWorkDetails()
                             .filter(detail => !detail.loaded && detail.status === "queued")
                             .sort((a, b) => new Date(a.createdAt || '').getTime() - new Date(b.createdAt || '').getTime())
                             .map(detail => (
@@ -1657,7 +1730,7 @@ export default function OwnerDetailsPage() {
                             ))}
                         </tbody>
                       </table>
-                      {workDetails.filter(detail => !detail.loaded && detail.status === "queued").length === 0 && (
+                      {getFilteredWorkDetails().filter(detail => !detail.loaded && detail.status === "queued").length === 0 && (
                         <p className="text-center text-muted-foreground py-4">
                           No pending orders
                         </p>
@@ -1779,7 +1852,7 @@ export default function OwnerDetailsPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {workDetails.filter(truck => truck.loaded).map(truck => {
+                        {getFilteredWorkDetails().filter(truck => truck.loaded).map(truck => {
                                                   const { totalDue, totalAllocated, balance, pendingAmount } = getTruckAllocations(truck, truckPayments);
                           return (
                             <tr key={truck.id} className="border-t">
@@ -1825,7 +1898,7 @@ export default function OwnerDetailsPage() {
               <Card className="p-3 sm:p-6">
                 <h2 className="text-lg sm:text-xl font-semibold mb-3 sm:mb-4">Payment History</h2>
                 <div className="space-y-2 sm:space-y-0">
-                  {ownerPayments.map((payment) => (
+                  {getFilteredOwnerPayments().map((payment) => (
                     <div key={payment.id} className="block sm:hidden border-b pb-2">
                       <div className="flex justify-between">
                         <div className="font-medium">${formatNumber(payment.amount)}</div>
@@ -1857,7 +1930,7 @@ export default function OwnerDetailsPage() {
                           <th className="p-2 text-left">Allocated Trucks</th>
                           <th className="p-2 text-left">Note</th></tr></thead>
                       <tbody>
-                        {ownerPayments
+                        {getFilteredOwnerPayments()
                           .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()) // Sort oldest first
                           .map((payment) => (
                           <tr key={payment.id} className={cn("border-t",payment.corrected && "bg-muted/50")}>
@@ -1917,7 +1990,7 @@ export default function OwnerDetailsPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {balanceUsageHistory
+                      {getFilteredBalanceHistory()
                         .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()) // Oldest first
                         .reduce((acc: any[], entry, index, array) => {
                           // Calculate running balance forwards
@@ -2002,7 +2075,7 @@ export default function OwnerDetailsPage() {
                         ))}
                     </tbody>
                   </table>
-                  {balanceUsageHistory.length === 0 && (
+                  {getFilteredBalanceHistory().length === 0 && (
                     <div className="text-center py-4 text-muted-foreground">
                       No balance history available
                     </div>
@@ -2045,11 +2118,11 @@ export default function OwnerDetailsPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {workDetails
+                      {getFilteredWorkDetails()
                         .filter(truck => truck.loaded && truck.truck_number.toLowerCase().includes(truckFilter.toLowerCase()))
                         .sort((a, b) => (paymentOrder[a.id] || 0) - (paymentOrder[b.id] || 0))
                         .map((truck, index) => {
-                          const payments = ownerPayments
+                          const payments = getFilteredOwnerPayments()
                             .flatMap(payment => 
                               payment.allocatedTrucks
                                 ?.filter((allocation: any) => allocation.truckId === truck.id)
@@ -2089,7 +2162,7 @@ export default function OwnerDetailsPage() {
                                         size="sm"
                                         onClick={() => handleMoveRow(truck.id, 'down')}
                                         className="h-6 w-6 p-0 hover:bg-muted"
-                                        disabled={paymentOrder[truck.id] === workDetails.filter(t => t.loaded).length - 1}
+                                        disabled={paymentOrder[truck.id] === getFilteredWorkDetails().filter(t => t.loaded).length - 1}
                                       >
                                         <ChevronDown className="h-4 w-4 text-muted-foreground hover:text-foreground transition-colors" />
                                       </Button>
@@ -2136,7 +2209,7 @@ export default function OwnerDetailsPage() {
                         })}
                     </tbody>
                   </table>
-                  {workDetails.filter(t => 
+                  {getFilteredWorkDetails().filter(t => 
                     t.loaded && t.truck_number.toLowerCase().includes(truckFilter.toLowerCase())
                   ).length === 0 && (
                     <div className="text-center py-4 text-muted-foreground">
@@ -2275,7 +2348,7 @@ export default function OwnerDetailsPage() {
                                 const totalAvailable = getTotalAvailable();
                                 const allocations = calculateOptimalAllocation(
                                   totalAvailable,
-                                  workDetails.filter(t => t.loaded),
+                                  getFilteredWorkDetails().filter(t => t.loaded),
                                   truckPayments
                                 );
                                 setPaymentFormData(prev => ({ ...prev, allocatedTrucks: allocations }));
@@ -2286,7 +2359,7 @@ export default function OwnerDetailsPage() {
                           </div>
 
                           <div className="space-y-2 max-h-[400px] overflow-y-auto rounded-lg border bg-card p-4">
-                            {workDetails
+                            {getFilteredWorkDetails()
                               .filter((t) => t.loaded && getTruckAllocations(t, truckPayments).balance > 0)
                               .map((truck) => {
                                 const truckAllocation = getTruckAllocations(truck, truckPayments);
@@ -2532,6 +2605,41 @@ export default function OwnerDetailsPage() {
                       )}
                     </span>
                   </div>
+                </div>
+              </div>
+              
+              {/* Add new fields for what we owe them and what they should pay */}
+              <div className="space-y-2">
+                <div className="space-y-1">
+                  <Label htmlFor="amountOwed">Amount We Owe Them</Label>
+                  <Input
+                    id="amountOwed"
+                    type="number"
+                    step="0.01"
+                    value={reconciliationFormData.amountOwed || 0}
+                    onChange={(e) => setReconciliationFormData(prev => ({
+                      ...prev,
+                      amountOwed: parseFloat(e.target.value) || 0
+                    }))}
+                    className="text-lg"
+                    placeholder="Enter amount we owe them"
+                  />
+                </div>
+                
+                <div className="space-y-1">
+                  <Label htmlFor="amountToPay">Amount They Should Pay</Label>
+                  <Input
+                    id="amountToPay"
+                    type="number"
+                    step="0.01"
+                    value={reconciliationFormData.amountToPay || 0}
+                    onChange={(e) => setReconciliationFormData(prev => ({
+                      ...prev,
+                      amountToPay: parseFloat(e.target.value) || 0
+                    }))}
+                    className="text-lg"
+                    placeholder="Enter amount they should pay"
+                  />
                 </div>
               </div>
               
