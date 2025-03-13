@@ -48,6 +48,8 @@ export interface BalanceReconciliation {
   id: string;
   ourBalance: number;
   theirBalance: number;
+  whatWeOweThem: number;
+  whatTheyShouldPay: number;
   difference: number;
   timestamp: string;
   status: 'pending' | 'accepted' | 'rejected';
@@ -55,6 +57,7 @@ export interface BalanceReconciliation {
   createdBy: string;
   resolvedAt?: string;
   resolvedBy?: string;
+  month: string;
 }
 
 export interface Payment {

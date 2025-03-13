@@ -250,9 +250,10 @@ export async function getPaymentCorrections(
 
 export async function getReconciliations(
   database: any,
-  owner: string
+  owner: string,
+  month: string
 ): Promise<BalanceReconciliation[]> {
-  const reconciliationsRef = ref(database, `payment_reconciliations/${owner}`);
+  const reconciliationsRef = ref(database, `payment_reconciliations/${owner}/${month}`);
   const snapshot = await get(reconciliationsRef);
   return snapshot.exists() ? Object.values(snapshot.val()) : [];
 }
@@ -260,13 +261,14 @@ export async function getReconciliations(
 export const updateBalanceAfterReconciliation = async (
   database: any,
   owner: string,
-  newBalance: number
+  newBalance: number,
+  month: string
 ) => {
   const timestamp = new Date().toISOString();
   const updates: { [path: string]: any } = {};
   
   // Update owner balance
-  updates[`owner_balances/${owner}`] = {
+  updates[`owner_balances/${owner}/${month}`] = {
     amount: newBalance,
     lastUpdated: timestamp,
     reconciled: true
