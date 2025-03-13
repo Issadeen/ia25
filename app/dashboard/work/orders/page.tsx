@@ -9,13 +9,13 @@ import { useEffect, useState } from "react"
 import { useSession } from "next-auth/react"
 import { useRouter } from "next/navigation"
 // Add Triangle to imports
-import { ArrowLeft, Plus, Trash2, FileText, Loader2, Edit, Check, X, Copy, Triangle, Download, FileSpreadsheet, History, Receipt, RefreshCw, MoreHorizontal, ChevronDown } from 'lucide-react'
+import { ArrowLeft, Plus, Trash2, FileText, Loader2, Edit, Check, X, Copy, Triangle, Download, FileSpreadsheet, History, Receipt, RefreshCw, MoreHorizontal, ChevronDown, Bell } from 'lucide-react'
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card } from "@/components/ui/card"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { database, storage } from "@/lib/firebase"
-import { ref, onValue, update, remove, push, get, query, orderByChild, equalTo, set } from "firebase/database"
+import { ref, onValue, update, remove, push, get, query, orderByChild, equalTo, set, limitToLast } from "firebase/database"
 import { ref as storageRef, getDownloadURL } from "firebase/storage"
 import { toast } from "@/components/ui/use-toast"
 import { AddWorkDialog } from "@/components/ui/molecules/add-work-dialog"
@@ -50,6 +50,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { useProfileImage } from '@/hooks/useProfileImage'
 import { Badge } from "@/components/ui/badge"
+import { ToastAction } from '@radix-ui/react-toast'
 
 // Add new interfaces
 interface Payment {
@@ -320,6 +321,15 @@ export default function WorkManagementPage() {
   const [selectedRows, setSelectedRows] = useState<string[]>([]);
   const [quickViewData, setQuickViewData] = useState<WorkDetail | null>(null);
   const [isQuickViewOpen, setIsQuickViewOpen] = useState(false);
+
+  // Add these new state variables
+  const [showTruckComparison, setShowTruckComparison] = useState(false);
+  const [comparisonTrucks, setComparisonTrucks] = useState<string[]>([]);
+  const [reminderSettings, setReminderSettings] = useState({
+    enabled: false,
+    threshold: 3, // days
+    notified: new Set<string>()
+  });
 
   // Add this function to calculate new orders
   const getNewOrdersStats = () => {
@@ -1421,6 +1431,62 @@ const handlePriceEdit = async (id: string, newPrice: string) => {
   }
 };
 
+  // Add function to check for trucks requiring attention
+  const checkExpiredTrucks = () => {
+    if (!reminderSettings.enabled) return;
+    
+    const thresholdDate = new Date();
+    thresholdDate.setDate(thresholdDate.getDate() - reminderSettings.threshold);
+    
+    const expiredTrucks = workDetails.filter(detail => {
+      if (!detail.loaded || detail.paid || detail.paymentPending) return false;
+      
+      // Check if loaded but unpaid for more than threshold days
+      const loadedDate = detail.at20 ? new Date(detail.createdAt || '') : null;
+      if (!loadedDate) return false;
+      
+      return loadedDate < thresholdDate && !reminderSettings.notified.has(detail.id);
+    });
+    
+    if (expiredTrucks.length > 0) {
+      toast({
+        title: "Payment Reminders",
+        description: `${expiredTrucks.length} trucks require payment attention`,
+        action: (
+          <ToastAction altText="View" onClick={() => setShowUnpaidSummary(true)}>
+            View
+          </ToastAction>
+        ),
+      });
+      
+      // Mark as notified
+      const newNotified = new Set(reminderSettings.notified);
+      expiredTrucks.forEach(truck => newNotified.add(truck.id));
+      setReminderSettings(prev => ({ ...prev, notified: newNotified }));
+    }
+  };
+
+  // Add useEffect to check for reminders
+  useEffect(() => {
+    if (workDetails.length > 0 && reminderSettings.enabled) {
+      checkExpiredTrucks();
+    }
+  }, [workDetails, reminderSettings.enabled]);
+  
+  // Add function to compare trucks
+  const compareTrucks = () => {
+    if (comparisonTrucks.length < 2) {
+      toast({
+        title: "Select Trucks",
+        description: "Please select at least 2 trucks to compare",
+        variant: "destructive"
+      });
+      return;
+    }
+    
+    setShowTruckComparison(true);
+  };
+
   // 4. Early return after hooks
   if (!mounted) {
     return null
@@ -2038,6 +2104,19 @@ const showTruckQuickView = (detail: WorkDetail) => {
                     {session?.user?.email?.[0]?.toUpperCase() || 'U'}
                   </AvatarFallback>
                 </Avatar>
+
+                {/* Additional controls */}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setReminderSettings(prev => ({ ...prev, enabled: !prev.enabled }))}
+                  className={cn(
+                    "hidden sm:flex",
+                    reminderSettings.enabled ? "text-amber-500" : "text-muted-foreground"
+                  )}
+                >
+                  <Bell className="h-4 w-4" />
+                </Button>
               </div>
             </div>
 
@@ -2983,6 +3062,88 @@ const showTruckQuickView = (detail: WorkDetail) => {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Add these new dialogs */}
+      <Dialog open={showTruckComparison} onOpenChange={setShowTruckComparison}>
+        <DialogContent className="sm:max-w-4xl w-[95vw]">
+          <DialogHeader>
+            <DialogTitle>Truck Comparison</DialogTitle>
+          </DialogHeader>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {comparisonTrucks.map(truckId => {
+              const truck = workDetails.find(d => d.id === truckId);
+              if (!truck) return null;
+              
+              return (
+                <Card key={truckId} className="p-4">
+                  <h3 className="font-semibold">{truck.truck_number}</h3>
+                  <div className="space-y-2 mt-2">
+                    <div className="grid grid-cols-2 gap-2">
+                      <span className="text-sm text-muted-foreground">Owner:</span>
+                      <span className="text-sm">{truck.owner}</span>
+                      
+                      <span className="text-sm text-muted-foreground">Product:</span>
+                      <span className="text-sm">{truck.product}</span>
+                      
+                      <span className="text-sm text-muted-foreground">Quantity:</span>
+                      <span className="text-sm">{truck.quantity}</span>
+                      
+                      <span className="text-sm text-muted-foreground">Destination:</span>
+                      <span className="text-sm">{truck.destination}</span>
+                      
+                      <span className="text-sm text-muted-foreground">Status:</span>
+                      <span className="text-sm">{truck.status}</span>
+                      
+                      {truck.loaded && (
+                        <>
+                          <span className="text-sm text-muted-foreground">AT20:</span>
+                          <span className="text-sm">{truck.at20}</span>
+                          
+                          <span className="text-sm text-muted-foreground">Payment:</span>
+                          <span className="text-sm">
+                            {truck.paid ? "Paid" : truck.paymentPending ? "Pending" : "Unpaid"}
+                          </span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </Card>
+              );
+            })}
+          </div>
+          <div className="flex justify-end mt-4">
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => setComparisonTrucks([])}
+              className="mr-2"
+            >
+              Clear Selection
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => setShowTruckComparison(false)}
+            >
+              Close
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+      
+      {/* Add this button at the bottom of the page */}
+      {bulkActionMode && selectedRows.length >= 2 && (
+        <div className="fixed bottom-4 right-4 z-10">
+          <Button 
+            onClick={() => {
+              setComparisonTrucks(selectedRows);
+              compareTrucks();
+            }}
+            className="shadow-lg"
+          >
+            Compare Selected ({selectedRows.length})
+          </Button>
+        </div>
+      )}
     </div>
   )
 }
