@@ -22,6 +22,20 @@ export interface PaymentCorrection {
   note: string;
 }
 
+// Add the new reconciliation types
+export interface BalanceReconciliation {
+  id: string;
+  ourBalance: number;
+  theirBalance: number;
+  difference: number;
+  timestamp: string;
+  status: 'pending' | 'accepted' | 'rejected';
+  note?: string;
+  createdBy: string;
+  resolvedAt?: string;
+  resolvedBy?: string;
+}
+
 export const getTruckAllocations = (
   truck: WorkDetail,
   truckPayments: { [truckId: string]: TruckPayment[] }
@@ -233,3 +247,40 @@ export async function getPaymentCorrections(
   const snapshot = await get(correctionsRef);
   return snapshot.exists() ? Object.values(snapshot.val()) : [];
 }
+
+export async function getReconciliations(
+  database: any,
+  owner: string
+): Promise<BalanceReconciliation[]> {
+  const reconciliationsRef = ref(database, `payment_reconciliations/${owner}`);
+  const snapshot = await get(reconciliationsRef);
+  return snapshot.exists() ? Object.values(snapshot.val()) : [];
+}
+
+export const updateBalanceAfterReconciliation = async (
+  database: any,
+  owner: string,
+  newBalance: number
+) => {
+  const timestamp = new Date().toISOString();
+  const updates: { [path: string]: any } = {};
+  
+  // Update owner balance
+  updates[`owner_balances/${owner}`] = {
+    amount: newBalance,
+    lastUpdated: timestamp,
+    reconciled: true
+  };
+  
+  // Add balance adjustment record
+  const adjustmentRef = push(ref(database, `balance_usage/${owner}`));
+  updates[`balance_usage/${owner}/${adjustmentRef.key}`] = {
+    amount: newBalance,
+    timestamp,
+    type: "reconciliation_adjustment",
+    note: "Balance adjusted after reconciliation"
+  };
+  
+  await update(ref(database), updates);
+  return updates;
+};

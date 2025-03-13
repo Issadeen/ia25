@@ -40,6 +40,21 @@ export interface BalanceUsage {
   timestamp: string;
   usedFor: string[];
   paymentId: string;
+  type?: 'deposit' | 'usage' | 'manual_adjustment' | 'reconciliation_adjustment';
+  note?: string;
+}
+
+export interface BalanceReconciliation {
+  id: string;
+  ourBalance: number;
+  theirBalance: number;
+  difference: number;
+  timestamp: string;
+  status: 'pending' | 'accepted' | 'rejected';
+  note?: string;
+  createdBy: string;
+  resolvedAt?: string;
+  resolvedBy?: string;
 }
 
 export interface Payment {

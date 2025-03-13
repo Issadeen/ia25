@@ -5,9 +5,9 @@ import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { useEffect, useState } from "react"
 import { database } from "@/lib/firebase"
-import { ref, onValue, update, get, push } from "firebase/database"
+import { ref, onValue, update, get, push, set } from "firebase/database"
 import { formatNumber, toFixed2, cn } from "@/lib/utils" // Add cn to imports
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -32,6 +32,7 @@ import {
   MoveVertical,
   ChevronUp,
   ChevronDown,
+  Scale,
 } from "lucide-react" // Add X and FileSpreadsheet icon to imports
 import { ThemeToggle } from "@/components/ui/molecules/theme-toggle" // Add ThemeToggle import
 import { Skeleton } from "@/components/ui/skeleton"
@@ -59,6 +60,8 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { AlertCircle, Receipt, Shield } from "lucide-react" // Add new imports
 import { useProfileImage } from "@/hooks/useProfileImage"
 import React from "react"
+import { Badge } from "@/components/ui/badge"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 
 // Add interfaces at the top
 interface TruckAllocation {
@@ -226,6 +229,16 @@ export default function OwnerDetailsPage() {
   const [paymentOrder, setPaymentOrder] = useState<{ [truckId: string]: number }>({})
   const [isDragging, setIsDragging] = useState(false)
 
+  // Add new state for reconciliations
+  const [reconciliations, setReconciliations] = useState<any[]>([])
+  const [isReconciliationDialogOpen, setIsReconciliationDialogOpen] = useState(false)
+  const [reconciliationFormData, setReconciliationFormData] = useState({
+    theirBalance: 0,
+    note: ""
+  })
+  const [activeBalanceView, setActiveBalanceView] = useState<'ours' | 'theirs' | 'difference'>('ours')
+  const [showReconciliationHistory, setShowReconciliationHistory] = useState(false)
+
   // Fetch data when component mounts
   useEffect(() => {
     const fetchOwnerData = async () => {
@@ -279,6 +292,14 @@ export default function OwnerDetailsPage() {
         onValue(orderRef, (snapshot) => {
           if (snapshot.exists()) {
             setPaymentOrder(snapshot.val())
+          }
+        })
+
+        // Fetch reconciliations
+        const reconciliationsRef = ref(database, `payment_reconciliations/${owner}`)
+        onValue(reconciliationsRef, (snapshot) => {
+          if (snapshot.exists()) {
+            setReconciliations(Object.values(snapshot.val()))
           }
         })
 
@@ -1274,6 +1295,103 @@ export default function OwnerDetailsPage() {
 
   const profilePicUrl = useProfileImage()
 
+  // Add function to get active balance based on view
+  const getActiveBalance = (): number => {
+    const ourBalance = ownerBalance?.amount || 0
+    
+    // Find latest accepted reconciliation
+    const latestAccepted = reconciliations
+      .filter(rec => rec.status === 'accepted')
+      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0]
+    
+    if (!latestAccepted) return ourBalance
+    
+    switch (activeBalanceView) {
+      case 'ours':
+        return ourBalance
+      case 'theirs':
+        return latestAccepted.theirBalance
+      case 'difference':
+        return ourBalance - latestAccepted.theirBalance
+    }
+  }
+
+  // Add function to handle reconciliation submission
+  const handleReconciliationSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    
+    try {
+      const ourBalance = ownerBalance?.amount || 0
+      const theirBalance = reconciliationFormData.theirBalance
+      const difference = ourBalance - theirBalance
+      const timestamp = new Date().toISOString()
+      
+      const reconciliationRef = push(ref(database, `payment_reconciliations/${owner}`))
+      const reconciliationId = reconciliationRef.key!
+      
+      await set(reconciliationRef, {
+        id: reconciliationId,
+        ourBalance,
+        theirBalance,
+        difference,
+        timestamp,
+        status: 'pending',
+        note: reconciliationFormData.note,
+        createdBy: session?.user?.email || 'unknown'
+      })
+      
+      toast({
+        title: "Reconciliation Recorded",
+        description: `Difference of $${formatNumber(Math.abs(difference))} recorded`,
+      })
+      
+      setIsReconciliationDialogOpen(false)
+      setReconciliationFormData({
+        theirBalance: 0,
+        note: ""
+      })
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to record reconciliation",
+        variant: "destructive",
+      })
+    }
+  }
+
+  // Add function to handle reconciliation status update
+  const handleReconciliationStatus = async (id: string, status: 'accepted' | 'rejected') => {
+    try {
+      await update(ref(database, `payment_reconciliations/${owner}/${id}`), {
+        status,
+        resolvedAt: new Date().toISOString(),
+        resolvedBy: session?.user?.email || 'unknown'
+      })
+      
+      toast({
+        title: status === 'accepted' ? "Reconciliation Accepted" : "Reconciliation Rejected",
+        description: status === 'accepted' ? 
+          "The balance difference has been recorded" : 
+          "The reconciliation has been rejected",
+      })
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to update reconciliation status",
+        variant: "destructive",
+      })
+    }
+  }
+
+  // Get pending and accepted reconciliations
+  const pendingReconciliations = reconciliations
+    .filter(rec => rec.status === 'pending')
+    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+
+  const acceptedReconciliations = reconciliations
+    .filter(rec => rec.status === 'accepted')
+    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+
   return (
     <div className="min-h-screen">
       {/* Animate header */}
@@ -1308,10 +1426,62 @@ export default function OwnerDetailsPage() {
             {/* Right side - Action buttons with tooltips */}
             <div className="flex items-center gap-1 sm:gap-2">
               <div className="hidden sm:flex items-center gap-2 mr-2">
-                <span className="text-sm text-muted-foreground">
-                  Balance: ${formatNumber(ownerBalance?.amount || 0)}
-                </span>
+                <div className="flex flex-col">
+                  <div className="flex items-center gap-1">
+                    <span className="text-sm text-muted-foreground">
+                      Balance:
+                    </span>
+                    <div className="relative group">
+                      <div
+                        className="text-sm font-medium hover:text-emerald-600 cursor-pointer"
+                        onClick={() => {
+                          if (acceptedReconciliations.length > 0) {
+                            setActiveBalanceView(
+                              activeBalanceView === 'ours' ? 'theirs' : 
+                              activeBalanceView === 'theirs' ? 'difference' : 'ours'
+                            )
+                            toast({
+                              title: `Now showing ${
+                                activeBalanceView === 'ours' ? "their" : 
+                                activeBalanceView === 'theirs' ? "difference in" : "our"
+                              } balance`,
+                              description: "Click again to cycle through views"
+                            })
+                          }
+                        }}
+                      >
+                        ${formatNumber(getActiveBalance())}
+                      </div>
+                      {acceptedReconciliations.length > 0 && (
+                        <div className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-emerald-500"></div>
+                      )}
+                      {activeBalanceView !== 'ours' && (
+                        <span className="absolute -bottom-5 left-0 text-[10px] whitespace-nowrap px-1 py-0.5 bg-muted rounded">
+                          {activeBalanceView === 'theirs' ? "Their balance" : "Balance difference"}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  {pendingReconciliations.length > 0 && (
+                    <span 
+                      className="text-[10px] text-amber-500 hover:text-amber-600 cursor-pointer"
+                      onClick={() => setShowReconciliationHistory(true)}
+                    >
+                      {pendingReconciliations.length} pending reconciliation{pendingReconciliations.length !== 1 ? 's' : ''}
+                    </span>
+                  )}
+                </div>
               </div>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setIsReconciliationDialogOpen(true)}
+                className="relative hover:bg-emerald-100"
+                title="Record Balance Difference"
+              >
+                <Scale className="h-4 w-4 sm:h-5 w-5 text-emerald-600" />
+                <span className="sr-only">Record Balance Difference</span>
+              </Button>
               <Button
                 variant="ghost"
                 size="icon"
@@ -1501,10 +1671,33 @@ export default function OwnerDetailsPage() {
             {/* Animate financial summary section */}
             <motion.div variants={slideUp}>
               <Card className="p-3 sm:p-6">
-                <h2 className="text-lg sm:text-xl font-semibold mb-3 sm:mb-4">Financial Summary</h2>
+                <div className="flex justify-between items-center mb-3 sm:mb-4">
+                  <h2 className="text-lg sm:text-xl font-semibold">Financial Summary</h2>
+                  
+                  {acceptedReconciliations.length > 0 && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-muted-foreground">Balance View:</span>
+                      <Select 
+                        value={activeBalanceView}
+                        onValueChange={(value: 'ours' | 'theirs' | 'difference') => setActiveBalanceView(value)}
+                      >
+                        <SelectTrigger className="w-[120px] h-8 text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="ours">Our Balance</SelectItem>
+                          <SelectItem value="theirs">Their Balance</SelectItem>
+                          <SelectItem value="difference">Difference</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+                </div>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-4">
                   {(() => {
                     const totals = calculateTotals();
+                    const activeBalance = getActiveBalance();
+                    
                     return (
                       <>
                         <div className="p-2 sm:p-4 rounded-lg border">
@@ -1526,11 +1719,28 @@ export default function OwnerDetailsPage() {
                             )}
                           </div>
                         </div>
-                        <div className="p-2 sm:p-4 rounded-lg border">
-                          <div className="text-xs sm:text-sm font-medium text-muted-foreground">Available Balance</div>
-                          <div className="text-lg sm:text-2xl font-bold text-green-600">
-                            ${formatNumber(totals.existingBalance)}
+                        <div className="p-2 sm:p-4 rounded-lg border relative">
+                          <div className="text-xs sm:text-sm font-medium text-muted-foreground">
+                            {activeBalanceView === 'ours' ? 'Available Balance' : 
+                             activeBalanceView === 'theirs' ? 'Their Balance' : 
+                             'Balance Difference'}
                           </div>
+                          <div className={cn(
+                            "text-lg sm:text-2xl font-bold",
+                            activeBalanceView === 'ours' ? 'text-green-600' :
+                            activeBalanceView === 'theirs' ? 'text-blue-600' :
+                            'text-amber-600'
+                          )}>
+                            ${formatNumber(Math.abs(activeBalance))}
+                          </div>
+                          {activeBalanceView !== 'ours' && acceptedReconciliations.length > 0 && (
+                            <button 
+                              onClick={() => setShowReconciliationHistory(true)}
+                              className="absolute bottom-1 right-1 text-[10px] text-muted-foreground hover:text-foreground"
+                            >
+                              Reconciliation Info
+                            </button>
+                          )}
                         </div>
                       </>
                     );
@@ -2268,6 +2478,215 @@ export default function OwnerDetailsPage() {
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
+        {/* Add Reconciliation Dialog */}
+        <Dialog open={isReconciliationDialogOpen} onOpenChange={setIsReconciliationDialogOpen}>
+          <DialogContent className="sm:max-w-[425px]">
+            <DialogHeader>
+              <DialogTitle className="text-lg font-medium">Record Balance Difference</DialogTitle>
+              <DialogDescription>
+                Record what the owner says their balance is, so you can track the difference.
+              </DialogDescription>
+            </DialogHeader>
+            
+            <form onSubmit={handleReconciliationSubmit} className="space-y-4 py-4">
+              <div className="space-y-2">
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Our recorded balance:</span>
+                  <span className="font-medium">${formatNumber(ownerBalance?.amount || 0)}</span>
+                </div>
+                
+                <div className="space-y-1">
+                  <Label htmlFor="theirBalance">Their claimed balance</Label>
+                  <Input
+                    id="theirBalance"
+                    type="number"
+                    step="0.01"
+                    value={reconciliationFormData.theirBalance}
+                    onChange={(e) => setReconciliationFormData(prev => ({
+                      ...prev,
+                      theirBalance: parseFloat(e.target.value) || 0
+                    }))}
+                    className="text-lg"
+                    placeholder="Enter what they think the balance is"
+                    required
+                  />
+                </div>
+                
+                <div className="pt-2">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Difference:</span>
+                    <span className={cn(
+                      "font-medium",
+                      (ownerBalance?.amount || 0) - reconciliationFormData.theirBalance > 0 ? 
+                        "text-green-600" : 
+                        (ownerBalance?.amount || 0) - reconciliationFormData.theirBalance < 0 ?
+                        "text-red-600" : ""
+                    )}>
+                      ${formatNumber(Math.abs((ownerBalance?.amount || 0) - reconciliationFormData.theirBalance))}
+                      {(ownerBalance?.amount || 0) - reconciliationFormData.theirBalance !== 0 && (
+                        <span className="text-xs ml-1">
+                          ({(ownerBalance?.amount || 0) - reconciliationFormData.theirBalance > 0 ? 
+                            "our balance is higher" : 
+                            "their balance is higher"})
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                </div>
+              </div>
+              
+              <div className="space-y-1">
+                <Label htmlFor="reconciliationNote">Note</Label>
+                <Input
+                  id="reconciliationNote"
+                  value={reconciliationFormData.note}
+                  onChange={(e) => setReconciliationFormData(prev => ({ ...prev, note: e.target.value }))}
+                  placeholder="Add details about this reconciliation"
+                />
+              </div>
+              
+              <div className="flex justify-end gap-2 pt-4">
+                <Button type="button" variant="outline" onClick={() => setIsReconciliationDialogOpen(false)}>
+                  Cancel
+                </Button>
+                <Button type="submit">
+                  Save Reconciliation
+                </Button>
+              </div>
+            </form>
+          </DialogContent>
+        </Dialog>
+        
+        {/* Add Reconciliation History Dialog */}
+        <Dialog open={showReconciliationHistory} onOpenChange={setShowReconciliationHistory}>
+          <DialogContent className="sm:max-w-[600px]">
+            <DialogHeader>
+              <DialogTitle className="text-lg font-medium">Balance Reconciliation History</DialogTitle>
+              <DialogDescription>
+                View and manage balance reconciliations with {owner}
+              </DialogDescription>
+            </DialogHeader>
+            
+            <div className="space-y-6 py-4">
+              {pendingReconciliations.length > 0 && (
+                <div>
+                  <h3 className="text-sm font-medium mb-2 text-amber-600">Pending Reconciliations</h3>
+                  <div className="space-y-2 max-h-[300px] overflow-y-auto">
+                    {pendingReconciliations.map(rec => (
+                      <div key={rec.id} className="border rounded-md p-3">
+                        <div className="flex justify-between mb-2">
+                          <span className="text-sm text-muted-foreground">
+                            {new Date(rec.timestamp).toLocaleDateString()}, {new Date(rec.timestamp).toLocaleTimeString()}
+                          </span>
+                          <Badge variant="outline" className="text-amber-600 bg-amber-50">
+                            Pending
+                          </Badge>
+                        </div>
+                        
+                        <div className="grid grid-cols-2 gap-4 mb-2">
+                          <div>
+                            <span className="text-xs text-muted-foreground">Our Balance</span>
+                            <p className="font-medium">${formatNumber(rec.ourBalance)}</p>
+                          </div>
+                          <div>
+                            <span className="text-xs text-muted-foreground">Their Balance</span>
+                            <p className="font-medium">${formatNumber(rec.theirBalance)}</p>
+                          </div>
+                        </div>
+                        
+                        <div className="mb-2">
+                          <span className="text-xs text-muted-foreground">Difference</span>
+                          <p className={cn(
+                            "font-medium",
+                            rec.difference > 0 ? "text-green-600" : rec.difference < 0 ? "text-red-600" : ""
+                          )}>
+                            ${formatNumber(Math.abs(rec.difference))}
+                            <span className="text-xs ml-1">
+                              ({rec.difference > 0 ? "our balance is higher" : "their balance is higher"})
+                            </span>
+                          </p>
+                        </div>
+                        
+                        {rec.note && (
+                          <div className="mb-3">
+                            <span className="text-xs text-muted-foreground">Note</span>
+                            <p className="text-sm">{rec.note}</p>
+                          </div>
+                        )}
+                        
+                        <div className="flex justify-end gap-2 pt-2 border-t">
+                          <Button 
+                            size="sm" 
+                            variant="outline"
+                            onClick={() => handleReconciliationStatus(rec.id, 'rejected')}
+                          >
+                            Reject
+                          </Button>
+                          <Button 
+                            size="sm"
+                            onClick={() => handleReconciliationStatus(rec.id, 'accepted')}
+                          >
+                            Accept
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              
+              {acceptedReconciliations.length > 0 && (
+                <div>
+                  <h3 className="text-sm font-medium mb-2 text-emerald-600">Accepted Reconciliations</h3>
+                  <div className="space-y-2 max-h-[300px] overflow-y-auto">
+                    {acceptedReconciliations.map(rec => (
+                      <div key={rec.id} className="border rounded-md p-3">
+                        <div className="flex justify-between mb-2">
+                          <span className="text-sm text-muted-foreground">
+                            {new Date(rec.timestamp).toLocaleDateString()}, {new Date(rec.timestamp).toLocaleTimeString()}
+                          </span>
+                          <Badge variant="outline" className="text-emerald-600 bg-emerald-50">
+                            Accepted
+                          </Badge>
+                        </div>
+                        
+                        <div className="grid grid-cols-2 gap-4 mb-2">
+                          <div>
+                            <span className="text-xs text-muted-foreground">Our Balance</span>
+                            <p className="font-medium">${formatNumber(rec.ourBalance)}</p>
+                          </div>
+                          <div>
+                            <span className="text-xs text-muted-foreground">Their Balance</span>
+                            <p className="font-medium">${formatNumber(rec.theirBalance)}</p>
+                          </div>
+                        </div>
+                        
+                        <div>
+                          <span className="text-xs text-muted-foreground">Difference</span>
+                          <p className={cn(
+                            "font-medium",
+                            rec.difference > 0 ? "text-green-600" : rec.difference < 0 ? "text-red-600" : ""
+                          )}>
+                            ${formatNumber(Math.abs(rec.difference))}
+                            <span className="text-xs ml-1">
+                              ({rec.difference > 0 ? "our balance is higher" : "their balance is higher"})
+                            </span>
+                          </p>
+                        </div>
+                        
+                        {rec.note && (
+                          <div className="mt-2 text-sm text-muted-foreground">
+                            <p>"{rec.note}"</p>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
       </main>
     </div>
   );
