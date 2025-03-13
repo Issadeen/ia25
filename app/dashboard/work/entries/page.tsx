@@ -1087,7 +1087,14 @@ export default function EntriesPage() {
   };
 
   // 5. Loading check
-  if (!mounted || status === "loading") return null
+  if (!mounted || status === "loading") {
+    // Return a loading state instead of null
+    return (
+      <div className="min-h-screen bg-white dark:bg-gray-900 flex items-center justify-center">
+        <Loader2 className="h-12 w-12 animate-spin text-emerald-500" />
+      </div>
+    )
+  }
 
   // 6. Event handlers
   const getEntries = async () => {
@@ -2977,13 +2984,15 @@ const updateTruckUsage = async (
 
   return (
     <div className={`min-h-screen relative ${
-      theme === 'dark' ? 'bg-gray-900/50 text-gray-100' : 'bg-gray-50/50 text-gray-900'
-    } backdrop-blur-sm`}>
+      // Use solid background colors until mounted is confirmed
+      !mounted ? 'bg-white dark:bg-gray-900' : 
+      theme === 'dark' ? 'bg-gray-900 text-gray-100' : 'bg-white text-gray-900'
+    }`}>
       <header className={`sticky top-0 z-50 w-full border-b ${
         theme === 'dark' 
-          ? 'bg-gray-900/70 border-gray-800/50' 
-          : 'bg-white/70 border-gray-200/50'
-      } backdrop-blur-md shadow-sm`}>
+          ? 'bg-gray-900 border-gray-800' 
+          : 'bg-white border-gray-200'
+      } shadow-sm`}>
         <div className="container mx-auto px-2 sm:px-4 py-2 sm:py-3">
           <div className="flex justify-between items-center">
             <div className="flex items-center gap-1 sm:gap-4">
@@ -3129,6 +3138,15 @@ const updateTruckUsage = async (
           </div>
         </div>
       </header>
+
+      {/* Only apply backdrop blur after mounted is confirmed */}
+      {mounted && (
+        <style jsx global>{`
+          body {
+            backdrop-filter: blur(8px);
+          }
+        `}</style>
+      )}
 
       <main className="container mx-auto px-2 sm:px-4 py-4 sm:py-8">
         {/* Add the warning modal */}
