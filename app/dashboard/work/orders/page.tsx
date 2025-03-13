@@ -315,7 +315,7 @@ export default function WorkManagementPage() {
   const [approvalCountdown, setApprovalCountdown] = useState(60);
 
   // Add these new state variables with the other state declarations
-  const [showStats, setShowStats] = useState(true);
+  const [showStats, setShowStats] = useState(false);
   const [bulkActionMode, setBulkActionMode] = useState(false);
   const [selectedRows, setSelectedRows] = useState<string[]>([]);
   const [quickViewData, setQuickViewData] = useState<WorkDetail | null>(null);
