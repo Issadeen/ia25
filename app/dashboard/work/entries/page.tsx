@@ -20,7 +20,8 @@ import {
   ChevronUp,
   Search, // Add this
   Bell, // Add this
-  Receipt // Add this
+  Receipt, // Add this
+  Edit // Add this
 } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -40,7 +41,7 @@ import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { storage } from "@/lib/firebase"
 import { getDownloadURL, ref as storageRef } from "firebase/storage"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
 import {
   Select,
   SelectContent,
@@ -140,6 +141,16 @@ interface TruckUsage {
   id?: string;  // Make id optional
   truckNumber: string;
   quantity: number;
+}
+
+// Add this interface near other interfaces
+interface EditingUsage {
+  entryKey: string;
+  allocationId: string; 
+  truckNumber: string;
+  volume: number;
+  originalTruck: string;
+  originalVolume: number;
 }
 
 export default function EntriesPage() {
@@ -330,6 +341,10 @@ export default function EntriesPage() {
 
   // Add ref for heading click tracking
   const h2Ref = useRef<{ lastClick: number; clickCount: number }>({ lastClick: 0, clickCount: 0 })
+
+  // Add new state variables
+  const [editingAllocation, setEditingAllocation] = useState<EditingUsage | null>(null);
+  const [editConfirmOpen, setEditConfirmOpen] = useState(false);
 
   // Add new state variables inside component
   const [editingUsage, setEditingUsage] = useState<{
@@ -2982,6 +2997,84 @@ const updateTruckUsage = async (
     }
   };
 
+  // Add the edit handler function
+  const handleEditAllocation = async (confirmed: boolean) => {
+    if (!editingAllocation || !confirmed) {
+      setEditingAllocation(null);
+      setEditConfirmOpen(false);
+      return;
+    }
+
+    try {
+      const db = getDatabase();
+      
+      // Calculate the volume difference
+      const volumeDiff = editingAllocation.volume - editingAllocation.originalVolume;
+      
+      const updates: { [key: string]: any } = {};
+      
+      // Update the TR800 entry remaining quantity
+      const tr800Ref = dbRef(db, `tr800/${editingAllocation.entryKey}`);
+      const tr800Snapshot = await get(tr800Ref);
+      
+      if (!tr800Snapshot.exists()) {
+        throw new Error("Entry not found");
+      }
+
+      const entry = tr800Snapshot.val();
+      updates[`tr800/${editingAllocation.entryKey}/remainingQuantity`] = 
+        entry.remainingQuantity - volumeDiff;
+
+      // Update the truck entry allocation
+      const oldTruckRef = dbRef(db, `truckEntries/${editingAllocation.originalTruck.replace(/\//g, '-')}`);
+      const newTruckRef = dbRef(db, `truckEntries/${editingAllocation.truckNumber.replace(/\//g, '-')}`);
+
+      updates[`truckEntries/${editingAllocation.originalTruck.replace(/\//g, '-')}/${editingAllocation.allocationId}`] = null;
+      
+      const newAllocation = {
+        entryNumber: entry.number,
+        subtractedQuantity: editingAllocation.volume,
+        timestamp: Date.now()
+      };
+
+      const newAllocationRef = push(newTruckRef);
+      updates[`truckEntries/${editingAllocation.truckNumber.replace(/\//g, '-')}/${newAllocationRef.key}`] = newAllocation;
+
+      // Create edit history entry
+      const historyRef = push(dbRef(db, 'allocationEdits'));
+      updates[`allocationEdits/${historyRef.key}`] = {
+        entryNumber: entry.number,
+        originalTruck: editingAllocation.originalTruck,
+        newTruck: editingAllocation.truckNumber,
+        originalVolume: editingAllocation.originalVolume,
+        newVolume: editingAllocation.volume,
+        editedBy: session?.user?.email,
+        editedAt: new Date().toISOString()
+      };
+
+      await update(dbRef(db), updates);
+
+      addNotification(
+        "Success",
+        "Allocation updated successfully",
+        "success"
+      );
+
+      // Refresh the usage data
+      await getUsage();
+
+    } catch (error) {
+      addNotification(
+        "Error", 
+        "Failed to update allocation",
+        "error"
+      );
+    }
+
+    setEditingAllocation(null);
+    setEditConfirmOpen(false);
+  };
+
   return (
     <div className={`min-h-screen relative ${
       // Use solid background colors until mounted is confirmed
@@ -3329,6 +3422,55 @@ const updateTruckUsage = async (
                 Dismiss
               </Button>
             </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Add the edit confirmation dialog after other dialogs */}
+        <Dialog open={editConfirmOpen} onOpenChange={setEditConfirmOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Edit Allocation</DialogTitle>
+              <DialogDescription>
+                Update the truck number and/or volume for this allocation.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-4 py-4">
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="truck" className="text-right">
+                  Truck
+                </Label>
+                <Input
+                  id="truck"
+                  className="col-span-3"
+                  value={editingAllocation?.truckNumber || ''}
+                  onChange={(e) => setEditingAllocation(prev => 
+                    prev ? {...prev, truckNumber: e.target.value} : null
+                  )}
+                />
+              </div>
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="volume" className="text-right">
+                  Volume
+                </Label>
+                <Input
+                  id="volume"
+                  type="number"
+                  className="col-span-3"
+                  value={editingAllocation?.volume || ''}
+                  onChange={(e) => setEditingAllocation(prev => 
+                    prev ? {...prev, volume: Number(e.target.value)} : null
+                  )}
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => handleEditAllocation(false)}>
+                Cancel
+              </Button>
+              <Button onClick={() => handleEditAllocation(true)}>
+                Save Changes
+              </Button>
+            </DialogFooter>
           </DialogContent>
         </Dialog>
       </div>
