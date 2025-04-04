@@ -14,7 +14,7 @@ import * as XLSX from 'xlsx'
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { storage } from "@/lib/firebase"
 import { getDownloadURL, ref as storageRef } from "firebase/storage"
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useToast } from "@/components/ui/use-toast"
@@ -91,6 +91,9 @@ export default function ReportsPage() {
   const [newReportId, setNewReportId] = useState<string | null>(null);
   const [isMigrating, setIsMigrating] = useState(false)
   const [showDuplicates, setShowDuplicates] = useState(false);
+  const [showBulkUpdate, setShowBulkUpdate] = useState(false)
+  const [bulkDepot, setBulkDepot] = useState("")
+  const [selectedReports, setSelectedReports] = useState<string[]>([])
   const profilePicUrl = useProfileImage()
 
   useEffect(() => {
@@ -513,11 +516,21 @@ export default function ReportsPage() {
       snapshot.forEach((child) => {
         const report = child.val();
         if (!report.depot) {
-          // Logic to determine depot based on destination
-          let depot = '';
+          // Use the same logic as handleSubmit
           const destination = report.entryDestination.toLowerCase();
-          
-          if (destination.includes('nakuru')) {
+          let depot = '';
+
+          if (destination.includes('local')) {
+            depot = 'Local';
+          } else if (destination === 'ssd') {
+            depot = 'SSD';
+          } else if (destination.includes('north')) {
+            depot = 'Northern';
+          } else if (destination.includes('west')) {
+            depot = 'Western';
+          } else if (destination.includes('east')) {
+            depot = 'Eastern';
+          } else if (destination.includes('nakuru')) {
             depot = 'Nakuru';
           } else if (destination.includes('eldoret')) {
             depot = 'Eldoret';
@@ -589,6 +602,43 @@ const handleRemoveEditEntry = (reportId: string, entryIndex: number) => {
       description: "You've exited edit mode"
     })
   }
+
+  // Update handleBulkUpdate to handle depot updates
+  const handleBulkUpdate = async () => {
+    if (!bulkDepot || selectedReports.length === 0) return;
+
+    try {
+      const db = getDatabase();
+      const updates: { [key: string]: any } = {};
+
+      // Get all reports to find the matching IDs
+      const snapshot = await get(ref(db, 'allocation_reports'));
+      if (snapshot.exists()) {
+        Object.entries(snapshot.val()).forEach(([key, value]: [string, any]) => {
+          if (selectedReports.includes(value.truckNumber)) {
+            updates[`allocation_reports/${key}/depot`] = bulkDepot;
+          }
+        });
+      }
+
+      await update(ref(db), updates);
+      
+      toast({
+        title: "Bulk Update Complete",
+        description: `Updated ${selectedReports.length} reports`
+      });
+      
+      setShowBulkUpdate(false);
+      setSelectedReports([]);
+      setBulkDepot("");
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to update reports",
+        variant: "destructive"
+      });
+    }
+  };
 
   if (!mounted) return null
 
@@ -740,138 +790,203 @@ const handleRemoveEditEntry = (reportId: string, entryIndex: number) => {
             )}
 
             <Table>
-  <TableHeader>
-    <TableRow>
-      <TableHead>Loaded Date</TableHead>
-      <TableHead>Truck Number</TableHead>
-      <TableHead>Owner</TableHead>
-      <TableHead>Product</TableHead>
-      <TableHead>Entries</TableHead>
-      <TableHead>Total Volume</TableHead>
-      <TableHead>AT20</TableHead>
-      <TableHead>Destination</TableHead>
-      <TableHead>Depot</TableHead>
-      {showEditControls && <TableHead className="w-[50px]">Edit</TableHead>}
-    </TableRow>
-  </TableHeader>
-  <TableBody>
-    {filteredReports.map((report, index) => (
-      <TableRow key={index} className={`${report.id === newReportId ? 'animate-highlight bg-emerald-100' : ''} transition-colors duration-500`}>
-        <TableCell>{editingReport === report.truckNumber ? (
-          <Input
-            type="date"
-            value={editFormData.loadedDate || report.loadedDate}
-            onChange={(e) => setEditFormData(prev => ({ ...prev, loadedDate: e.target.value }))}
-          />
-        ) : (
-          formatSimpleDate(report?.loadedDate)
-        )}</TableCell>
-        <TableCell>{editingReport === report.truckNumber ? (
-          <Input
-            value={editFormData.truckNumber || report.truckNumber}
-            onChange={(e) => setEditFormData(prev => ({ ...prev, truckNumber: e.target.value }))}
-          />
-        ) : (
-          report?.truckNumber || '-'
-        )}</TableCell>
-        <TableCell>{editingReport === report.truckNumber ? (
-          <Input
-            value={editFormData.owner || report.owner}
-            onChange={(e) => setEditFormData(prev => ({ ...prev, owner: e.target.value }))}
-          />
-        ) : (
-          report?.owner || '-'
-        )}</TableCell>
-        <TableCell>{report?.product?.toUpperCase() || '-'}</TableCell>
-        <TableCell>
-  {editingReport === report.truckNumber ? (
-    <div className="space-y-2">
-      {(editFormData.entries || report.entries)?.map((entry, i) => (
-        <div key={i} className="flex items-center gap-2">
-          <Input
-            className="w-24"
-            value={entry.entryUsed}
-            onChange={(e) => handleEditEntryChange(report.truckNumber, i, 'entryUsed', e.target.value)}
-            placeholder="Entry"
-          />
-          <Input
-            className="w-24"
-            type="number"
-            value={entry.volume}
-            onChange={(e) => handleEditEntryChange(report.truckNumber, i, 'volume', e.target.value)}
-            placeholder="Volume"
-          />
-          {(editFormData.entries || report.entries).length > 1 && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => handleRemoveEditEntry(report.truckNumber, i)}
-              className="h-8 w-8 p-0"
-            >
-              <X className="h-4 w-4" />
-            </Button>
-          )}
-        </div>
-      ))}
-      {(editFormData.entries || report.entries).length < 3 && (
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => handleAddEditEntry(report.truckNumber)}
-          className="w-full mt-2"
-        >
-          <Plus className="h-4 w-4 mr-2" /> Add Entry
-        </Button>
-      )}
-    </div>
-  ) : (
-    <div className="space-y-1">
-      {report?.entries?.map((entry, i) => (
-        <div key={i} className="text-sm">
-          {entry?.entryUsed || '-'}: {entry?.volume || '0'}L
-        </div>
-      ))}
-    </div>
-  )}
-</TableCell>
-        <TableCell>{report?.totalVolume ? `${report.totalVolume}L` : '-'}</TableCell>
-        <TableCell>{editingReport === report.truckNumber ? (
-          <Input
-            type="text"
-            value={editFormData.at20 || report.at20}
-            onChange={(e) => setEditFormData(prev => ({ ...prev, at20: e.target.value }))}
-          />
-        ) : (
-          report?.at20 || '-'
-        )}</TableCell>
-        <TableCell>{report?.entryDestination?.toUpperCase() || '-'}</TableCell>
-        <TableCell>{editingReport === report.truckNumber ? (
-          <Input
-            value={editFormData.depot || report.depot}
-            onChange={(e) => setEditFormData(prev => ({ ...prev, depot: e.target.value }))}
-          />
-        ) : (
-          report?.depot || '-'
-        )}</TableCell>
-        {showEditControls && (
-          <TableCell>
-            {editingReport === report.truckNumber ? (
-              <div className="flex gap-2">
-                <Button variant="ghost" size="sm" onClick={() => handleSaveEdit(report.truckNumber)} className="h-8 w-8 p-0"><Check className="h-4 w-4" /></Button>
-                <Button variant="ghost" size="sm" onClick={() => {
-                  setEditingReport(null)
-                  setEditFormData({})
-                }} className="h-8 w-8 p-0"><X className="h-4 w-4" /></Button>
+              <TableHeader>
+                <TableRow>
+                  {showEditControls && (
+                    <TableHead className="w-[50px]">
+                      <input
+                        type="checkbox"
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSelectedReports(filteredReports.map(r => r.truckNumber));
+                          } else {
+                            setSelectedReports([]);
+                          }
+                        }}
+                        checked={selectedReports.length === filteredReports.length}
+                      />
+                    </TableHead>
+                  )}
+                  <TableHead>Loaded Date</TableHead>
+                  <TableHead>Truck Number</TableHead>
+                  <TableHead>Owner</TableHead>
+                  <TableHead>Product</TableHead>
+                  <TableHead>Entries</TableHead>
+                  <TableHead>Total Volume</TableHead>
+                  <TableHead>AT20</TableHead>
+                  <TableHead>Destination</TableHead>
+                  <TableHead>Depot</TableHead>
+                  {showEditControls && <TableHead className="w-[50px]">Edit</TableHead>}
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filteredReports.map((report, index) => (
+                  <TableRow key={index} className={`${report.id === newReportId ? 'animate-highlight bg-emerald-100' : ''} transition-colors duration-500`}>
+                    {showEditControls && (
+                      <TableCell>
+                        <input
+                          type="checkbox"
+                          checked={selectedReports.includes(report.truckNumber)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedReports([...selectedReports, report.truckNumber]);
+                            } else {
+                              setSelectedReports(selectedReports.filter(id => id !== report.truckNumber));
+                            }
+                          }}
+                        />
+                      </TableCell>
+                    )}
+                    <TableCell>{editingReport === report.truckNumber ? (
+                      <Input
+                        type="date"
+                        value={editFormData.loadedDate || report.loadedDate}
+                        onChange={(e) => setEditFormData(prev => ({ ...prev, loadedDate: e.target.value }))}
+                      />
+                    ) : (
+                      formatSimpleDate(report?.loadedDate)
+                    )}</TableCell>
+                    <TableCell>{editingReport === report.truckNumber ? (
+                      <Input
+                        value={editFormData.truckNumber || report.truckNumber}
+                        onChange={(e) => setEditFormData(prev => ({ ...prev, truckNumber: e.target.value }))}
+                      />
+                    ) : (
+                      report?.truckNumber || '-'
+                    )}</TableCell>
+                    <TableCell>{editingReport === report.truckNumber ? (
+                      <Input
+                        value={editFormData.owner || report.owner}
+                        onChange={(e) => setEditFormData(prev => ({ ...prev, owner: e.target.value }))}
+                      />
+                    ) : (
+                      report?.owner || '-'
+                    )}</TableCell>
+                    <TableCell>{report?.product?.toUpperCase() || '-'}</TableCell>
+                    <TableCell>
+                      {editingReport === report.truckNumber ? (
+                        <div className="space-y-2">
+                          {(editFormData.entries || report.entries)?.map((entry, i) => (
+                            <div key={i} className="flex items-center gap-2">
+                              <Input
+                                className="w-24"
+                                value={entry.entryUsed}
+                                onChange={(e) => handleEditEntryChange(report.truckNumber, i, 'entryUsed', e.target.value)}
+                                placeholder="Entry"
+                              />
+                              <Input
+                                className="w-24"
+                                type="number"
+                                value={entry.volume}
+                                onChange={(e) => handleEditEntryChange(report.truckNumber, i, 'volume', e.target.value)}
+                                placeholder="Volume"
+                              />
+                              {(editFormData.entries || report.entries).length > 1 && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => handleRemoveEditEntry(report.truckNumber, i)}
+                                  className="h-8 w-8 p-0"
+                                >
+                                  <X className="h-4 w-4" />
+                                </Button>
+                              )}
+                            </div>
+                          ))}
+                          {(editFormData.entries || report.entries).length < 3 && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleAddEditEntry(report.truckNumber)}
+                              className="w-full mt-2"
+                            >
+                              <Plus className="h-4 w-4 mr-2" /> Add Entry
+                            </Button>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="space-y-1">
+                          {report?.entries?.map((entry, i) => (
+                            <div key={i} className="text-sm">
+                              {entry?.entryUsed || '-'}: {entry?.volume || '0'}L
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </TableCell>
+                    <TableCell>{report?.totalVolume ? `${report.totalVolume}L` : '-'}</TableCell>
+                    <TableCell>{editingReport === report.truckNumber ? (
+                      <Input
+                        type="text"
+                        value={editFormData.at20 || report.at20}
+                        onChange={(e) => setEditFormData(prev => ({ ...prev, at20: e.target.value }))}
+                      />
+                    ) : (
+                      report?.at20 || '-'
+                    )}</TableCell>
+                    <TableCell>{editingReport === report.truckNumber ? (
+                      <Select
+                        value={editFormData.entryDestination || report.entryDestination}
+                        onValueChange={(value) => setEditFormData(prev => ({ ...prev, entryDestination: value }))}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select destination" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="local">Local</SelectItem>
+                          <SelectItem value="ssd">SSD</SelectItem>
+                          <SelectItem value="northern">Northern</SelectItem>
+                          <SelectItem value="western">Western</SelectItem>
+                          <SelectItem value="eastern">Eastern</SelectItem>
+                          <SelectItem value="nakuru">Nakuru</SelectItem>
+                          <SelectItem value="eldoret">Eldoret</SelectItem>
+                          <SelectItem value="kisumu">Kisumu</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      report?.entryDestination?.toUpperCase() || '-'
+                    )}</TableCell>
+                    <TableCell>{editingReport === report.truckNumber ? (
+                      <Input
+                        value={editFormData.depot || report.depot}
+                        onChange={(e) => setEditFormData(prev => ({ ...prev, depot: e.target.value }))}
+                      />
+                    ) : (
+                      report?.depot || '-'
+                    )}</TableCell>
+                    {showEditControls && (
+                      <TableCell>
+                        {editingReport === report.truckNumber ? (
+                          <div className="flex gap-2">
+                            <Button variant="ghost" size="sm" onClick={() => handleSaveEdit(report.truckNumber)} className="h-8 w-8 p-0"><Check className="h-4 w-4" /></Button>
+                            <Button variant="ghost" size="sm" onClick={() => {
+                              setEditingReport(null)
+                              setEditFormData({})
+                            }} className="h-8 w-8 p-0"><X className="h-4 w-4" /></Button>
+                          </div>
+                        ) : (
+                          <Button variant="ghost" size="sm" onClick={() => handleEdit(report)} className="h-8 w-8 p-0"><Edit className="h-4 w-4" /></Button>
+                        )}
+                      </TableCell>
+                    )}
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+
+            {/* Add Bulk Update button after the table */}
+            {showEditControls && selectedReports.length > 0 && (
+              <div className="mt-4">
+                <Button
+                  onClick={() => setShowBulkUpdate(true)}
+                  variant="outline"
+                  className="gap-2"
+                >
+                  <Edit className="h-4 w-4" />
+                  Bulk Update Selected ({selectedReports.length})
+                </Button>
               </div>
-            ) : (
-              <Button variant="ghost" size="sm" onClick={() => handleEdit(report)} className="h-8 w-8 p-0"><Edit className="h-4 w-4" /></Button>
             )}
-          </TableCell>
-        )}
-      </TableRow>
-    ))}
-  </TableBody>
-</Table>
           </CardContent>
         </Card>
       </main>
@@ -919,12 +1034,24 @@ const handleRemoveEditEntry = (reportId: string, entryIndex: number) => {
               </div>
               <div>
                 <Label htmlFor="entryDestination">Destination</Label>
-                <Input
-                  id="entryDestination"
+                <Select
                   value={formData.entryDestination}
-                  onChange={(e) => setFormData(prev => ({ ...prev, entryDestination: e.target.value }))}
-                  required
-                />
+                  onValueChange={(value) => setFormData(prev => ({ ...prev, entryDestination: value }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select destination" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="local">Local</SelectItem>
+                    <SelectItem value="ssd">SSD</SelectItem>
+                    <SelectItem value="northern">Northern</SelectItem>
+                    <SelectItem value="western">Western</SelectItem>
+                    <SelectItem value="eastern">Eastern</SelectItem>
+                    <SelectItem value="nakuru">Nakuru</SelectItem>
+                    <SelectItem value="eldoret">Eldoret</SelectItem>
+                    <SelectItem value="kisumu">Kisumu</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
               <div>
                 <Label htmlFor="at20">AT20</Label>
@@ -959,7 +1086,6 @@ const handleRemoveEditEntry = (reportId: string, entryIndex: number) => {
                     <SelectItem value="Eldoret">Eldoret</SelectItem>
                     <SelectItem value="Nakuru">Nakuru</SelectItem>
                     <SelectItem value="Kisumu">Kisumu</SelectItem>
-                    <SelectItem value="Unknown">Unknown</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -1029,6 +1155,54 @@ const handleRemoveEditEntry = (reportId: string, entryIndex: number) => {
               </Button>
             </div>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Bulk Update Dialog */}
+      <Dialog open={showBulkUpdate} onOpenChange={setShowBulkUpdate}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Bulk Update Depots</DialogTitle>
+            <DialogDescription>
+              Update depot for {selectedReports.length} selected reports. 
+              {selectedReports.length === filteredReports.length && (
+                <span className="font-medium text-emerald-600"> All reports in current view are selected.</span>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label>New Depot</Label>
+              <Select
+                value={bulkDepot}
+                onValueChange={setBulkDepot}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Select new depot value" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Eldoret">Eldoret</SelectItem>
+                  <SelectItem value="Nakuru">Nakuru</SelectItem>
+                  <SelectItem value="Kisumu">Kisumu</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => {
+                setShowBulkUpdate(false);
+                setBulkDepot("");
+              }}>
+                Cancel
+              </Button>
+              <Button 
+                onClick={handleBulkUpdate} 
+                disabled={!bulkDepot}
+                className="bg-emerald-600 hover:bg-emerald-700"
+              >
+                Update {selectedReports.length} {selectedReports.length === 1 ? 'Report' : 'Reports'}
+              </Button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
     </div>
