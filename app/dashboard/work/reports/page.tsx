@@ -792,6 +792,7 @@ const handleRemoveEditEntry = (reportId: string, entryIndex: number) => {
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-[50px]">No.</TableHead>
                   {showEditControls && (
                     <TableHead className="w-[50px]">
                       <input
@@ -822,6 +823,7 @@ const handleRemoveEditEntry = (reportId: string, entryIndex: number) => {
               <TableBody>
                 {filteredReports.map((report, index) => (
                   <TableRow key={index} className={`${report.id === newReportId ? 'animate-highlight bg-emerald-100' : ''} transition-colors duration-500`}>
+                    <TableCell className="font-medium">{index + 1}</TableCell>
                     {showEditControls && (
                       <TableCell>
                         <input
