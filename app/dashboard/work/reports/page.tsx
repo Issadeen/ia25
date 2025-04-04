@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react"
 import { useSession } from "next-auth/react"
 import { useRouter } from "next/navigation"
-import { ArrowLeft, Download, Search, Plus, Loader2, ChevronLeft, ChevronRight, Edit, Check, X, AlertCircle } from "lucide-react"
+import { ArrowLeft, Download, Search, Plus, Loader2, ChevronLeft, ChevronRight, Edit, Check, X, AlertCircle, ChevronDown, ChevronUp } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -94,6 +94,7 @@ export default function ReportsPage() {
   const [showBulkUpdate, setShowBulkUpdate] = useState(false)
   const [bulkDepot, setBulkDepot] = useState("")
   const [selectedReports, setSelectedReports] = useState<string[]>([])
+  const [showStats, setShowStats] = useState(false);
   const profilePicUrl = useProfileImage()
 
   useEffect(() => {
@@ -742,7 +743,55 @@ const handleRemoveEditEntry = (reportId: string, entryIndex: number) => {
 
         <Card>
           <CardContent className="p-6">
-            {/* Add this month navigator above the table */}
+            {/* Update summary stats section */}
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-semibold">Statistics Overview</h3>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowStats(!showStats)}
+                className="text-muted-foreground hover:text-foreground gap-2"
+              >
+                {showStats ? (
+                  <>
+                    Hide Stats
+                    <ChevronUp className="h-4 w-4" />
+                  </>
+                ) : (
+                  <>
+                    Show Stats
+                    <ChevronDown className="h-4 w-4" />
+                  </>
+                )}
+              </Button>
+            </div>
+
+            {showStats && (
+              <div className="grid grid-cols-3 gap-4 mb-6 animate-in slide-in-from-top duration-200">
+                <div className="p-4 border rounded-lg bg-card hover:bg-accent/50 transition-colors">
+                  <p className="text-sm text-muted-foreground">Total Reports</p>
+                  <h3 className="text-2xl font-bold">{filteredReports.length}</h3>
+                </div>
+                <div className="p-4 border rounded-lg bg-card hover:bg-accent/50 transition-colors">
+                  <p className="text-sm text-muted-foreground">Total Volume</p>
+                  <h3 className="text-2xl font-bold">
+                    {filteredReports.reduce((sum, report) => 
+                      sum + parseFloat(report.totalVolume || '0'), 0
+                    ).toLocaleString()}L
+                  </h3>
+                </div>
+                <div className="p-4 border rounded-lg bg-card hover:bg-accent/50 transition-colors">
+                  <p className="text-sm text-muted-foreground">Average Volume</p>
+                  <h3 className="text-2xl font-bold">
+                    {(filteredReports.reduce((sum, report) => 
+                      sum + parseFloat(report.totalVolume || '0'), 0
+                    ) / (filteredReports.length || 1)).toLocaleString()}L
+                  </h3>
+                </div>
+              </div>
+            )}
+
+            {/* Existing month navigator */}
             <div className="flex items-center justify-center gap-4 mb-6">
               <Button
                 variant="ghost"
