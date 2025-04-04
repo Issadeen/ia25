@@ -835,7 +835,15 @@ const handleRemoveEditEntry = (reportId: string, entryIndex: number) => {
   )}
 </TableCell>
         <TableCell>{report?.totalVolume ? `${report.totalVolume}L` : '-'}</TableCell>
-        <TableCell>{report?.at20 || '-'}</TableCell>
+        <TableCell>{editingReport === report.truckNumber ? (
+          <Input
+            type="text"
+            value={editFormData.at20 || report.at20}
+            onChange={(e) => setEditFormData(prev => ({ ...prev, at20: e.target.value }))}
+          />
+        ) : (
+          report?.at20 || '-'
+        )}</TableCell>
         <TableCell>{report?.entryDestination?.toUpperCase() || '-'}</TableCell>
         <TableCell>{editingReport === report.truckNumber ? (
           <Input
