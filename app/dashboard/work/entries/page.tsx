@@ -71,6 +71,7 @@ interface PendingOrderSummary {
     quantity: number;
     orderno: string;
     owner: string; // Add this line
+    status?: string; // Add this line
   }[];
 }
 
@@ -636,7 +637,8 @@ export default function EntriesPage() {
             truckNumber: order.truck_number,
             quantity: quantityInCubicMeters, // Store as m³
             orderno: order.orderno,
-            owner: order.owner || 'Unknown' // Add owner info
+            owner: order.owner || 'Unknown', // Add owner info
+            status: order.status || 'Not Queued' // Add status info
           })
           destGroup.totalQuantity += quantityInCubicMeters // Sum in m³
         })
@@ -2691,9 +2693,17 @@ const renderStockInfo = () => {
                         <TableCell>
                           {order.orders.map((o, idx) => (
                             <div key={idx} className="mb-1">
-                              {`${idx + 1}. Truck: ${o.truckNumber}`}
-                              <br />
-                              <span className="text-sm text-muted-foreground">
+                              <div className="flex items-center gap-2">
+                                <span>{`${idx + 1}. Truck: ${o.truckNumber}`}</span>
+                                <span className={`px-2 py-0.5 rounded-full text-xs ${
+                                  o.status === 'queued' 
+                                    ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/20' 
+                                    : 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/20'
+                                }`}>
+                                  {o.status || 'Not Queued'}
+                                </span>
+                              </div>
+                              <span className="text-sm text-muted-foreground block ml-4">
                                 {`Quantity: ${o.quantity} m³, Order: ${o.orderno}, Owner: ${o.owner}`}
                               </span>
                             </div>
