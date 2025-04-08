@@ -10,7 +10,7 @@ export interface PermitEntry {
   createdBy: string;
   preAllocatedQuantity?: number;
   allocatedTo?: PermitAllocation[];
-  availableQuantity?: number; // Add this property
+  availableQuantity?: number;
 }
 
 export interface PermitAllocation {
@@ -36,4 +36,5 @@ export interface PreAllocation {
   allocatedAt: string;
   usedAt?: string;
   used?: boolean;
+  destination: string; // Add destination field
 }

@@ -20,14 +20,13 @@ interface Entry {
   id: string;
   number: string;
   product: string;
+  destination: string; // Ensure this property is defined
   remainingQuantity: number;
   initialQuantity: number;
-  destination: string;
-  createdBy: string;
+  allocated: boolean;
   timestamp: number;
 }
 
-// Add new interface for permit allocations
 interface PermitAllocation {
   id: string;
   truckNumber: string;
@@ -41,6 +40,7 @@ interface PermitAllocation {
   usedAt?: string;
   actualTruckNumber?: string;
   previousTruckNumber?: string;
+  destination: string;
 }
 
 export default function AdminPage() {
@@ -52,15 +52,13 @@ export default function AdminPage() {
   const { data: session, status } = useSession()
   const [searchTerm, setSearchTerm] = useState('')
   const [productFilter, setProductFilter] = useState('ALL')
+  const [destinationFilter, setDestinationFilter] = useState('ALL')
   const profilePicUrl = useProfileImage()
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);
   const [ssdEntriesToFix, setSsdEntriesToFix] = useState<number>(0);
-  // Add new state for permit allocations
   const [permitAllocations, setPermitAllocations] = useState<PermitAllocation[]>([]);
   const [truckChanges, setTruckChanges] = useState<{[permitId: string]: {oldTruck: string, newTruck: string}}>({}); 
-  
-  // Add new state for showing truck changes
   const [showTruckChanges, setShowTruckChanges] = useState(false);
   const [truckChangeCount, setTruckChangeCount] = useState(0);
   const [keyComboCount, setKeyComboCount] = useState(0);
@@ -82,30 +80,27 @@ export default function AdminPage() {
     return () => unsubscribe();
   }, []);
 
-  // Enhanced synchronization function specifically for SSD entries
-  const syncSsdEntries = async () => {
+  const syncAllEntriesData = async () => {
     try {
       setIsSyncing(true);
       const db = getDatabase();
-      
-      // Get TR800 entries
-      const tr800Ref = ref(db, 'tr800');
-      const tr800Snapshot = await get(tr800Ref);
-      const tr800Entries = tr800Snapshot.exists() ? tr800Snapshot.val() : {};
 
-      // Get allocations
+      // First, let's get all existing allocations for all destinations
       const allocationsRef = ref(db, 'allocations');
       const allocationsSnapshot = await get(allocationsRef);
       const allocations = allocationsSnapshot.exists() ? allocationsSnapshot.val() : {};
 
-      // Find mismatches and sync specifically for SSD entries
+      // Ensure we are synchronizing allocations for SSD entries
+      // This is for backward compatibility
+      const tr800Ref = ref(db, 'tr800');
+      const tr800Snapshot = await get(tr800Ref);
+      const tr800Entries = tr800Snapshot.exists() ? tr800Snapshot.val() : {};
+
+      // Find mismatches and sync for all destinations
       const updates: { [key: string]: any } = {};
       let fixCount = 0;
       
       Object.entries(allocations).forEach(([key, alloc]: [string, any]) => {
-        // Only process SSD entries
-        if (alloc.destination?.toLowerCase() !== 'ssd') return;
-        
         const tr800Entry = tr800Entries[key];
         if (!tr800Entry) {
           // Allocation exists but no TR800 entry - remove it or set to 0
@@ -118,10 +113,10 @@ export default function AdminPage() {
         }
       });
 
-      // Also check for SSD entries in TR800 that are missing in allocations
+      // Also check for entries in TR800 that are missing in allocations
       Object.entries(tr800Entries).forEach(([key, entry]: [string, any]) => {
-        if (entry.destination?.toLowerCase() === 'ssd' && !allocations[key]) {
-          // Found a TR800 SSD entry that's missing in allocations, add it
+        if (!allocations[key]) {
+          // Found a TR800 entry that's missing in allocations, add it
           updates[`allocations/${key}`] = entry;
           fixCount++;
         }
@@ -131,23 +126,23 @@ export default function AdminPage() {
         await update(ref(db), updates);
         setSsdEntriesToFix(0);
         toast({
-          title: "SSD Sync Complete",
-          description: `Fixed ${fixCount} SSD entries`,
+          title: "Sync Complete",
+          description: `Fixed ${fixCount} entries`,
         });
       } else {
         toast({
-          title: "SSD Entries Verified",
-          description: "All SSD entries are in sync",
+          title: "Entries Verified",
+          description: "All entries are in sync",
         });
       }
       
       setLastSyncTime(new Date());
 
     } catch (error) {
-      console.error('SSD Sync error:', error);
+      console.error('Sync error:', error);
       toast({
         title: "Sync Error",
-        description: "Failed to synchronize SSD entries",
+        description: "Failed to synchronize entries",
         variant: "destructive"
       });
     } finally {
@@ -155,40 +150,30 @@ export default function AdminPage() {
     }
   };
 
-  // Add manual sync button
   const handleManualSync = () => {
-    syncSsdEntries();
+    syncAllEntriesData();
   };
 
-  // Setup periodic checks
   useEffect(() => {
-    // Initial check
-    syncSsdEntries();
+    syncAllEntriesData();
     
-    // Check every 5 minutes (300000 ms)
-    const syncInterval = setInterval(syncSsdEntries, 300000);
+    const syncInterval = setInterval(syncAllEntriesData, 300000);
     
-    // Periodic check for SSD entries that need fixing
     const checkInterval = setInterval(async () => {
       try {
         const db = getDatabase();
         
-        // Get TR800 entries
         const tr800Ref = ref(db, 'tr800');
         const tr800Snapshot = await get(tr800Ref);
         const tr800Entries = tr800Snapshot.exists() ? tr800Snapshot.val() : {};
 
-        // Get allocations
         const allocationsRef = ref(db, 'allocations');
         const allocationsSnapshot = await get(allocationsRef);
         const allocations = allocationsSnapshot.exists() ? allocationsSnapshot.val() : {};
 
-        // Count mismatches
         let count = 0;
         
         Object.entries(allocations).forEach(([key, alloc]: [string, any]) => {
-          if (alloc.destination?.toLowerCase() !== 'ssd') return;
-          
           const tr800Entry = tr800Entries[key];
           if (!tr800Entry || tr800Entry.remainingQuantity !== alloc.remainingQuantity) {
             count++;
@@ -196,11 +181,10 @@ export default function AdminPage() {
         });
         
         setSsdEntriesToFix(count);
-        
       } catch (error) {
-        console.error('SSD check error:', error);
+        console.error('Check error:', error);
       }
-    }, 60000); // Check every minute
+    }, 60000);
     
     return () => {
       clearInterval(syncInterval);
@@ -240,27 +224,29 @@ export default function AdminPage() {
     }
   };
 
-  // Update the handleSave function to use the new volume update
   const handleSave = async (entry: Entry) => {
     if (!editingEntry) return;
     await handleVolumeUpdate(entry, editValue);
   };
 
-  // Add filter function
   const getFilteredEntries = () => {
     return entries.filter(entry => {
-      const matchesSearch = searchTerm === '' || 
-        entry.number.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        entry.createdBy.toLowerCase().includes(searchTerm.toLowerCase());
+      // Handle undefined destination gracefully
+      const entryDestination = entry.destination || '';
       
-      const matchesProduct = productFilter === 'ALL' || 
-        entry.product.toUpperCase() === productFilter;
-
-      return matchesSearch && matchesProduct;
+      // Check if the entry should be filtered by destination
+      const matchesDestination = destinationFilter === 'ALL' || 
+        entryDestination.toLowerCase() === destinationFilter.toLowerCase();
+      
+      // Check if the entry matches the search term
+      const matchesSearch = !searchTerm || 
+        entry.number.toLowerCase().includes(searchTerm.toLowerCase()) || 
+        entry.product.toLowerCase().includes(searchTerm.toLowerCase());
+      
+      return matchesDestination && matchesSearch;
     });
   };
 
-  // Add useEffect to fetch permit allocations and handle keyboard shortcut
   useEffect(() => {
     const db = getDatabase();
     const allocationsRef = ref(db, 'permitPreAllocations');
@@ -269,10 +255,10 @@ export default function AdminPage() {
       if (snapshot.exists()) {
         const data = Object.entries(snapshot.val()).map(([id, alloc]: [string, any]) => ({
           id,
-          ...alloc
+          ...alloc,
+          destination: alloc.destination || 'ssd'
         }));
         
-        // Track truck changes
         const changes: {[permitId: string]: {oldTruck: string, newTruck: string}} = {};
         let changeCount = 0;
         
@@ -293,9 +279,7 @@ export default function AdminPage() {
       }
     });
 
-    // Add keyboard shortcut handler
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Alt+T to toggle truck changes visibility
       if (e.altKey && e.key === 't') {
         setShowTruckChanges(prev => !prev);
         toast({
@@ -306,7 +290,6 @@ export default function AdminPage() {
         });
       }
       
-      // Triple press H for alternative method
       if (e.key === 'h') {
         setKeyComboCount(prev => {
           const newCount = prev + 1;
@@ -321,7 +304,6 @@ export default function AdminPage() {
           return newCount;
         });
         
-        // Reset key combo count after delay
         setTimeout(() => setKeyComboCount(0), 1000);
       }
     };
@@ -334,7 +316,6 @@ export default function AdminPage() {
     };
   }, [showTruckChanges, truckChangeCount, toast]);
 
-  // Add function to track truck number changes in permits
   const monitorTruckChanges = async () => {
     try {
       const db = getDatabase();
@@ -345,16 +326,12 @@ export default function AdminPage() {
       
       const updates: { [key: string]: any } = {};
       
-      // Check each loaded truck with previous trucks
       Object.entries(workSnapshot.val()).forEach(([id, detail]: [string, any]) => {
         if (detail.loaded && detail.previous_trucks && detail.previous_trucks.length > 0) {
-          // This truck was renamed, check if it has a permit allocation
           const previousTruck = detail.previous_trucks[detail.previous_trucks.length - 1];
           
-          // Find permit allocations for the previous truck number
           permitAllocations.forEach(alloc => {
             if (alloc.truckNumber === previousTruck && !alloc.previousTruckNumber) {
-              // Update the permit allocation
               updates[`permitPreAllocations/${alloc.id}/actualTruckNumber`] = detail.truck_number;
               updates[`permitPreAllocations/${alloc.id}/previousTruckNumber`] = previousTruck;
             }
@@ -379,11 +356,9 @@ export default function AdminPage() {
     }
   };
 
-  // Add this to your render
   const renderPermitAllocationsSection = () => {
     if (!showTruckChanges) return null;
     
-    // Get only allocations with truck changes
     const changedAllocations = permitAllocations.filter(
       alloc => alloc.previousTruckNumber && alloc.actualTruckNumber
     );
@@ -439,10 +414,86 @@ export default function AdminPage() {
     );
   };
 
+  const renderPermitEntry = (entry: Entry) => {
+    return (
+      <div className="border rounded-md p-4 mb-4">
+        <div className="flex justify-between mb-2">
+          <span className="text-lg font-semibold">{entry.number}</span>
+          <Badge variant="outline">{(entry.destination || 'UNKNOWN').toUpperCase()}</Badge>
+        </div>
+        <div className="grid grid-cols-2 gap-2 mb-4">
+          <div>
+            <span className="text-sm text-gray-500">Product:</span>
+            <div>{entry.product}</div>
+          </div>
+          <div>
+            <span className="text-sm text-gray-500">Initial Quantity:</span>
+            <div>{entry.initialQuantity?.toLocaleString() || 0} litres</div>
+          </div>
+          <div>
+            <span className="text-sm text-gray-500">Remaining Quantity:</span>
+            <div>{entry.remainingQuantity?.toLocaleString() || 0} litres</div>
+          </div>
+          <div>
+            <span className="text-sm text-gray-500">Date:</span>
+            <div>{new Date(entry.timestamp || 0).toLocaleDateString()}</div>
+          </div>
+        </div>
+        <div className="flex justify-end space-x-2">
+          {/* ... existing buttons ... */}
+        </div>
+      </div>
+    );
+  };
+
+  const renderPermitAllocation = (allocation: PermitAllocation) => {
+    return (
+      <div className="border rounded-md p-4 mb-4">
+        <div className="flex justify-between mb-2">
+          <span className="text-lg font-semibold">{allocation.truckNumber}</span>
+          <div className="flex items-center gap-2">
+            <Badge>{allocation.product}</Badge>
+            {allocation.destination && (
+              <Badge 
+                variant={
+                  allocation.destination?.toLowerCase() === 'ssd' ? 'default' : 
+                  allocation.destination?.toLowerCase() === 'drc' ? 'secondary' : 
+                  'outline'
+                }
+              >
+                {allocation.destination.toUpperCase()}
+              </Badge>
+            )}
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-2 mb-4">
+          <div>
+            <span className="text-sm text-gray-500">Owner:</span>
+            <div>{allocation.owner}</div>
+          </div>
+          <div>
+            <span className="text-sm text-gray-500">Quantity:</span>
+            <div>{allocation.quantity.toLocaleString()} litres</div>
+          </div>
+          <div>
+            <span className="text-sm text-gray-500">Date:</span>
+            <div>{new Date(allocation.allocatedAt).toLocaleDateString()}</div>
+          </div>
+          <div>
+            <span className="text-sm text-gray-500">Status:</span>
+            <div>{allocation.used ? 'Used' : 'Not Used'}</div>
+          </div>
+        </div>
+        <div className="flex justify-end space-x-2">
+          {/* ... existing buttons ... */}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <>
       <div className="min-h-screen">
-        {/* Header with sync info */}
         <header className="fixed top-0 left-0 w-full border-b z-50 bg-gradient-to-r from-emerald-900/10 via-blue-900/10 to-blue-900/10 backdrop-blur-xl">
         <div className="max-w-7xl mx-auto px-2 py-2">
           <div className="flex items-center justify-between">
@@ -463,7 +514,7 @@ export default function AdminPage() {
             <div className="flex items-center gap-2">
               {ssdEntriesToFix > 0 && (
                 <Badge variant="destructive" className="animate-pulse">
-                  {ssdEntriesToFix} SSD {ssdEntriesToFix === 1 ? 'entry' : 'entries'} need sync
+                  {ssdEntriesToFix} {ssdEntriesToFix === 1 ? 'entry' : 'entries'} need sync
                 </Badge>
               )}
 
@@ -493,7 +544,7 @@ export default function AdminPage() {
                 ) : (
                   <RefreshCw className="h-3 w-3" />
                 )}
-                Sync SSD Entries
+                Sync Entries
               </Button>
 
               {lastSyncTime && (
@@ -518,14 +569,12 @@ export default function AdminPage() {
                 </Avatar>
               </div>
             </div>
+          </div>
         </div>
-      </div>
-    </header>
+      </header>
     <main className="max-w-7xl mx-auto px-2 sm:px-4 pt-28 sm:pt-24 pb-6 sm:pb-8">
-        {/* Render permit allocations section */}
         {renderPermitAllocationsSection()}
 
-        {/* Search and Filter Controls */}
         <div className="mb-6 space-y-4">
           <div className="flex flex-col sm:flex-row gap-4">
             <Input
@@ -546,10 +595,23 @@ export default function AdminPage() {
                 <SelectItem value="PMS">PMS</SelectItem>
               </SelectContent>
             </Select>
+            <Select
+              value={destinationFilter}
+              onValueChange={setDestinationFilter}
+            >
+              <SelectTrigger className="w-full sm:w-[150px]">
+                <SelectValue placeholder="Filter Destination" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ALL">All Destinations</SelectItem>
+                <SelectItem value="ssd">SSD</SelectItem>
+                <SelectItem value="local">LOCAL</SelectItem>
+                <SelectItem value="drc">DRC</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         </div>
 
-        {/* Add a button to monitor truck changes */}
         <div className="mb-6 flex flex-wrap gap-2">
           {!showTruckChanges && truckChangeCount > 0 && (
             <Button
@@ -577,60 +639,11 @@ export default function AdminPage() {
           </div>
         </div>
 
-        {/* Entries Grid */}
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {getFilteredEntries().map(entry => (
-            <Card key={entry.id} className="hover:shadow-md transition-shadow">
-              <CardHeader>
-                <CardTitle className="flex justify-between items-center">
-                  <span>{entry.number}</span>
-                  <span className={`text-sm font-normal px-2 py-1 rounded-full ${entry.product === 'AGO'
-                      ? 'bg-blue-100 text-blue-800'
-                      : 'bg-green-100 text-green-800'}`}>
-                    {entry.product}
-                  </span>
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-2">
-                  <div className="flex justify-between">
-                    <span>Initial:</span>
-                    <span>{entry.initialQuantity.toLocaleString()}L</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span>Remaining:</span>
-                    {editingEntry === entry.id ? (
-                      <div className="flex items-center gap-2">
-                        <Input
-                          type="number"
-                          value={editValue}
-                          onChange={(e) => setEditValue(Number(e.target.value))}
-                          className="w-32" />
-                        <Button
-                          size="sm"
-                          onClick={() => handleSave(entry)}
-                        >
-                          <Save className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    ) : (
-                      <Button
-                        variant="ghost"
-                        onClick={() => {
-                          setEditingEntry(entry.id)
-                          setEditValue(entry.remainingQuantity)
-                        } }
-                      >
-                        {entry.remainingQuantity.toLocaleString()}L
-                      </Button>
-                    )}
-                  </div>
-                  <div className="text-sm text-muted-foreground">
-                    Created by: {entry.createdBy}
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+          {getFilteredEntries().map((entry) => (
+            <div key={entry.id || `entry-${entry.number}-${Date.now()}`}>
+              {renderPermitEntry(entry)}
+            </div>
           ))}
         </div>
     </main>

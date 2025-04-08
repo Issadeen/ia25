@@ -7,7 +7,7 @@ import { useTheme } from "next-themes"
 import * as Popover from '@radix-ui/react-popover'
 import { 
   ArrowLeft,
-  ArrowUp, // Add this
+  ArrowUp,
   Sun,
   Moon,
   FileText,
@@ -18,10 +18,10 @@ import {
   ClipboardList,
   ChevronDown, 
   ChevronUp,
-  Search, // Add this
-  Bell, // Add this
-  Receipt, // Add this
-  Edit // Add this
+  Search,
+  Bell,
+  Receipt,
+  Edit
 } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -50,18 +50,16 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { validateAllocation } from '@/lib/validation'
-import { confirmDialog } from "@/components/ui/confirm-dialog" // Add this line
-import { reminderService } from '@/lib/reminders' // Add this line
+import { confirmDialog } from "@/components/ui/confirm-dialog"
+import { reminderService } from '@/lib/reminders'
 import { StockItem } from '@/types/stock';
 import { Entry } from "@/types/entries"
-import { getPreAllocatedPermit, markPermitAsUsed } from '@/lib/permit-utils'; // Add this line
-import { useProfileImage } from '@/hooks/useProfileImage' // Add this import
+import { getPreAllocatedPermit, markPermitAsUsed } from '@/lib/permit-utils';
+import { useProfileImage } from '@/hooks/useProfileImage'
 
-// Add new constants at the top of the file
 const WARNING_TIMEOUT = 9 * 60 * 1000; // 9 minutes
 const LOGOUT_TIMEOUT = 10 * 60 * 1000; // 10 minutes
 
-// Add new interface for pending orders
 interface PendingOrderSummary {
   product: string;
   destination: string;
@@ -70,12 +68,11 @@ interface PendingOrderSummary {
     truckNumber: string;
     quantity: number;
     orderno: string;
-    owner: string; // Add this line
-    status?: string; // Add this line
+    owner: string;
+    status?: string;
   }[];
 }
 
-// Add this interface with your other interfaces
 interface AllocationReport {
   truckNumber: string;
   volume: string;
@@ -87,13 +84,11 @@ interface AllocationReport {
   entryDestination: string;
 }
 
-// Add new interface for selected entry with volume
 interface SelectedEntryWithVolume {
   entryKey: string;
   allocatedVolume: number;
 }
 
-// Add to your existing interfaces
 interface Summary {
   productDestination: string;
   remainingQuantity: number;
@@ -101,14 +96,13 @@ interface Summary {
   motherEntries: { 
     number: string; 
     remainingQuantity: number;
-    timestamp: number; // Add timestamp
-    creationDate: string; // Add this
-    ageInDays: number;    // Add this
-    usageCount: number;   // Add this
+    timestamp: number;
+    creationDate: string;
+    ageInDays: number;
+    usageCount: number;
   }[];
 }
 
-// Add new interfaces
 interface ThresholdConfig {
   product: string;
   destination: string;
@@ -127,7 +121,6 @@ interface AlertHistory {
   acknowledged: boolean;
 }
 
-// Add new interfaces
 interface Notification {
   id: string;
   title: string;
@@ -137,14 +130,12 @@ interface Notification {
   read: boolean;
 }
 
-// Add new interfaces after existing interfaces
 interface TruckUsage {
-  id?: string;  // Make id optional
+  id?: string;
   truckNumber: string;
   quantity: number;
 }
 
-// Add this interface near other interfaces
 interface EditingUsage {
   entryKey: string;
   allocationId: string; 
@@ -155,7 +146,6 @@ interface EditingUsage {
 }
 
 export default function EntriesPage() {
-  // Add highlightText inside the component
   const highlightText = useCallback((text: string, filter: string) => {
     if (!filter) return text;
     const textStr = String(text);
@@ -170,10 +160,8 @@ export default function EntriesPage() {
     );
   }, []);
 
-  // Add to existing state declarations
   const searchParams = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '');
 
-  // 1. State hooks
   const [mounted, setMounted] = useState(false)
   const [truckNumber, setTruckNumber] = useState('')
   const [destination, setDestination] = useState('')
@@ -187,19 +175,19 @@ export default function EntriesPage() {
   })
   const [entriesUsedInPermits, setEntriesUsedInPermits] = useState<Entry[]>([])
   interface Entry {
-    key: string; // Add this line
+    key: string;
     motherEntry: string;
     initialQuantity: number;
     remainingQuantity: number;
     truckNumber?: string;
     destination: string;
     subtractedQuantity: number;
-    status?: string;  // Add this line
+    status?: string;
     number: string;
     product: string;
     product_destination: string;
     timestamp: number;
-    permitNumber?: string; // Add this line
+    permitNumber?: string;
   }
 
   const [entriesData, setEntriesData] = useState<Entry[]>([])
@@ -209,7 +197,7 @@ export default function EntriesPage() {
   const [showUsage, setShowUsage] = useState(false)
   const [summaryData, setSummaryData] = useState<Summary[]>([])
   interface UsageEntry {
-    key: string;  // Add this line
+    key: string;
     number: string;
     initialQuantity: number;
     remainingQuantity: number;
@@ -227,13 +215,8 @@ export default function EntriesPage() {
     truck: ''
   })
 
-  // Add error state at the top with other state declarations
   const [error, setError] = useState<string | null>(null)
-
-  // Add new state for volume warning
   const [volumeWarning, setVolumeWarning] = useState<string | null>(null)
-
-  // Add these new state declarations with the other states
   const [editMode, setEditMode] = useState<string | null>(null)
   const [workIdDialogOpen, setWorkIdDialogOpen] = useState(false)
   const [workId, setWorkId] = useState("")
@@ -242,47 +225,22 @@ export default function EntriesPage() {
     entryId: string;
     newValue: string;
   } | null>(null)
-
-  // Add new state for verification loading
   const [isVerifying, setIsVerifying] = useState(false)
-
-  // Add new state for pending orders
   const [pendingOrders, setPendingOrders] = useState<PendingOrderSummary[]>([])
   const [isPendingLoading, setIsPendingLoading] = useState(false)
-
-  // Add new state for showing pending orders
   const [showPendingOrders, setShowPendingOrders] = useState(false)
-
-  // Remove the permitNumber state
-  // const [permitNumber, setPermitNumber] = useState('')
-
-  // Add new state for entry used in permit
   const [entryUsedInPermit, setEntryUsedInPermit] = useState('')
-
-  // Add state for manual allocation
   const [showManualAllocation, setShowManualAllocation] = useState(false)
   const [selectedEntries, setSelectedEntries] = useState<string[]>([])
   const [availableEntries, setAvailableEntries] = useState<Entry[]>([])
-
-  // Add this with other state declarations
   const [currentView, setCurrentView] = useState<'default' | 'summary' | 'usage' | 'manual'>('default')
-
-  // Add new state for available permit entries
   const [availablePermitEntries, setAvailablePermitEntries] = useState<Entry[]>([])
-
-  // Add this state near other state declarations
   const [showMobileMenu, setShowMobileMenu] = useState(false)
-
-  // Add this warning modal state
   const [showWarningModal, setShowWarningModal] = useState(false)
   const [warningMessage, setWarningMessage] = useState("")
-
-  // Add to existing state declarations
   const [stocks, setStocks] = useState<{ ago: StockItem; pms: StockItem } | null>(null);
   const [editingStock, setEditingStock] = useState<'ago' | 'pms' | null>(null);
   const [tempStockValue, setTempStockValue] = useState('');
-
-  // Add new state for warnings
   const [quantityWarnings, setQuantityWarnings] = useState<{
     [key: string]: { 
       shortage: number;
@@ -291,25 +249,13 @@ export default function EntriesPage() {
       shortageQuantity: number;
     }
   }>({});
-
-  // Add new state for showing note
   const [showNote, setShowNote] = useState(true);
-
-  // Add new state for auto-refresh
   const [autoRefresh, setAutoRefresh] = useState(false);
   const autoRefreshIntervalRef = useRef<NodeJS.Timeout | null>(null);
-
-  // Add new state for scroll button
   const [showScrollTop, setShowScrollTop] = useState(false);
-
-  // Add to existing state declarations
   const [selectedEntriesWithVolumes, setSelectedEntriesWithVolumes] = useState<SelectedEntryWithVolume[]>([]);
   const [remainingRequired, setRemainingRequired] = useState<number>(0);
-
-  // Add near other state declarations
   const [summarySearch, setSummarySearch] = useState('');
-
-  // Add new state for advanced filtering
   const [advancedFilters, setAdvancedFilters] = useState({
     dateRange: {
       from: '',
@@ -317,61 +263,40 @@ export default function EntriesPage() {
     },
     minQuantity: '',
     maxQuantity: '',
-    sortBy: 'date' // 'date', 'quantity', 'usage'
+    sortBy: 'date'
   })
-
-  // Add to existing state declarations
   const [thresholds, setThresholds] = useState<ThresholdConfig[]>([
     { product: 'ago', destination: 'ssd', warning: 100000, critical: 50000 },
     { product: 'ago', destination: 'local', warning: 50000, critical: 25000 },
     { product: 'pms', destination: 'ssd', warning: 120000, critical: 70000 },
     { product: 'pms', destination: 'local', warning: 70000, critical: 35000 },
   ]);
-
   const [alertHistory, setAlertHistory] = useState<AlertHistory[]>([]);
   const [showLowQuantityAlert, setShowLowQuantityAlert] = useState(false);
   const [currentAlert, setCurrentAlert] = useState<AlertHistory | null>(null);
-
-  // Add to existing state declarations
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [showNotifications, setShowNotifications] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
-
-  // Add new state for animating the bell icon
   const [animateBell, setAnimateBell] = useState(false)
-
-  // Add ref for heading click tracking
   const h2Ref = useRef<{ lastClick: number; clickCount: number }>({ lastClick: 0, clickCount: 0 })
-
-  // Add new state variables
   const [editingAllocation, setEditingAllocation] = useState<EditingUsage | null>(null);
   const [editConfirmOpen, setEditConfirmOpen] = useState(false);
-
-  // Add new state variables inside component
   const [editingUsage, setEditingUsage] = useState<{
     entryKey: string;
     usageId: string;
     truckNumber: string;
     quantity: number;
   } | null>(null);
-
-  // Add after existing state declarations
   const [isAdminMode, setIsAdminMode] = useState(false);
-
-  // Add to existing state declarations
   const [hiddenDuplicates, setHiddenDuplicates] = useState<Set<string>>(new Set());
-
-  // Add new state for showing duplicates
   const [showDuplicates, setShowDuplicates] = useState(false);
 
-  // 2. Other hooks
   const { data: session, status } = useSession()
   const router = useRouter()
   const { theme, setTheme } = useTheme()
   const { toast } = useToast()
-  const profilePicUrl = useProfileImage() // Replace lastUploadedImage state and related code with useProfileImage hook
+  const profilePicUrl = useProfileImage()
 
-  // 3. Helper functions
   function generateProfileImageFilename(email: string): string {
     return email.toLowerCase().replace(/[@.]/g, '_') + '_com.jpg'
   }
@@ -420,7 +345,6 @@ export default function EntriesPage() {
     )
   }
 
-  // Add this function with other helper functions
   const verifyWorkIdAgainstDb = useCallback(async (inputWorkId: string): Promise<boolean> => {
     const db = getDatabase();
     const usersRef = dbRef(db, 'users');
@@ -448,7 +372,6 @@ export default function EntriesPage() {
     }
   }, []);
 
-  // Update the verifyWorkId function
   const verifyWorkId = async (e: React.FormEvent) => {
     e.preventDefault()
     setIsVerifying(true)
@@ -463,7 +386,6 @@ export default function EntriesPage() {
         return
       }
   
-      // Add delay to show loading state
       await new Promise(resolve => setTimeout(resolve, 500))
   
       const isValidWorkId = await verifyWorkIdAgainstDb(workId);
@@ -511,11 +433,9 @@ export default function EntriesPage() {
     }
   }
 
-  // Add this function with other helper functions
   const updateRemainingQuantity = async (entryId: string, newValue: number) => {
     const db = getDatabase()
     try {
-      // First get the current entry data
       const entrySnapshot = await get(dbRef(db, `tr800/${entryId}`))
       if (!entrySnapshot.exists()) {
         throw new Error("Entry not found")
@@ -523,13 +443,11 @@ export default function EntriesPage() {
   
       const entryData = entrySnapshot.val()
       
-      // Update remaining quantity
       await update(dbRef(db, `tr800/${entryId}`), {
         ...entryData,
         remainingQuantity: newValue
       })
   
-      // Update local state
       setUsageData(prevData => 
         prevData.map(entry => 
           entry.key === entryId 
@@ -553,7 +471,6 @@ export default function EntriesPage() {
     }
   }
 
-  // Add this helper function
   const addNotification = (
     title: string,
     message: string,
@@ -568,14 +485,12 @@ export default function EntriesPage() {
       read: false
     };
     
-    setNotifications(prev => [newNotification, ...prev].slice(0, 50)); // Keep last 50 notifications
+    setNotifications(prev => [newNotification, ...prev].slice(0, 50));
     setUnreadCount(prev => prev + 1);
     
-    // Trigger bell animation
     setAnimateBell(true)
     setTimeout(() => setAnimateBell(false), 1000)
 
-    // Still show critical errors as toasts
     if (type === 'error') {
       toast({
         title,
@@ -585,7 +500,6 @@ export default function EntriesPage() {
     }
   };
 
-  // Add function to clear all notifications
   const clearNotifications = () => {
     setNotifications([])
     setUnreadCount(0)
@@ -602,7 +516,6 @@ export default function EntriesPage() {
         return
       }
   
-      // First group by product
       const productGroups: { [key: string]: PendingOrderSummary[] } = {}
   
       Object.values(snapshot.val() as any[])
@@ -618,7 +531,6 @@ export default function EntriesPage() {
             productGroups[product] = []
           }
           
-          // Find existing destination group or create new one
           let destGroup = productGroups[product].find(g => g.destination === destination)
           if (!destGroup) {
             destGroup = {
@@ -630,32 +542,29 @@ export default function EntriesPage() {
             productGroups[product].push(destGroup)
           }
           
-          // Convert quantity from m³ to m³ (since input is already in m³)
           const quantityInCubicMeters = parseFloat(order.quantity)
           
           destGroup.orders.push({
             truckNumber: order.truck_number,
-            quantity: quantityInCubicMeters, // Store as m³
+            quantity: quantityInCubicMeters,
             orderno: order.orderno,
-            owner: order.owner || 'Unknown', // Add owner info
-            status: order.status || 'Not Queued' // Add status info
+            owner: order.owner || 'Unknown',
+            status: order.status || 'Not Queued'
           })
-          destGroup.totalQuantity += quantityInCubicMeters // Sum in m³
+          destGroup.totalQuantity += quantityInCubicMeters
         })
   
-      // Filter out product groups with totalQuantity > 0
       const filteredProductGroups = Object.fromEntries(
         Object.entries(productGroups).filter(([_, groups]) => 
           groups.some(group => group.totalQuantity > 0)
         )
       )
   
-      // Convert to array and sort
       const sortedOrders = Object.entries(filteredProductGroups)
-        .sort(([a], [b]) => b.localeCompare(a)) // AGO before PMS
+        .sort(([a], [b]) => b.localeCompare(a))
         .flatMap(([_, groups]) => 
           groups
-            .filter(group => group.totalQuantity > 0) // Exclude groups with 0 balance
+            .filter(group => group.totalQuantity > 0)
             .sort((a, b) => a.destination.localeCompare(b.destination))
         )
   
@@ -671,7 +580,7 @@ export default function EntriesPage() {
     }
   }
 
-  const fetchEntriesUsedInPermits = async (product: string) => {
+  const fetchEntriesUsedInPermits = async (product: string, destination: string = 'ssd') => {
     const db = getDatabase()
     try {
       const snapshot = await get(dbRef(db, 'tr800'))
@@ -683,24 +592,23 @@ export default function EntriesPage() {
           }))
           .filter(entry => 
             entry.product.toLowerCase() === product.toLowerCase() &&
-            entry.destination.toLowerCase() === 'ssd' && // Add destination check
-            entry.remainingQuantity > 0 // Only show entries with remaining quantity
+            entry.destination.toLowerCase() === destination.toLowerCase() &&
+            entry.remainingQuantity > 0
           )
-          .sort((a, b) => b.timestamp - a.timestamp) // Sort by newest first
+          .sort((a, b) => b.timestamp - a.timestamp)
 
         setAvailablePermitEntries(entries)
         
-        // Show toast with filtered results
         if (entries.length > 0) {
           addNotification(
             "Available Permit Entries",
-            `Found ${entries.length} entries for ${product.toUpperCase()} to SSD`,
+            `Found ${entries.length} entries for ${product.toUpperCase()} to ${destination.toUpperCase()}`,
             "info"
           )
         } else {
           addNotification(
             "No Entries Available",
-            `No entries found for ${product.toUpperCase()} to SSD`,
+            `No entries found for ${product.toUpperCase()} to ${destination.toUpperCase()}`,
             "error"
           )
         }
@@ -721,7 +629,6 @@ export default function EntriesPage() {
     }
   }
 
-  // Add this function to fetch stocks
   const fetchStocks = async () => {
     const db = getDatabase();
     try {
@@ -740,7 +647,6 @@ export default function EntriesPage() {
     }
   };
 
-  // Add this function to update stocks
   const updateStock = async (product: 'ago' | 'pms', quantity: number) => {
     const db = getDatabase();
     try {
@@ -755,7 +661,6 @@ export default function EntriesPage() {
         "success"
       );
       
-      // Refresh stocks
       fetchStocks();
     } catch (error) {
       addNotification(
@@ -766,13 +671,11 @@ export default function EntriesPage() {
     }
   };
 
-  // 4. Function to fetch available entries
   const fetchAvailableEntries = async (product: string, destination: string) => {
     const db = getDatabase()
     try {
       const snapshot = await get(dbRef(db, 'tr800'))
       if (snapshot.exists()) {
-        // Get entries from TR800
         const entries = Object.entries(snapshot.val())
           .map(([key, value]: [string, any]) => ({
             key,
@@ -785,25 +688,22 @@ export default function EntriesPage() {
           )
           .sort((a, b) => a.timestamp - b.timestamp)
 
-        // If we're handling SSD entries, fetch pre-allocated entries that are used
-        // This is to provide visual indicators
-        let usedEntries: { [key: string]: string } = {}; // entryId -> truckNumber
+        let usedEntries: { [key: string]: string } = {};
         
-        if (destination.toLowerCase() === 'ssd') {
-          const permitAllocationsRef = dbRef(db, 'permitPreAllocations');
-          const permitAllocationsSnapshot = await get(permitAllocationsRef);
-          
-          if (permitAllocationsSnapshot.exists()) {
-            permitAllocationsSnapshot.forEach((childSnapshot) => {
-              const allocation = childSnapshot.val();
-              if (allocation.used && allocation.permitEntryId) {
-                usedEntries[allocation.permitEntryId] = allocation.truckNumber;
-              }
-            });
-          }
+        const permitAllocationsRef = dbRef(db, 'permitPreAllocations');
+        const permitAllocationsSnapshot = await get(permitAllocationsRef);
+        
+        if (permitAllocationsSnapshot.exists()) {
+          permitAllocationsSnapshot.forEach((childSnapshot) => {
+            const allocation = childSnapshot.val();
+            if (allocation.used && 
+                allocation.permitEntryId && 
+                allocation.destination.toLowerCase() === destination.toLowerCase()) {
+              usedEntries[allocation.permitEntryId] = allocation.truckNumber;
+            }
+          });
         }
         
-        // Mark entries that have been used in permits
         const entriesWithUsageInfo = entries.map(entry => ({
           ...entry,
           usedByTruck: usedEntries[entry.key] || null
@@ -811,7 +711,6 @@ export default function EntriesPage() {
 
         setAvailableEntries(entriesWithUsageInfo)
         
-        // Update toast implementation to use conditional logic
         if (entries.length > 0) {
           addNotification(
             "Entries Found",
@@ -835,19 +734,16 @@ export default function EntriesPage() {
     }
   }
 
-  // Update the useEffect that handles URL parameters
   useEffect(() => {
     if (typeof window !== 'undefined') {
       setMounted(true)
       
-      // Get URL parameters
       const params = new URLSearchParams(window.location.search)
       const truckNum = params.get('truckNumber')
       const prod = params.get('product')
       const dest = params.get('destination')
       const qty = params.get('at20Quantity')
 
-      // Set form values only if they're not already set
       if (truckNum && !truckNumber) {
         setTruckNumber(decodeURIComponent(truckNum))
       }
@@ -858,19 +754,17 @@ export default function EntriesPage() {
         setDestination(decodeURIComponent(dest.toLowerCase()))
       }
       if (qty && !at20Quantity) {
-        // Convert to number and back to string to ensure proper formatting
         const parsedQty = parseFloat(decodeURIComponent(qty))
         if (!isNaN(parsedQty)) {
           setAt20Quantity(parsedQty.toString())
         }
       }
 
-      // If we have product and destination, fetch available entries
       if (prod && dest) {
         fetchAvailableEntries(prod.toLowerCase(), dest.toLowerCase())
       }
     }
-  }, [mounted]) // Remove dependencies that could cause re-runs
+  }, [mounted])
 
   useEffect(() => {
     if (status === "unauthenticated") {
@@ -878,7 +772,6 @@ export default function EntriesPage() {
     }
   }, [status, router])
 
-  // Add this effect for real-time volume validation
   useEffect(() => {
     if (!at20Quantity || !product) {
       setVolumeWarning(null)
@@ -896,46 +789,38 @@ export default function EntriesPage() {
     }
   }, [at20Quantity, product])
 
-  // Update the inactivity timeout effect
   useEffect(() => {
     let warningTimer: NodeJS.Timeout;
     let logoutTimer: NodeJS.Timeout;
 
     const resetTimers = () => {
-      // Clear existing timers
       clearTimeout(warningTimer);
       clearTimeout(logoutTimer);
       setShowWarningModal(false);
 
-      // Set new warning timer
       warningTimer = setTimeout(() => {
         setWarningMessage("Your session will expire in 1 minute due to inactivity.");
         setShowWarningModal(true);
       }, WARNING_TIMEOUT);
 
-      // Set new logout timer
       logoutTimer = setTimeout(async () => {
         await signOut();
         router.push('/login');
       }, LOGOUT_TIMEOUT);
     };
 
-    // Debounce the reset timer function
     let debounceTimeout: NodeJS.Timeout;
     const debouncedResetTimers = () => {
       clearTimeout(debounceTimeout);
-      debounceTimeout = setTimeout(resetTimers, 1000); // 1 second debounce
+      debounceTimeout = setTimeout(resetTimers, 1000);
     };
 
-    // Add event listeners with debounced handler
     window.addEventListener('mousemove', debouncedResetTimers);
     window.addEventListener('keydown', debouncedResetTimers);
     window.addEventListener('click', debouncedResetTimers);
 
-    // Initial setup
     resetTimers();
 
-    // Cleanup
     return () => {
       clearTimeout(warningTimer);
       clearTimeout(logoutTimer);
@@ -946,19 +831,16 @@ export default function EntriesPage() {
     };
   }, [router]);
 
-  // Add to useEffect for initial load
   useEffect(() => {
     if (mounted) {
       fetchPendingOrders()
     }
   }, [mounted])
 
-  // Modify the useEffect to clear entryUsedInPermit when destination changes
   useEffect(() => {
     setEntryUsedInPermit('')
   }, [destination])
 
-  // Add effect to fetch entries when product or destination changes
   useEffect(() => {
     if (product && destination) {
       fetchAvailableEntries(product, destination)
@@ -969,15 +851,19 @@ export default function EntriesPage() {
   }, [product, destination])
 
   useEffect(() => {
-    if (product && destination.toLowerCase() === 'ssd') {
-      fetchEntriesUsedInPermits(product)
-    } else {
-      setAvailablePermitEntries([])
-      setEntryUsedInPermit('')
+    if (product) {
+      const needsPermitEntry = destination.toLowerCase() === 'ssd' || 
+                              destination.toLowerCase() === 'drc';
+      
+      if (needsPermitEntry) {
+        fetchEntriesUsedInPermits(product, destination.toLowerCase());
+      } else {
+        setAvailablePermitEntries([]);
+        setEntryUsedInPermit('');
+      }
     }
   }, [product, destination])
 
-  // Add this to your component to check reminders periodically
   useEffect(() => {
     const checkReminders = async () => {
       if (!session?.user?.email) return;
@@ -995,21 +881,18 @@ export default function EntriesPage() {
       }
     };
 
-    // Check reminders on mount and every 15 minutes
     checkReminders();
     const interval = setInterval(checkReminders, 15 * 60 * 1000);
 
     return () => clearInterval(interval);
   }, [session?.user?.email]);
 
-  // Add to your useEffect for initial load
   useEffect(() => {
     if (mounted) {
       fetchStocks();
     }
   }, [mounted]);
 
-  // Add effect to check quantities and set warnings
   useEffect(() => {
     if (summaryData.length > 0 && pendingOrders.length > 0) {
       const warnings: { [key: string]: any } = {};
@@ -1021,16 +904,14 @@ export default function EntriesPage() {
         );
         
         if (matchingSummary) {
-          // Convert liters to m³ for comparison (1 m³ = 1000 liters)
-          const availableQuantityInCubicMeters = matchingSummary.remainingQuantity / 1000; // Convert liters to m³
-          const pendingQuantityInCubicMeters = order.totalQuantity; // Already in m³
+          const availableQuantityInCubicMeters = matchingSummary.remainingQuantity / 1000;
+          const pendingQuantityInCubicMeters = order.totalQuantity;
           
           if (pendingQuantityInCubicMeters > availableQuantityInCubicMeters) {
             const shortageInCubicMeters = pendingQuantityInCubicMeters - availableQuantityInCubicMeters;
-            // Calculate truck shortage based on product capacity
             const truckShortage = order.product.toLowerCase() === 'ago' 
-              ? (shortageInCubicMeters / 36).toFixed(1) // 36m³ per AGO truck
-              : (shortageInCubicMeters / 40).toFixed(1); // 40m³ per PMS truck
+              ? (shortageInCubicMeters / 36).toFixed(1)
+              : (shortageInCubicMeters / 40).toFixed(1);
             
             warnings[key] = {
               shortage: parseFloat(truckShortage),
@@ -1040,10 +921,9 @@ export default function EntriesPage() {
             };
           }
         } else {
-          // If no matching summary found, all pending quantity is shortage
           const truckShortage = order.product.toLowerCase() === 'ago' 
-            ? (order.totalQuantity / 36).toFixed(1) // 36m³ per AGO truck
-            : (order.totalQuantity / 40).toFixed(1) // 40m³ per PMS truck
+            ? (order.totalQuantity / 36).toFixed(1)
+            : (order.totalQuantity / 40).toFixed(1)
           
           warnings[key] = {
             shortage: parseFloat(truckShortage),
@@ -1058,7 +938,6 @@ export default function EntriesPage() {
     }
   }, [summaryData, pendingOrders]);
 
-  // Add effect for note timing
   useEffect(() => {
     if (showNote) {
       const timer = setTimeout(() => {
@@ -1068,10 +947,8 @@ export default function EntriesPage() {
     }
   }, [showNote]);
 
-  // Add to your useEffect cleanup
   useEffect(() => {
     if (autoRefresh && showSummary) {
-      // Refresh every 30 seconds
       autoRefreshIntervalRef.current = setInterval(() => {
         getSummary();
         fetchPendingOrders();
@@ -1085,7 +962,6 @@ export default function EntriesPage() {
     };
   }, [autoRefresh, showSummary]);
 
-  // Add scroll handler effect
   useEffect(() => {
     const handleScroll = () => {
       setShowScrollTop(window.scrollY > 400);
@@ -1095,7 +971,6 @@ export default function EntriesPage() {
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
-  // Add scroll to top function
   const scrollToTop = () => {
     window.scrollTo({
       top: 0,
@@ -1103,9 +978,7 @@ export default function EntriesPage() {
     });
   };
 
-  // 5. Loading check
   if (!mounted || status === "loading") {
-    // Return a loading state instead of null
     return (
       <div className="min-h-screen bg-white dark:bg-gray-900 flex items-center justify-center">
         <Loader2 className="h-12 w-12 animate-spin text-emerald-500" />
@@ -1113,9 +986,55 @@ export default function EntriesPage() {
     )
   }
 
-  // 6. Event handlers
+  const fetchPreAllocatedEntries = async (truckNumber: string, destination: string, product: string) => {
+    const db = getDatabase();
+    try {
+      const permitPreAllocationsRef = dbRef(db, 'permitPreAllocations');
+      const permitSnapshot = await get(permitPreAllocationsRef);
+      
+      if (permitSnapshot.exists()) {
+        let matchingAllocation: any = null;
+        
+        permitSnapshot.forEach((childSnapshot) => {
+          const allocation = childSnapshot.val();
+          
+          if (allocation.truckNumber === truckNumber && 
+              allocation.product.toLowerCase() === product.toLowerCase() &&
+              allocation.destination.toLowerCase() === destination.toLowerCase() &&
+              !allocation.used) {
+            matchingAllocation = {
+              id: childSnapshot.key,
+              ...allocation
+            };
+            return true;
+          }
+        });
+        
+        if (matchingAllocation) {
+          await update(dbRef(db, `permitPreAllocations/${matchingAllocation.id}`), {
+            used: true,
+            usedAt: new Date().toISOString()
+          });
+          
+          setEntryUsedInPermit(matchingAllocation.permitEntryId || entryUsedInPermit);
+          
+          addNotification(
+            "Pre-allocation Found",
+            `Using pre-allocated permit entry for ${destination.toUpperCase()}`,
+            "info"
+          );
+          
+          return matchingAllocation;
+        }
+      }
+      return null;
+    } catch (error) {
+      console.error('Error checking pre-allocations:', error);
+      return null;
+    }
+  };
+
   const getEntries = async () => {
-    // Basic validation
     if (!truckNumber || !destination || !product || !at20Quantity) {
       addNotification(
         "Validation Error",
@@ -1125,72 +1044,30 @@ export default function EntriesPage() {
       return;
     }
   
-    // Validate permit entry for SSD
-    if (destination.toLowerCase() === 'ssd') {
-      if (!entryUsedInPermit) {
-        addNotification(
-          "Permit Entry Required",
-          "Please select a permit entry for SSD allocation",
-          "error"
-        );
-        return;
-      }
+    const needsPermitEntry = destination.toLowerCase() === 'ssd' || 
+                             destination.toLowerCase() === 'drc';
+    
+    if (needsPermitEntry && !entryUsedInPermit) {
+      addNotification(
+        "Permit Entry Required",
+        `Please select a permit entry for ${destination.toUpperCase()} allocation`,
+        "error"
+      );
+      return;
     }
   
     setIsLoading(true);
     const db = getDatabase();
   
     try {
-      // Check for pre-allocated permit if destination is SSD
-      if (destination.toLowerCase() === 'ssd') {
-        const permitPreAllocationsRef = dbRef(db, 'permitPreAllocations');
-        const permitSnapshot = await get(permitPreAllocationsRef);
-        
-        if (permitSnapshot.exists()) {
-          // Find if there's a pre-allocation for this truck
-          let matchingAllocation: any = null;
-          
-          permitSnapshot.forEach((childSnapshot) => {
-            const allocation = childSnapshot.val();
-            
-            // Check direct match
-            if (allocation.truckNumber === truckNumber && 
-                allocation.product.toLowerCase() === product.toLowerCase() &&
-                !allocation.used) {
-              matchingAllocation = {
-                id: childSnapshot.key,
-                ...allocation
-              };
-              return true; // Break the loop
-            }
-          });
-          
-          if (matchingAllocation) {
-            // We found a pre-allocation, mark it as used
-            await update(dbRef(db, `permitPreAllocations/${matchingAllocation.id}`), {
-              used: true,
-              usedAt: new Date().toISOString()
-            });
-            
-            // Set the entryUsedInPermit to the pre-allocated permit entry
-            setEntryUsedInPermit(matchingAllocation.permitEntryId || entryUsedInPermit);
-            
-            addNotification(
-              "Pre-allocation Found",
-              "Using pre-allocated permit entry",
-              "info"
-            );
-          }
-        }
-      }
-  
+      const preAllocated = await fetchPreAllocatedEntries(truckNumber, destination, product);
+      
       const requiredQuantity = parseFloat(at20Quantity);
       const updates: { [key: string]: any } = {};
       const tempOriginalData: { [key: string]: Entry } = {};
       const allocations: Entry[] = [];
   
-      if (destination.toLowerCase() === 'ssd') {
-        // Handle SSD allocation
+      if (needsPermitEntry) {
         const permitEntrySnapshot = await get(dbRef(db, `tr800/${entryUsedInPermit}`));
         if (!permitEntrySnapshot.exists()) {
           throw new Error("Selected permit entry not found");
@@ -1199,7 +1076,6 @@ export default function EntriesPage() {
         const permitEntry = { key: permitEntrySnapshot.key, ...permitEntrySnapshot.val() };
         let remainingToAllocate = requiredQuantity;
       
-        // First use permit entry
         tempOriginalData[permitEntry.key] = { ...permitEntry };
         const permitAllocation = Math.min(permitEntry.remainingQuantity, remainingToAllocate);
         
@@ -1216,19 +1092,17 @@ export default function EntriesPage() {
           initialQuantity: permitEntry.initialQuantity,
           remainingQuantity: updatedPermitEntry.remainingQuantity,
           truckNumber,
-          destination: 'ssd',
+          destination,
           subtractedQuantity: permitAllocation,
           number: permitEntry.number,
           product,
-          product_destination: `${product}-ssd`,
+          product_destination: `${product}-${destination}`,
           timestamp: Date.now()
         });
       
         remainingToAllocate -= permitAllocation;
       
-        // If we still need more quantity, use FIFO entries
         if (remainingToAllocate > 0) {
-          // Get all available entries except the permit entry
           const fifoEntries = availableEntries.filter(entry => entry.key !== permitEntry.key);
           
           for (const entry of fifoEntries) {
@@ -1251,11 +1125,11 @@ export default function EntriesPage() {
               initialQuantity: entry.initialQuantity,
               remainingQuantity: updatedEntry.remainingQuantity,
               truckNumber,
-              destination: 'ssd',
+              destination,
               subtractedQuantity: toAllocate,
               number: entry.number,
               product,
-              product_destination: `${product}-ssd`,
+              product_destination: `${product}-${destination}`,
               timestamp: Date.now()
             });
             
@@ -1267,40 +1141,45 @@ export default function EntriesPage() {
           }
         }
       } else {
-        // Handle non-SSD allocation using single entry
-        const entry = availableEntries[0]; // Use first available entry
-        if (!entry || entry.remainingQuantity < requiredQuantity) {
-          throw new Error(`Insufficient quantity available in selected entry. Need: ${requiredQuantity.toLocaleString()} liters`);
+        let remainingToAllocate = requiredQuantity;
+        for (const entry of availableEntries) {
+          if (remainingToAllocate <= 0) break;
+          
+          const toAllocate = Math.min(entry.remainingQuantity, remainingToAllocate);
+          
+          tempOriginalData[entry.key] = { ...entry };
+          
+          const updatedEntry = {
+            ...entry,
+            remainingQuantity: entry.remainingQuantity - toAllocate
+          };
+          
+          updates[`tr800/${entry.key}`] = updatedEntry;
+          
+          allocations.push({
+            key: entry.key,
+            motherEntry: entry.number,
+            initialQuantity: entry.initialQuantity,
+            remainingQuantity: updatedEntry.remainingQuantity,
+            truckNumber,
+            destination,
+            subtractedQuantity: toAllocate,
+            number: entry.number,
+            product,
+            product_destination: `${product}-${destination}`,
+            timestamp: Date.now()
+          });
+          
+          remainingToAllocate -= toAllocate;
         }
-  
-        tempOriginalData[entry.key] = { ...entry };
         
-        const updatedEntry = {
-          ...entry,
-          remainingQuantity: entry.remainingQuantity - requiredQuantity
-        };
-        
-        updates[`tr800/${entry.key}`] = updatedEntry;
-        
-        allocations.push({
-          key: entry.key,
-          motherEntry: entry.number,
-          initialQuantity: entry.initialQuantity,
-          remainingQuantity: updatedEntry.remainingQuantity,
-          truckNumber,
-          destination,
-          subtractedQuantity: requiredQuantity,
-          number: entry.number,
-          product,
-          product_destination: `${product}-${destination}`,
-          timestamp: Date.now()
-        });
+        if (requiredQuantity > 0) {
+          throw new Error(`Insufficient quantity available. Need ${requiredQuantity.toFixed(2)} more liters`);
+        }
       }
   
-      // Create truck entry
       const truckEntryKey = `${truckNumber.replace(/\//g, '-')}-${destination}${product}`.toUpperCase();
   
-      // Save truck entries
       for (const allocation of allocations) {
         const truckEntryData = {
           entryNumber: allocation.motherEntry,
@@ -1312,13 +1191,11 @@ export default function EntriesPage() {
         updates[`truckEntries/${truckEntryKey}/${newTruckEntryRef.key}`] = truckEntryData;
       }
   
-      // Get owner information using once() instead of get() with query
       let owner = 'Unknown'
       const workDetailsRef = dbRef(db, 'work_details')
       const workDetailsSnapshot = await get(workDetailsRef)
       
       if (workDetailsSnapshot.exists()) {
-        // Find matching truck number manually
         Object.values(workDetailsSnapshot.val()).forEach((detail: any) => {
           if (detail.truck_number === truckNumber) {
             owner = detail.owner || 'Unknown'
@@ -1326,7 +1203,6 @@ export default function EntriesPage() {
         })
       }
   
-      // Create allocation report
       const currentDate = new Date().toISOString().split('T')[0]
       const reportRef = push(dbRef(db, 'allocation_reports'))
       updates[`allocation_reports/${reportRef.key}`] = {
@@ -1344,9 +1220,7 @@ export default function EntriesPage() {
         entryDestination: destination
       }
   
-      // After creating truck entry, also record the permit number used for this allocation
-      if (destination.toLowerCase() === 'ssd' && entryUsedInPermit) {
-        // Get the permit entry details
+      if (needsPermitEntry && entryUsedInPermit) {
         const permitEntryRef = dbRef(db, `tr800/${entryUsedInPermit}`);
         const permitEntrySnapshot = await get(permitEntryRef);
         
@@ -1355,34 +1229,29 @@ export default function EntriesPage() {
           updates[`truckEntries/${truckEntryKey}/permitEntry`] = {
             id: entryUsedInPermit,
             number: permitEntry.number,
+            destination: destination,
             usedAt: new Date().toISOString()
           };
         }
       }
 
-      // Apply all updates in one transaction
       await update(dbRef(db), updates)
 
-      // After successful allocation, if we used a pre-allocated permit, mark it as used
-      if (destination.toLowerCase() === 'ssd' && entryUsedInPermit) {
-        const preAllocated = await getPreAllocatedPermit(db, truckNumber);
-        if (preAllocated) {
-          await markPermitAsUsed(db, preAllocated.id);
-          addNotification(
-            "Permit Used",
-            `Pre-allocated permit ${preAllocated.permitEntryNumber} has been marked as used`,
-            "success"
-          );
-        }
+      if (preAllocated) {
+        await markPermitAsUsed(db, preAllocated.id);
+        addNotification(
+          "Permit Used",
+          `Pre-allocated permit ${preAllocated.permitNumber} for ${destination.toUpperCase()} has been marked as used`,
+          "success"
+        );
       }
   
-      // Update local state
       setOriginalData(tempOriginalData)
       setEntriesData(allocations)
   
       addNotification(
         "Success",
-        `Allocated ${requiredQuantity.toLocaleString()} liters using ${allocations.length} entries`,
+        `Allocated ${requiredQuantity.toLocaleString()} liters for ${destination.toUpperCase()} using ${allocations.length} entries`,
         "success"
       )
   
@@ -1400,113 +1269,85 @@ export default function EntriesPage() {
     }
   }
 
-  // Add new helper function for date formatting
-  const formatDate = (timestamp: number) => {
-    const date = new Date(timestamp);
-    const now = new Date();
-    const diffTime = Math.abs(now.getTime() - date.getTime());
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    
-    return {
-      formatted: date.toLocaleDateString('en-US', {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-      }),
-      ageInDays: diffDays
-    };
-  };
+  const getSummary = async () => {
+    const db = getDatabase()
+    const tr800Ref = dbRef(db, 'tr800')
+    try {
+      const truckEntriesSnapshot = await get(dbRef(db, 'truckEntries'))
+      const usageCounts: { [key: string]: number } = {}
 
-  // Update the getSummary function:
-const getSummary = async () => {
-  const db = getDatabase()
-  const tr800Ref = dbRef(db, 'tr800')
-  try {
-    // First get truck entries to calculate usage counts
-    const truckEntriesSnapshot = await get(dbRef(db, 'truckEntries'))
-    const usageCounts: { [key: string]: number } = {}
+      if (truckEntriesSnapshot.exists()) {
+        truckEntriesSnapshot.forEach(truck => {
+          const entries = truck.val()
+          Object.values(entries).forEach((entry: any) => {
+            if (entry.entryNumber) {
+              usageCounts[entry.entryNumber] = (usageCounts[entry.entryNumber] || 0) + 1
+            }
+          })
+        })
+      }
 
-    // Calculate usage counts from truck entries
-    if (truckEntriesSnapshot.exists()) {
-      truckEntriesSnapshot.forEach(truck => {
-        const entries = truck.val()
-        Object.values(entries).forEach((entry: any) => {
-          if (entry.entryNumber) {
-            usageCounts[entry.entryNumber] = (usageCounts[entry.entryNumber] || 0) + 1
+      const snapshot = await get(tr800Ref)
+      if (snapshot.exists()) {
+        const summaryMap: { [key: string]: any } = {}
+        
+        snapshot.forEach((childSnapshot) => {
+          const data = childSnapshot.val()
+          if (!data) return
+          
+          const key = `${data.product.toLowerCase()} - ${data.destination.toLowerCase()}`
+          
+          if (!summaryMap[key]) {
+            summaryMap[key] = {
+              productDestination: key,
+              remainingQuantity: 0,
+              estimatedTrucks: 0,
+              motherEntries: []
+            }
+          }
+          
+          if (data.remainingQuantity > 0) {
+            summaryMap[key].remainingQuantity += data.remainingQuantity
+            summaryMap[key].motherEntries.push({
+              number: data.number,
+              remainingQuantity: data.remainingQuantity,
+              timestamp: data.timestamp,
+              creationDate: formatDate(data.timestamp).formatted,
+              ageInDays: formatDate(data.timestamp).ageInDays,
+              usageCount: usageCounts[data.number] || 0
+            })
           }
         })
-      })
+
+        Object.values(summaryMap).forEach(summary => {
+          const product = summary.productDestination.split(' - ')[0]
+          const capacity = product.toLowerCase() === 'ago' ? 36000 : 40000
+          summary.estimatedTrucks = Math.floor(summary.remainingQuantity / capacity)
+        })
+
+        const summaryArray = Object.values(summaryMap)
+          .sort((a, b) => b.remainingQuantity - a.remainingQuantity)
+
+        const filteredSummaryArray = summaryArray.filter(summary => summary.remainingQuantity > 0)
+
+        setSummaryData(filteredSummaryArray)
+        setShowSummary(true)
+        setShowUsage(false)
+        setShowManualAllocation(false)
+      }
+    } catch (error) {
+      console.error('Summary error:', error)
+      addNotification(
+        "Error",
+        "Failed to fetch summary data",
+        "error"
+      )
     }
-
-    // Get TR800 entries and build summary
-    const snapshot = await get(tr800Ref)
-    if (snapshot.exists()) {
-      const summaryMap: { [key: string]: any } = {}
-      
-      snapshot.forEach((childSnapshot) => {
-        const data = childSnapshot.val()
-        if (!data) return
-        
-        const key = `${data.product.toLowerCase()} - ${data.destination.toLowerCase()}`
-        
-        if (!summaryMap[key]) {
-          summaryMap[key] = {
-            productDestination: key,
-            remainingQuantity: 0,
-            estimatedTrucks: 0,
-            motherEntries: []
-          }
-        }
-        
-        if (data.remainingQuantity > 0) {
-          summaryMap[key].remainingQuantity += data.remainingQuantity
-          summaryMap[key].motherEntries.push({
-            number: data.number,
-            remainingQuantity: data.remainingQuantity,
-            timestamp: data.timestamp,
-            creationDate: formatDate(data.timestamp).formatted,
-            ageInDays: formatDate(data.timestamp).ageInDays,
-            usageCount: usageCounts[data.number] || 0
-          })
-        }
-      })
-
-      // Calculate estimated trucks for each summary
-      Object.values(summaryMap).forEach(summary => {
-        const product = summary.productDestination.split(' - ')[0]
-        const capacity = product.toLowerCase() === 'ago' ? 36000 : 40000
-        summary.estimatedTrucks = Math.floor(summary.remainingQuantity / capacity)
-      })
-
-      // Convert map to array and sort
-      // Convert map to array and sort
-      const summaryArray = Object.values(summaryMap)
-        .sort((a, b) => b.remainingQuantity - a.remainingQuantity)
-
-      // Filter out summaries with remainingQuantity > 0
-      const filteredSummaryArray = summaryArray.filter(summary => summary.remainingQuantity > 0)
-
-      setSummaryData(filteredSummaryArray)
-      setShowSummary(true)
-      setShowUsage(false)
-      setShowManualAllocation(false)
-    }
-  } catch (error) {
-    console.error('Summary error:', error)
-    addNotification(
-      "Error",
-      "Failed to fetch summary data",
-      "error"
-    )
   }
-}
 
   const getUsage = async () => {
     const db = getDatabase()
     try {
-      // First get TR800 entries
       const tr800Snapshot = await get(dbRef(db, 'tr800'))
       
       if (!tr800Snapshot.exists()) {
@@ -1518,7 +1359,6 @@ const getSummary = async () => {
         return
       }
   
-      // Get all truck entries with error handling
       let truckEntriesSnapshot;
       try {
         truckEntriesSnapshot = await get(dbRef(db, 'truckEntries'))
@@ -1529,13 +1369,11 @@ const getSummary = async () => {
       let entries: UsageEntry[] = []
       const truckUsageMap: { [key: string]: { truckNumber: string; quantity: number }[] } = {}
   
-      // Process truck entries if they exist
       if (truckEntriesSnapshot && truckEntriesSnapshot.exists()) {
         truckEntriesSnapshot.forEach((truckSnapshot) => {
           const truckNumber = truckSnapshot.key?.replace(/-/g, '/') || 'Unknown'
           const truckData = truckSnapshot.val()
           
-          // Handle both array and object structures
           Object.values(truckData).forEach((entry: any) => {
             if (entry && entry.entryNumber) {
               if (!truckUsageMap[entry.entryNumber]) {
@@ -1550,7 +1388,6 @@ const getSummary = async () => {
         })
       }
   
-      // Process TR800 entries
       tr800Snapshot.forEach((childSnapshot) => {
         const data = childSnapshot.val()
         if (data) {
@@ -1567,7 +1404,6 @@ const getSummary = async () => {
         }
       })
 
-      // Apply advanced filters
       const filteredEntries = entries.filter(entry => {
         if (advancedFilters.minQuantity && entry.remainingQuantity < parseFloat(advancedFilters.minQuantity)) return false;
         if (advancedFilters.maxQuantity && entry.remainingQuantity > parseFloat(advancedFilters.maxQuantity)) return false;
@@ -1580,7 +1416,6 @@ const getSummary = async () => {
       });
       entries = filteredEntries;
     
-      // Apply sorting
       entries.sort((a, b) => {
         switch(advancedFilters.sortBy) {
           case 'date':
@@ -1607,19 +1442,16 @@ const getSummary = async () => {
     }
   }
 
-  // New function to reset views
   const resetViews = () => {
     setShowSummary(false)
     setShowUsage(false)
     setShowPendingOrders(false)
     setShowManualAllocation(false)
     setCurrentView('default')
-    // Add these lines to clear selections
     setSelectedEntries([])
     clearForm()
   }
 
-  // Add to the existing event handlers
   const undoAllocation = async () => {
     if (!Object.keys(originalData).length) {
       addNotification(
@@ -1634,30 +1466,24 @@ const getSummary = async () => {
     try {
       const updates: { [key: string]: any } = {}
   
-      // Get the truck number and destination from the first entry
       const truckNumber = entriesData[0]?.truckNumber
       const destination = entriesData[0]?.destination
       if (!truckNumber || !destination) {
         throw new Error("No truck number or destination found")
       }
   
-      // Restore original TR800 data
       for (const key in originalData) {
         updates[`tr800/${key}`] = originalData[key]
       }
   
-      // Build the truck entry key correctly
       const truckEntryKey = `${truckNumber.replace(/\//g, '-')}-${destination}${entriesData[0].product}`.toUpperCase()
   
-      // Get all truck entries for this key
       const truckEntriesRef = dbRef(db, `truckEntries/${truckEntryKey}`)
       const truckEntriesSnapshot = await get(truckEntriesRef)
   
       if (truckEntriesSnapshot.exists()) {
-        // Get all mother entry numbers that were used in this allocation
         const motherEntries = entriesData.map(entry => entry.motherEntry)
   
-        // Find and remove matching truck entries
         truckEntriesSnapshot.forEach((childSnapshot) => {
           const entryData = childSnapshot.val()
           if (motherEntries.includes(entryData.entryNumber)) {
@@ -1666,7 +1492,6 @@ const getSummary = async () => {
         })
       }
   
-      // Find and remove the corresponding allocation report
       const reportsRef = dbRef(db, 'allocation_reports')
       const reportsSnapshot = await get(reportsRef)
       
@@ -1688,7 +1513,6 @@ const getSummary = async () => {
         })
       }
   
-      // Apply all updates in a single transaction
       await update(dbRef(db), updates)
   
       addNotification(
@@ -1697,11 +1521,9 @@ const getSummary = async () => {
         "success"
       )
   
-      // Reset states
       setOriginalData({})
       setEntriesData([])
       
-      // Refresh usage data immediately if showing
       if (showUsage) {
         await getUsage()
       }
@@ -1715,133 +1537,141 @@ const getSummary = async () => {
       )
     }
   }
-  
 
-  // Add Manual Allocation function
   const manualAllocate = async () => {
-    // Implementation for manual allocation
-    // This can include form submission logic
   }
 
-  // Function already defined above - removed duplicate declaration
+  const formatDate = (timestamp: number) => {
+    const date = new Date(timestamp);
+    const now = new Date();
+    const diffTime = Math.abs(now.getTime() - date.getTime());
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    
+    return {
+      formatted: date.toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      }),
+      ageInDays: diffDays
+    };
+  };
 
-  // Add this function before renderMainContent
-const renderStockInfo = () => {
-  if (!stocks) return null;
+  const renderStockInfo = () => {
+    if (!stocks) return null;
 
-  return (
-    <Card className="mb-6 border-emerald-500/20">
-      <CardHeader>
-        <CardTitle className="text-xl">Current Stock Levels</CardTitle>
-      </CardHeader>
-      <CardContent className="p-6">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* AGO Stock */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <h3 className="text-lg font-medium">AGO Stock</h3>
-              {editingStock === 'ago' ? (
-                <div className="flex items-center gap-2">
-                  <Input
-                    type="number"
-                    value={tempStockValue}
-                    onChange={(e) => setTempStockValue(e.target.value)}
-                    className="w-32"
-                  />
+    return (
+      <Card className="mb-6 border-emerald-500/20">
+        <CardHeader>
+          <CardTitle className="text-xl">Current Stock Levels</CardTitle>
+        </CardHeader>
+        <CardContent className="p-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-medium">AGO Stock</h3>
+                {editingStock === 'ago' ? (
+                  <div className="flex items-center gap-2">
+                    <Input
+                      type="number"
+                      value={tempStockValue}
+                      onChange={(e) => setTempStockValue(e.target.value)}
+                      className="w-32"
+                    />
+                    <Button
+                      size="sm"
+                      onClick={() => {
+                        updateStock('ago', parseInt(tempStockValue));
+                        setEditingStock(null);
+                      }}
+                    >
+                      Save
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setEditingStock(null)}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                ) : (
                   <Button
+                    variant="ghost"
                     size="sm"
                     onClick={() => {
-                      updateStock('ago', parseInt(tempStockValue));
-                      setEditingStock(null);
+                      setEditingStock('ago');
+                      setTempStockValue(stocks.ago.quantity.toString());
                     }}
                   >
-                    Save
+                    Edit
                   </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => setEditingStock(null)}
-                  >
-                    Cancel
-                  </Button>
-                </div>
-              ) : (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    setEditingStock('ago');
-                    setTempStockValue(stocks.ago.quantity.toString());
-                  }}
-                >
-                  Edit
-                </Button>
-              )}
+                )}
+              </div>
+              <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">
+                {stocks.ago.quantity.toLocaleString()} m³
+              </div>
+              <div className="text-sm text-muted-foreground">
+                Estimated Trucks: {(stocks.ago.quantity / 36).toFixed(2)}
+              </div>
             </div>
-            <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">
-              {stocks.ago.quantity.toLocaleString()} m³
-            </div>
-            <div className="text-sm text-muted-foreground">
-              Estimated Trucks: {(stocks.ago.quantity / 36).toFixed(2)}
-            </div>
-          </div>
 
-          {/* PMS Stock */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <h3 className="text-lg font-medium">PMS Stock</h3>
-              {editingStock === 'pms' ? (
-                <div className="flex items-center gap-2">
-                  <Input
-                    type="number"
-                    value={tempStockValue}
-                    onChange={(e) => setTempStockValue(e.target.value)}
-                    className="w-32"
-                  />
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-medium">PMS Stock</h3>
+                {editingStock === 'pms' ? (
+                  <div className="flex items-center gap-2">
+                    <Input
+                      type="number"
+                      value={tempStockValue}
+                      onChange={(e) => setTempStockValue(e.target.value)}
+                      className="w-32"
+                    />
+                    <Button
+                      size="sm"
+                      onClick={() => {
+                        updateStock('pms', parseInt(tempStockValue));
+                        setEditingStock(null);
+                      }}
+                    >
+                      Save
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setEditingStock(null)}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                ) : (
                   <Button
+                    variant="ghost"
                     size="sm"
                     onClick={() => {
-                      updateStock('pms', parseInt(tempStockValue));
-                      setEditingStock(null);
+                      setEditingStock('pms');
+                      setTempStockValue(stocks.pms.quantity.toString());
                     }}
                   >
-                    Save
+                    Edit
                   </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => setEditingStock(null)}
-                  >
-                    Cancel
-                  </Button>
-                </div>
-              ) : (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    setEditingStock('pms');
-                    setTempStockValue(stocks.pms.quantity.toString());
-                  }}
-                >
-                  Edit
-                </Button>
-              )}
-            </div>
-            <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">
-              {stocks.pms.quantity.toLocaleString()} m³
-            </div>
-            <div className="text-sm text-muted-foreground">
-              Estimated Trucks: {(stocks.pms.quantity / 40).toFixed(2)}
+                )}
+              </div>
+              <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">
+                {stocks.pms.quantity.toLocaleString()} m³
+              </div>
+              <div className="text-sm text-muted-foreground">
+                Estimated Trucks: {(stocks.pms.quantity / 40).toFixed(2)}
+              </div>
             </div>
           </div>
-        </div>
-      </CardContent>
-    </Card>
-  );
-};
+        </CardContent>
+      </Card>
+    );
+  };
 
-  // Update renderMainContent to include back button and better styling
   const renderMainContent = () => {
     if (showSummary) {
       return (
@@ -1850,13 +1680,11 @@ const renderStockInfo = () => {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.3 }}
         >
-          {/* Update header controls for mobile */}
           <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-6">
             <h2 className="text-2xl font-semibold bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">
               Quantity Summary
             </h2>
             <div className="flex flex-col sm:flex-row gap-2">
-              {/* Add search input */}
               <div className="relative w-full sm:w-64">
                 <Input
                   placeholder="Search entries..."
@@ -1866,7 +1694,6 @@ const renderStockInfo = () => {
                 />
                 <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               </div>
-              {/* Existing buttons */}
               <Button 
                 variant="outline" 
                 onClick={() => setShowPendingOrders(!showPendingOrders)}
@@ -1874,8 +1701,8 @@ const renderStockInfo = () => {
               >
                 {showPendingOrders ? 'Hide' : 'Show'} Pending Orders
               </Button>
-              <Button 
-                variant="outline" 
+              <Button
+                variant="outline"
                 onClick={resetViews}
                 className="w-full sm:w-auto border-emerald-500/30 hover:border-emerald-500/50"
               >
@@ -1895,7 +1722,6 @@ const renderStockInfo = () => {
             </div>
           </div>
 
-          {/* Summary info note */}
           <AnimatePresence>
             {showNote && (
               <motion.div 
@@ -1948,7 +1774,6 @@ const renderStockInfo = () => {
                         );
                       })
                       .map((item, index) => {
-                        // Split and format product-destination
                         const [product, destination] = item.productDestination.split(' - ')
                         const warningKey = `${product}-${destination}`.toUpperCase();
                         const warning = quantityWarnings[warningKey];
@@ -2035,7 +1860,6 @@ const renderStockInfo = () => {
             </Card>
           )}
 
-          {/* Add spacing between cards */}
           {showPendingOrders && (
             <div className="mt-8">
               {renderStockInfo()}
@@ -2057,7 +1881,6 @@ const renderStockInfo = () => {
             <h2 
               className="text-2xl font-semibold bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent cursor-pointer select-none"
               onClick={(e) => {
-                // Track clicks using a custom counter
                 const now = Date.now();
                 if (!h2Ref.current.lastClick || now - h2Ref.current.lastClick > 500) {
                   h2Ref.current.clickCount = 1;
@@ -2066,7 +1889,6 @@ const renderStockInfo = () => {
                 }
                 h2Ref.current.lastClick = now;
 
-                // Check for triple click
                 if (h2Ref.current.clickCount === 3) {
                   toggleAdminMode();
                   h2Ref.current.clickCount = 0;
@@ -2084,7 +1906,6 @@ const renderStockInfo = () => {
             </Button>
           </div>
 
-          {/* Add filters */}
           <Card className="mb-6 border-emerald-500/20">
             <CardContent className="p-4">
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -2192,7 +2013,6 @@ const renderStockInfo = () => {
                           <TableCell>{highlightText(entry.product, usageFilters.product)}</TableCell>
                           <TableCell>{highlightText(entry.destination, usageFilters.destination)}</TableCell>
                           <TableCell>
-                            {/* Add toggle button if there are duplicates */}
                             {entry.usedBy.some((usage: any, idx: number) => {
                               const isDuplicate = entry.usedBy.findIndex(
                                 (u: any) => u.truckNumber === usage.truckNumber && u.quantity === usage.quantity
@@ -2214,7 +2034,6 @@ const renderStockInfo = () => {
                                 const isDuplicate = entry.usedBy.findIndex(
                                   (u: any) => u.truckNumber === usage.truckNumber && u.quantity === usage.quantity
                                 ) !== idx;
-                                // Show all if showDuplicates is true, otherwise hide duplicates
                                 return showDuplicates ? true : !isDuplicate;
                               })
                               .map((usage: any, idx: number) => {
@@ -2314,12 +2133,11 @@ const renderStockInfo = () => {
             </CardContent>
           </Card>
 
-          {/* Add scroll to top button */}
           <AnimatePresence>
             {showScrollTop && (
               <motion.button
                 initial={{ opacity: 0, scale: 0.8 }}
-                animate={{ opacity: 1, scale: 1 }} // Changed from scale: 8 to scale: 1
+                animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.8 }}
                 onClick={scrollToTop}
                 className="fixed bottom-4 right-4 p-2 rounded-full bg-emerald-500/90 text-white shadow-lg hover:bg-emerald-600/90 transition-colors z-50"
@@ -2394,7 +2212,7 @@ const renderStockInfo = () => {
 
               <div className="mt-6 flex flex-col sm:flex-row gap-3">
                 <Button 
-                  type="button" // Add this to prevent form submission
+                  type="button"
                   onClick={handleManualAllocation}
                   disabled={isLoading}
                   className="w-full sm:w-auto bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-600 hover:from-emerald-500 hover:via-teal-400 hover:to-blue-500 text-white"
@@ -2471,18 +2289,17 @@ const renderStockInfo = () => {
               />
             </div>
 
-            {/* Add Permit Entry Selection */}
-            {destination.toLowerCase() === 'ssd' && (
+            {(destination.toLowerCase() === 'ssd' || destination.toLowerCase() === 'drc') && (
               <div className="mt-4">
                 <Label htmlFor="permitEntry" className="block text-sm font-medium mb-2">
-                  Select Permit Entry (Required for SSD)
+                  Select Permit Entry (Required for {destination.toUpperCase()})
                 </Label>
                 <Select
                   value={entryUsedInPermit}
                   onValueChange={(value) => setEntryUsedInPermit(value)}
                 >
                   <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Select permit entry..." />
+                    <SelectValue placeholder={`Select ${destination.toUpperCase()} permit entry...`} />
                   </SelectTrigger>
                   <SelectContent>
                     {availablePermitEntries.map((entry) => (
@@ -2494,7 +2311,7 @@ const renderStockInfo = () => {
                 </Select>
                 {!entryUsedInPermit && (
                   <p className="mt-2 text-sm text-red-500">
-                    Please select a permit entry for SSD allocation
+                    Please select a permit entry for {destination.toUpperCase()} allocation
                   </p>
                 )}
               </div>
@@ -2549,7 +2366,7 @@ const renderStockInfo = () => {
                 <TableHeader>
                   <TableRow className="border-b border-emerald-500/20">
                     <TableHead className="text-emerald-700 dark:text-emerald-400">Entry Number</TableHead>
-                    <TableHead className="text-emerald-700 dark:text-emerald-400">Truck Number</TableHead> {/* Add this line */}
+                    <TableHead className="text-emerald-700 dark:text-emerald-400">Truck Number</TableHead>
                     <TableHead className="text-emerald-700 dark:text-emerald-400">Initial Quantity</TableHead>
                     <TableHead className="text-emerald-700 dark:text-emerald-400">Remaining</TableHead>
                     <TableHead className="text-emerald-700 dark:text-emerald-400">Subtracted Quantity</TableHead>
@@ -2560,7 +2377,7 @@ const renderStockInfo = () => {
                   {entriesData.map((entry, index) => (
                     <TableRow key={index}>
                       <TableCell>{entry.number}</TableCell>
-                      <TableCell>{entry.truckNumber}</TableCell> {/* Add this line */}
+                      <TableCell>{entry.truckNumber}</TableCell>
                       <TableCell>{entry.initialQuantity}</TableCell>
                       <TableCell>{entry.remainingQuantity}</TableCell>
                       <TableCell>{entry.subtractedQuantity}</TableCell>
@@ -2632,24 +2449,21 @@ const renderStockInfo = () => {
                   {pendingOrders.map((order, index) => {
                     const warningKey = `${order.product}-${order.destination}`;
                     
-                    // Find matching summary entry
                     const matchingSummary = summaryData.find(
                       s => s.productDestination.toLowerCase() === `${order.product.toLowerCase()} - ${order.destination.toLowerCase()}`
                     );
                     
-                    // Calculate available quantity
-                    const availableQuantity = matchingSummary ? matchingSummary.remainingQuantity / 1000 : 0; // Convert liters to m³
+                    const availableQuantity = matchingSummary ? matchingSummary.remainingQuantity / 1000 : 0;
                     
-                    // Calculate shortage if any
-                    const pendingQuantity = order.totalQuantity; // Already in m³
+                    const pendingQuantity = order.totalQuantity;
                     const shortage = pendingQuantity > availableQuantity ? 
                       pendingQuantity - availableQuantity : 
                       0;
                     
                     const warning = shortage > 0 ? {
                       shortage: order.product.toLowerCase() === 'ago' ? 
-                        (shortage / 36).toFixed(1) : // 36m³ per AGO truck
-                        (shortage / 40).toFixed(1), // 40m³ per PMS truck
+                        (shortage / 36).toFixed(1) :
+                        (shortage / 40).toFixed(1),
                       shortageQuantity: shortage,
                       pendingQuantity,
                       availableQuantity
@@ -2814,7 +2628,6 @@ const renderStockInfo = () => {
       const tempOriginalData: { [key: string]: any } = {};
       const allocations: Entry[] = [];
   
-      // Process selected entries with their volumes
       for (const selection of selectedEntriesWithVolumes) {
         const entry = availableEntries.find(e => e.key === selection.entryKey);
         if (!entry) continue;
@@ -2843,7 +2656,6 @@ const renderStockInfo = () => {
         });
       }
   
-      // Save truck entries
       const sanitizedTruckNumber = truckNumber.replace(/\//g, '-');
       for (const allocation of allocations) {
         const truckEntryRef = dbRef(db, `truckEntries/${sanitizedTruckNumber}`);
@@ -2854,7 +2666,6 @@ const renderStockInfo = () => {
         });
       }
   
-      // Get owner information
       let owner = 'Unknown';
       const workDetailsRef = dbRef(db, 'work_details');
       const workDetailsSnapshot = await get(workDetailsRef);
@@ -2867,7 +2678,6 @@ const renderStockInfo = () => {
         });
       }
   
-      // Create allocation report
       const reportRef = push(dbRef(db, 'allocation_reports'));
       updates[`allocation_reports/${reportRef.key}`] = {
         truckNumber,
@@ -2884,7 +2694,6 @@ const renderStockInfo = () => {
         entryDestination: destination
       };
   
-      // Apply all updates
       await update(dbRef(db), updates);
       
       setOriginalData(tempOriginalData);
@@ -2896,7 +2705,6 @@ const renderStockInfo = () => {
         "success"
       );
       
-      // Clear form and close manual allocation
       clearForm();
       setSelectedEntriesWithVolumes([]);
       setShowManualAllocation(false);
@@ -2912,90 +2720,84 @@ const renderStockInfo = () => {
     }
   };
 
-  // Add these helper functions before renderMainContent
-const findDuplicateUsages = (usages: TruckUsage[]) => {
-  const seen = new Set<string>();
-  const duplicates = new Set<string>();
+  const findDuplicateUsages = (usages: TruckUsage[]) => {
+    const seen = new Set<string>();
+    const duplicates = new Set<string>();
 
-  usages.forEach(usage => {
-    const key = `${usage.truckNumber}-${usage.quantity}`;
-    if (seen.has(key)) {
-      duplicates.add(key);
-    }
-    seen.add(key);
-  });
-
-  return duplicates;
-};
-
-const hideDuplicate = (entryNumber: string, usage: TruckUsage) => {
-  setHiddenDuplicates(prev => {
-    const key = `${entryNumber}-${usage.truckNumber}-${usage.quantity}`;
-    const newSet = new Set(prev);
-    newSet.add(key);
-    return newSet;
-  });
-  
-  addNotification(
-    "Success",
-    "Duplicate usage entry hidden",
-    "success"
-  );
-};
-
-const updateTruckUsage = async (
-  entryKey: string, 
-  oldTruckNumber: string, 
-  newTruckNumber: string, 
-  newQuantity: number
-) => {
-  const db = getDatabase();
-  try {
-    // Get the old truck entry
-    const oldTruckRef = dbRef(db, `truckEntries/${oldTruckNumber.replace(/\//g, '-')}`);
-    const snapshot = await get(oldTruckRef);
-
-    if (snapshot.exists()) {
-      const updates: { [key: string]: any } = {};
-      
-      // Find and update the matching entry
-      snapshot.forEach((child) => {
-        const entry = child.val();
-        if (entry.entryNumber === entryKey) {
-          // Remove old entry
-          updates[`truckEntries/${oldTruckNumber.replace(/\//g, '-')}/${child.key}`] = null;
-          
-          // Create new entry
-          const newTruckKey = newTruckNumber.replace(/\//g, '-');
-          const newRef = push(dbRef(db, `truckEntries/${newTruckKey}`));
-          updates[`truckEntries/${newTruckKey}/${newRef.key}`] = {
-            entryNumber: entryKey,
-            subtractedQuantity: newQuantity,
-            timestamp: Date.now()
-          };
-        }
-      });
-
-      if (Object.keys(updates).length > 0) {
-        await update(dbRef(db), updates);
-        await getUsage(); // Refresh usage data
-        addNotification(
-          "Success",
-          "Usage entry updated successfully",
-          "success"
-        );
+    usages.forEach(usage => {
+      const key = `${usage.truckNumber}-${usage.quantity}`;
+      if (seen.has(key)) {
+        duplicates.add(key);
       }
-    }
-  } catch (error) {
-    addNotification(
-      "Error",
-      "Failed to update usage entry",
-      "error"
-    );
-  }
-};
+      seen.add(key);
+    });
 
-  // Add this function before renderMainContent
+    return duplicates;
+  };
+
+  const hideDuplicate = (entryNumber: string, usage: TruckUsage) => {
+    setHiddenDuplicates(prev => {
+      const key = `${entryNumber}-${usage.truckNumber}-${usage.quantity}`;
+      const newSet = new Set(prev);
+      newSet.add(key);
+      return newSet;
+    });
+    
+    addNotification(
+      "Success",
+      "Duplicate usage entry hidden",
+      "success"
+    );
+  };
+
+  const updateTruckUsage = async (
+    entryKey: string, 
+    oldTruckNumber: string, 
+    newTruckNumber: string, 
+    newQuantity: number
+  ) => {
+    const db = getDatabase();
+    try {
+      const oldTruckRef = dbRef(db, `truckEntries/${oldTruckNumber.replace(/\//g, '-')}`);
+      const snapshot = await get(oldTruckRef);
+
+      if (snapshot.exists()) {
+        const updates: { [key: string]: any } = {};
+        
+        snapshot.forEach((child) => {
+          const entry = child.val();
+          if (entry.entryNumber === entryKey) {
+            updates[`truckEntries/${oldTruckNumber.replace(/\//g, '-')}/${child.key}`] = null;
+            
+            const newTruckKey = newTruckNumber.replace(/\//g, '-');
+            const newRef = push(dbRef(db, `truckEntries/${newTruckKey}`));
+            updates[`truckEntries/${newTruckKey}/${newRef.key}`] = {
+              entryNumber: entryKey,
+              subtractedQuantity: newQuantity,
+              timestamp: Date.now()
+            };
+          }
+        });
+
+        if (Object.keys(updates).length > 0) {
+          await update(dbRef(db), updates);
+          await getUsage();
+          addNotification(
+            "Success",
+            "Usage entry updated successfully",
+            "success"
+          );
+        }
+      }
+    } catch (error) {
+      addNotification(
+        "Error",
+        "Failed to update usage entry",
+        "error"
+      );
+    }
+  };
+
   const toggleAdminMode = () => {
     setIsAdminMode(prev => !prev);
     if (!isAdminMode) {
@@ -3007,7 +2809,6 @@ const updateTruckUsage = async (
     }
   };
 
-  // Add the edit handler function
   const handleEditAllocation = async (confirmed: boolean) => {
     if (!editingAllocation || !confirmed) {
       setEditingAllocation(null);
@@ -3018,12 +2819,10 @@ const updateTruckUsage = async (
     try {
       const db = getDatabase();
       
-      // Calculate the volume difference
       const volumeDiff = editingAllocation.volume - editingAllocation.originalVolume;
       
       const updates: { [key: string]: any } = {};
       
-      // Update the TR800 entry remaining quantity
       const tr800Ref = dbRef(db, `tr800/${editingAllocation.entryKey}`);
       const tr800Snapshot = await get(tr800Ref);
       
@@ -3035,7 +2834,6 @@ const updateTruckUsage = async (
       updates[`tr800/${editingAllocation.entryKey}/remainingQuantity`] = 
         entry.remainingQuantity - volumeDiff;
 
-      // Update the truck entry allocation
       const oldTruckRef = dbRef(db, `truckEntries/${editingAllocation.originalTruck.replace(/\//g, '-')}`);
       const newTruckRef = dbRef(db, `truckEntries/${editingAllocation.truckNumber.replace(/\//g, '-')}`);
 
@@ -3050,7 +2848,6 @@ const updateTruckUsage = async (
       const newAllocationRef = push(newTruckRef);
       updates[`truckEntries/${editingAllocation.truckNumber.replace(/\//g, '-')}/${newAllocationRef.key}`] = newAllocation;
 
-      // Create edit history entry
       const historyRef = push(dbRef(db, 'allocationEdits'));
       updates[`allocationEdits/${historyRef.key}`] = {
         entryNumber: entry.number,
@@ -3070,7 +2867,6 @@ const updateTruckUsage = async (
         "success"
       );
 
-      // Refresh the usage data
       await getUsage();
 
     } catch (error) {
@@ -3087,7 +2883,6 @@ const updateTruckUsage = async (
 
   return (
     <div className={`min-h-screen relative ${
-      // Use solid background colors until mounted is confirmed
       !mounted ? 'bg-white dark:bg-gray-900' : 
       theme === 'dark' ? 'bg-gray-900 text-gray-100' : 'bg-white text-gray-900'
     }`}>
@@ -3124,7 +2919,6 @@ const updateTruckUsage = async (
                 }
               </Button>
               
-              {/* Add notification bell here */}
               <div className="relative">
                 <Popover.Root open={showNotifications} onOpenChange={setShowNotifications}>
                   <Popover.Trigger asChild>
@@ -3242,7 +3036,6 @@ const updateTruckUsage = async (
         </div>
       </header>
 
-      {/* Only apply backdrop blur after mounted is confirmed */}
       {mounted && (
         <style jsx global>{`
           body {
@@ -3252,7 +3045,6 @@ const updateTruckUsage = async (
       )}
 
       <main className="container mx-auto px-2 sm:px-4 py-4 sm:py-8">
-        {/* Add the warning modal */}
         <AnimatePresence>
           {showWarningModal && (
             <Dialog open={showWarningModal} onOpenChange={setShowWarningModal}>
@@ -3273,14 +3065,12 @@ const updateTruckUsage = async (
           )}
         </AnimatePresence>
 
-        {/* Navigation Buttons - remove sticky positioning */}
         <motion.div 
           className="mb-4 sm:mb-6 bg-background/80 backdrop-blur-sm py-2"
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.3 }}
         >
-          {/* Mobile Menu Button */}
           <Button
             variant="outline"
             className="w-full flex items-center justify-between sm:hidden mb-2"
@@ -3294,17 +3084,16 @@ const updateTruckUsage = async (
             )}
           </Button>
 
-          {/* Action Buttons */}
           <div className={`
             grid grid-cols-1 sm:flex sm:flex-row gap-2 sm:gap-4
             ${showMobileMenu ? 'block' : 'hidden'}
             sm:flex
           `}>
             <Button 
-              onClick={async () => {  // Make the handler async
+              onClick={async () => {  
                 try {
                   setIsLoading(true);
-                  await getSummary();  // Wait for getSummary to complete
+                  await getSummary();
                   setShowSummary(true);
                   setShowUsage(false);
                   setShowManualAllocation(false);
@@ -3370,7 +3159,6 @@ const updateTruckUsage = async (
 
         {renderMainContent()}
 
-        {/* Add scroll to top button */}
         <AnimatePresence>
           {showScrollTop && (
             <motion.button
@@ -3435,7 +3223,6 @@ const updateTruckUsage = async (
           </DialogContent>
         </Dialog>
 
-        {/* Add the edit confirmation dialog after other dialogs */}
         <Dialog open={editConfirmOpen} onOpenChange={setEditConfirmOpen}>
           <DialogContent>
             <DialogHeader>

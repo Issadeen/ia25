@@ -5,11 +5,12 @@ interface PermitPreAllocation {
   truckNumber: string;
   product: string;
   permitEntryId: string;
-  permitEntryNumber: string;
+  permitNumber: string;
   allocatedAt: string;
   usedAt?: string;
   used?: boolean;
   owner: string;
+  destination: string; // Add destination field
 }
 
 export const preAllocatePermitEntry = async (
@@ -18,7 +19,8 @@ export const preAllocatePermitEntry = async (
   product: string,
   owner: string,
   permitEntryId: string,
-  permitEntryNumber: string
+  permitNumber: string,
+  destination: string = 'ssd' // Add destination parameter with default
 ) => {
   try {
     const preAllocationRef = push(ref(db, 'permitPreAllocations'));
@@ -27,9 +29,10 @@ export const preAllocatePermitEntry = async (
       truckNumber,
       product,
       permitEntryId,
-      permitEntryNumber,
+      permitNumber,
       allocatedAt: new Date().toISOString(),
-      owner
+      owner,
+      destination
     };
 
     await set(preAllocationRef, preAllocation);
@@ -42,7 +45,8 @@ export const preAllocatePermitEntry = async (
 
 export const getPreAllocatedPermit = async (
   db: Database,
-  truckNumber: string
+  truckNumber: string,
+  destination?: string // Add optional destination parameter
 ): Promise<PermitPreAllocation | null> => {
   try {
     const preAllocationsRef = ref(db, 'permitPreAllocations');
@@ -53,8 +57,16 @@ export const getPreAllocatedPermit = async (
     let preAllocation: PermitPreAllocation | null = null;
     snapshot.forEach((child) => {
       const data = child.val() as PermitPreAllocation;
-      if (data.truckNumber === truckNumber && !data.used) {
-        preAllocation = data;
+      // If destination is specified, match both truck and destination
+      // Otherwise just match the truck (backward compatibility)
+      if ((data.truckNumber === truckNumber) && 
+          (!data.used) && 
+          (!destination || data.destination === destination)) {
+        preAllocation = {
+          ...data,
+          id: child.key!
+        };
+        return true; // Exit the loop
       }
     });
 
