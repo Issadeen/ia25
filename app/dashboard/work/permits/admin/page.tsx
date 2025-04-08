@@ -15,6 +15,8 @@ import { getStorage, ref as storageRef, getDownloadURL } from 'firebase/storage'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select'
 import { useProfileImage } from '@/hooks/useProfileImage'
 import { Badge } from '@/components/ui/badge'
+import { Switch } from '@/components/ui/switch'
+import { Label } from '@/components/ui/label'
 
 interface Entry {
   id: string;
@@ -53,6 +55,7 @@ export default function AdminPage() {
   const [searchTerm, setSearchTerm] = useState('')
   const [productFilter, setProductFilter] = useState('ALL')
   const [destinationFilter, setDestinationFilter] = useState('ALL')
+  const [showWithBalanceOnly, setShowWithBalanceOnly] = useState(false)
   const profilePicUrl = useProfileImage()
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);
@@ -243,7 +246,14 @@ export default function AdminPage() {
         entry.number.toLowerCase().includes(searchTerm.toLowerCase()) || 
         entry.product.toLowerCase().includes(searchTerm.toLowerCase());
       
-      return matchesDestination && matchesSearch;
+      // Filter by products if applicable
+      const matchesProduct = productFilter === 'ALL' || 
+        entry.product.toUpperCase() === productFilter.toUpperCase();
+      
+      // Filter by balance if applicable
+      const matchesBalance = !showWithBalanceOnly || entry.remainingQuantity > 0;
+      
+      return matchesDestination && matchesSearch && matchesProduct && matchesBalance;
     });
   };
 
@@ -609,6 +619,22 @@ export default function AdminPage() {
                 <SelectItem value="drc">DRC</SelectItem>
               </SelectContent>
             </Select>
+          </div>
+          <div className="flex items-center space-x-2">
+            <Switch 
+              id="balance-filter" 
+              checked={showWithBalanceOnly}
+              onCheckedChange={setShowWithBalanceOnly}
+            />
+            <Label htmlFor="balance-filter" className="cursor-pointer">
+              Show entries with balance only
+            </Label>
+            <Badge 
+              variant="outline" 
+              className={showWithBalanceOnly ? "bg-green-100 dark:bg-green-900/30" : ""}
+            >
+              {getFilteredEntries().length} entries
+            </Badge>
           </div>
         </div>
 
