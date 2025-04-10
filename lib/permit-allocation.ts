@@ -1,4 +1,4 @@
-import { Database, ref, update, push, get, query, orderByChild, equalTo, set } from 'firebase/database';
+import { Database, ref, set, get, update, DatabaseReference, query, orderByChild, equalTo } from 'firebase/database';
 import type { PermitEntry, PreAllocation } from '@/types/permits';
 import { getPermitEntryStatus, validatePermitEntry } from '@/utils/permit-helpers';
 
@@ -9,83 +9,62 @@ export const preAllocatePermitEntry = async (
   owner: string,
   permitEntryId: string,
   permitNumber: string,
-  destination: string = 'ssd' // Default to SSD for backward compatibility
-): Promise<PreAllocation> => {
+  destination: string,
+  quantity?: number // Add optional quantity parameter
+) => {
   try {
-    // Check if truck already has an allocation for this destination
-    const existingAllocationsSnapshot = await get(
-      query(ref(db, 'permitPreAllocations'), 
-        orderByChild('truckNumber'), 
-        equalTo(truckNumber)
-      )
-    );
-
-    if (existingAllocationsSnapshot.exists()) {
-      // Check if any existing allocation matches this destination
-      let hasMatchingDestination = false;
+    // First check if pre-allocation already exists
+    const existingAllocRef = ref(db, 'permitPreAllocations');
+    const snapshot = await get(existingAllocRef);
+    
+    if (snapshot.exists()) {
+      const existingAllocation = (Object.values(snapshot.val()) as PreAllocation[]).find(
+        (alloc) => 
+          alloc.truckNumber === truckNumber && 
+          !alloc.used &&
+          alloc.destination?.toLowerCase() === destination.toLowerCase()
+      );
       
-      existingAllocationsSnapshot.forEach((snapshot) => {
-        const allocation = snapshot.val();
-        if (allocation.destination === destination.toLowerCase() && !allocation.used) {
-          hasMatchingDestination = true;
+      if (existingAllocation) {
+        // If existing allocation has zero quantity, clean it up
+        if (existingAllocation.quantity === 0) {
+          await update(ref(db), {
+            [`permitPreAllocations/${existingAllocation.id}`]: null
+          });
+        } else {
+          throw new Error(`Truck ${truckNumber} already has a permit allocated for ${destination}`);
         }
-      });
-      
-      if (hasMatchingDestination) {
-        throw new Error(`Truck already has a permit allocation for ${destination.toUpperCase()}`);
       }
-      
-      // Allow allocations for different destinations
-      // Continue with allocation for new destination
     }
 
-    // Get permit entry data
-    const permitSnapshot = await get(ref(db, `allocations/${permitEntryId}`));
-    if (!permitSnapshot.exists()) {
-      throw new Error('Permit entry not found');
+    // Validate quantity
+    const actualQuantity = quantity || 0;
+    if (actualQuantity <= 0) {
+      throw new Error("Cannot allocate permit with zero or negative quantity");
     }
 
-    // Get work detail data
-    const workSnapshot = await get(query(ref(db, 'work_details'), orderByChild('truck_number'), equalTo(truckNumber)));
-    if (!workSnapshot.exists()) {
-      throw new Error('Work detail not found for truck');
-    }
-
-    // Get the work detail for this truck
-    const workDetail = Object.values(workSnapshot.val())[0] as any;
-    
-    // Set quantity based on truck's work detail
-    const quantityInLiters = parseFloat(workDetail.quantity) * 1000;
-
-    // Create pre-allocation record
-    const preAllocationId = `${truckNumber}-${destination}-${Date.now()}`;
-    const newPreAllocationRef = ref(db, `permitPreAllocations/${preAllocationId}`);
-    
-    const preAllocation: PreAllocation = {
-      id: preAllocationId,
+    // Create new pre-allocation with required fields
+    const allocData = {
       truckNumber,
       product,
       owner,
       permitEntryId,
       permitNumber,
-      quantity: quantityInLiters,
+      destination: destination.toLowerCase(),
+      quantity: actualQuantity,
       allocatedAt: new Date().toISOString(),
-      used: false,
-      destination: destination.toLowerCase() // Ensure destination is stored in lowercase
+      used: false
     };
 
-    await set(newPreAllocationRef, preAllocation);
+    // Generate allocation ID
+    const allocationId = generateAllocationId();
 
-    // Update work detail with permit info
-    await update(ref(db, `work_details/${workDetail.id}`), {
-      permitAllocated: true,
-      permitNumber: permitNumber,
-      permitEntryId: permitEntryId,
-      permitDestination: destination.toLowerCase()
-    });
+    // Use set for new allocation
+    const newAllocRef = ref(db, `permitPreAllocations/${allocationId}`);
+    await set(newAllocRef, allocData);
 
-    return preAllocation;
-    
+    return { success: true, data: { ...allocData, id: allocationId } };
+
   } catch (error) {
     console.error('[Permit Allocation Error]:', {
       truck: truckNumber,
@@ -96,7 +75,31 @@ export const preAllocatePermitEntry = async (
   }
 };
 
-// Update the resetTruckAllocation function to handle multiple destinations
+// Add this helper function to generate allocation IDs
+const generateAllocationId = () => {
+  const timestamp = Date.now();
+  const random = Math.random().toString(36).substring(2, 15);
+  return `${timestamp}-${random}`;
+};
+
+export const markPermitAsUsed = async (db: Database, allocationId: string) => {
+  const updates: { [key: string]: any } = {};
+  updates[`permitPreAllocations/${allocationId}/used`] = true;
+  updates[`permitPreAllocations/${allocationId}/usedAt`] = new Date().toISOString();
+  
+  await update(ref(db), updates);
+};
+
+// Add this function to validate allocation data
+const validateAllocationData = (data: any): boolean => {
+  return (
+    data.truckNumber && 
+    data.permitNumber && 
+    typeof data.quantity === 'number' &&
+    data.destination
+  );
+};
+
 export const resetTruckAllocation = async (
   db: Database,
   truckNumber: string,
@@ -161,22 +164,6 @@ export const resetTruckAllocation = async (
   }
 };
 
-export const markPermitUsed = async (
-  db: Database,
-  preAllocation: PreAllocation
-): Promise<void> => {
-  const updates: { [key: string]: any } = {};
-  
-  // Mark as used
-  updates[`permitPreAllocations/${preAllocation.id}/used`] = true;
-  updates[`permitPreAllocations/${preAllocation.id}/usedAt`] = new Date().toISOString();
-  
-  // Remove from pending allocations
-  updates[`permitPreAllocations/${preAllocation.id}`] = null;
-  
-  await update(ref(db), updates);
-};
-
 export const releasePreAllocation = async (
   db: Database,
   preAllocationId: string
@@ -207,27 +194,77 @@ export const releasePreAllocation = async (
   }
 };
 
-export const cleanupOrphanedAllocations = async (db: Database): Promise<void> => {
-  const preAllocationsRef = ref(db, 'permitPreAllocations');
-  const snapshot = await get(preAllocationsRef);
-  
-  if (!snapshot.exists()) return;
-  
-  const updates: { [key: string]: null } = {};
-  const seen = new Set<string>();
-  
-  Object.entries(snapshot.val()).forEach(([id, allocation]: [string, any]) => {
-    const key = `${allocation.truckNumber}-${allocation.product}`;
-    if (seen.has(key)) {
-      // This is a duplicate, mark for deletion
-      updates[`permitPreAllocations/${id}`] = null;
-    } else {
-      seen.add(key);
+export const cleanupOrphanedAllocations = async (db: Database) => {
+  try {
+    const [workDetailsSnap, preAllocationsSnap] = await Promise.all([
+      get(ref(db, 'work_details')),
+      get(ref(db, 'permitPreAllocations'))
+    ]);
+
+    if (!preAllocationsSnap.exists()) return;
+
+    const updates: { [key: string]: null } = {};
+    const loadedTrucks = new Map<string, { loadedAt: string; destination: string }>();
+    
+    // Build map of loaded trucks with timestamps
+    if (workDetailsSnap.exists()) {
+      Object.values(workDetailsSnap.val()).forEach((detail: any) => {
+        if (detail.loaded && detail.truck_number) {
+          loadedTrucks.set(detail.truck_number, {
+            loadedAt: detail.loadedAt || new Date().toISOString(),
+            destination: detail.destination?.toLowerCase() || ''
+          });
+        }
+      });
     }
-  });
-  
-  if (Object.keys(updates).length > 0) {
-    await update(ref(db), updates);
+
+    const now = new Date().getTime();
+    const GRACE_PERIOD = 30 * 60 * 1000; // 30 minutes grace period
+
+    preAllocationsSnap.forEach((child) => {
+      const allocation = child.val();
+      const loadInfo = loadedTrucks.get(allocation.truckNumber);
+      
+      if (loadInfo) {
+        const loadedTime = new Date(loadInfo.loadedAt).getTime();
+        const allocationTime = new Date(allocation.allocatedAt).getTime();
+        
+        // Clean up if:
+        // 1. Truck is loaded and allocation matches destination
+        // 2. Loading happened after allocation
+        // 3. Outside grace period to prevent premature cleanup
+        if (
+          loadInfo.destination === allocation.destination?.toLowerCase() &&
+          loadedTime > allocationTime &&
+          (now - loadedTime) > GRACE_PERIOD && 
+          !allocation.used
+        ) {
+          updates[`permitPreAllocations/${child.key}`] = null;
+          console.log(`Cleaning up allocation for ${allocation.truckNumber} (loaded: ${loadInfo.loadedAt})`);
+        }
+      }
+      
+      // Also clean up very old allocations (48 hours)
+      const allocationAge = now - new Date(allocation.allocatedAt).getTime();
+      if (allocationAge > 48 * 60 * 60 * 1000 && !allocation.used) {
+        updates[`permitPreAllocations/${child.key}`] = null;
+        console.log(`Cleaning up old allocation for ${allocation.truckNumber} (age: ${Math.round(allocationAge/3600000)}h)`);
+      }
+    });
+
+    if (Object.keys(updates).length > 0) {
+      await update(ref(db), updates);
+      return {
+        success: true,
+        cleaned: Object.keys(updates).length
+      };
+    }
+
+    return { success: true, cleaned: 0 };
+
+  } catch (error) {
+    console.error('Cleanup error:', error);
+    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
   }
 };
 
@@ -308,6 +345,70 @@ export const updatePermitAllocation = async (
     await update(ref(db), updates);
   } catch (error) {
     console.error('Error updating allocation:', error);
+    throw error;
+  }
+};
+
+export const checkTruckPermitAllocation = async (
+  db: Database, 
+  truckNumber: string,
+  destination: string,
+  product: string
+) => {
+  try {
+    const permitRef = ref(db, 'permitPreAllocations');
+    const snapshot = await get(permitRef);
+    
+    if (!snapshot.exists()) return null;
+    
+    let allocation = null;
+    snapshot.forEach((child) => {
+      const permit = child.val();
+      if (permit.truckNumber === truckNumber && 
+          !permit.used &&
+          permit.destination?.toLowerCase() === destination.toLowerCase() &&
+          permit.product.toLowerCase() === product.toLowerCase()) {
+        allocation = {
+          ...permit,
+          id: child.key
+        };
+      }
+    });
+    
+    return allocation;
+  } catch (error) {
+    console.error('Error checking permit allocation:', error);
+    return null;
+  }
+};
+
+// Add cleanup function for zero-quantity allocations
+export const cleanupZeroQuantityAllocations = async (db: Database) => {
+  try {
+    const allocRef = ref(db, 'permitPreAllocations');
+    const snapshot = await get(allocRef);
+    
+    if (!snapshot.exists()) return;
+    
+    const updates: { [key: string]: null } = {};
+    let cleanupCount = 0;
+    
+    snapshot.forEach((child) => {
+      const allocation = child.val();
+      if (allocation.quantity === 0 || !allocation.quantity) {
+        updates[`permitPreAllocations/${child.key}`] = null;
+        cleanupCount++;
+      }
+    });
+    
+    if (cleanupCount > 0) {
+      await update(ref(db), updates);
+      console.log(`Cleaned up ${cleanupCount} zero-quantity allocations`);
+    }
+    
+    return cleanupCount;
+  } catch (error) {
+    console.error('Error cleaning up zero-quantity allocations:', error);
     throw error;
   }
 };

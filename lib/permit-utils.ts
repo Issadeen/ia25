@@ -44,36 +44,42 @@ export const preAllocatePermitEntry = async (
 };
 
 export const getPreAllocatedPermit = async (
-  db: Database,
+  db: Database, 
   truckNumber: string,
-  destination?: string // Add optional destination parameter
-): Promise<PermitPreAllocation | null> => {
+  destination: string,
+  product: string
+) => {
   try {
-    const preAllocationsRef = ref(db, 'permitPreAllocations');
-    const snapshot = await get(preAllocationsRef);
-
+    const permitRef = ref(db, 'permitPreAllocations');
+    const snapshot = await get(permitRef);
+    
     if (!snapshot.exists()) return null;
 
-    let preAllocation: PermitPreAllocation | null = null;
+    const now = new Date();
+    const threeDaysAgo = new Date();
+    threeDaysAgo.setDate(now.getDate() - 3);
+    
+    let validPermit = null;
     snapshot.forEach((child) => {
-      const data = child.val() as PermitPreAllocation;
-      // If destination is specified, match both truck and destination
-      // Otherwise just match the truck (backward compatibility)
-      if ((data.truckNumber === truckNumber) && 
-          (!data.used) && 
-          (!destination || data.destination === destination)) {
-        preAllocation = {
-          ...data,
-          id: child.key!
+      const permit = child.val();
+      const permitDate = new Date(permit.allocatedAt);
+      
+      if (permit.truckNumber === truckNumber && 
+          !permit.used &&
+          permitDate > threeDaysAgo &&
+          permit.destination?.toLowerCase() === destination.toLowerCase() &&
+          permit.product.toLowerCase() === product.toLowerCase()) {
+        validPermit = {
+          ...permit,
+          id: child.key
         };
-        return true; // Exit the loop
       }
     });
-
-    return preAllocation;
+    
+    return validPermit;
   } catch (error) {
     console.error('Error getting pre-allocated permit:', error);
-    throw error;
+    return null;
   }
 };
 

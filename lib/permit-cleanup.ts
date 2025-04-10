@@ -210,3 +210,35 @@ export const validateLoadedTrucks = async (db: Database) => {
     throw error;
   }
 };
+
+export const cleanupZeroQuantityAllocations = async (db: Database) => {
+  try {
+    const allocRef = ref(db, 'permitPreAllocations');
+    const snapshot = await get(allocRef);
+    
+    if (!snapshot.exists()) {
+      return 0;
+    }
+    
+    const updates: { [key: string]: null } = {};
+    let cleanupCount = 0;
+    
+    snapshot.forEach((child) => {
+      const allocation = child.val();
+      if (!allocation.quantity || allocation.quantity <= 0) {
+        updates[`permitPreAllocations/${child.key}`] = null;
+        cleanupCount++;
+      }
+    });
+    
+    if (cleanupCount > 0) {
+      await update(ref(db), updates);
+      console.log(`[Permit Cleanup] Removed ${cleanupCount} zero-quantity allocations`);
+    }
+    
+    return cleanupCount;
+  } catch (error) {
+    console.error('[Permit Cleanup] Error cleaning up zero-quantity allocations:', error);
+    throw error;
+  }
+};

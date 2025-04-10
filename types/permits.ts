@@ -26,6 +26,7 @@ export interface PermitAllocation {
 }
 
 export interface PreAllocation {
+  timestamp: any;
   id: string;
   truckNumber: string;
   product: string;

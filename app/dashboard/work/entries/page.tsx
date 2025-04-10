@@ -53,9 +53,30 @@ import { validateAllocation } from '@/lib/validation'
 import { confirmDialog } from "@/components/ui/confirm-dialog"
 import { reminderService } from '@/lib/reminders'
 import { StockItem } from '@/types/stock';
-import { Entry } from "@/types/entries"
+import { Entry as EntryType } from "@/types/entries"
+
+interface Entry {
+  usedBy: {
+    truckNumber: string;
+    quantity: number;
+  }[];
+  key: string;
+  motherEntry?: string;
+  truckNumber?: string;
+  subtractedQuantity: number;
+  permitNumber?: string | null;
+  number: string;
+  initialQuantity: number;
+  remainingQuantity: number;
+  destination: string;
+  product: string;
+  product_destination: string;
+  timestamp: number;
+  status?: string;
+}
 import { getPreAllocatedPermit, markPermitAsUsed } from '@/lib/permit-utils';
 import { useProfileImage } from '@/hooks/useProfileImage'
+import { Badge } from "@/components/ui/badge"
 
 const WARNING_TIMEOUT = 9 * 60 * 1000; // 9 minutes
 const LOGOUT_TIMEOUT = 10 * 60 * 1000; // 10 minutes
@@ -145,6 +166,22 @@ interface EditingUsage {
   originalVolume: number;
 }
 
+interface EntryData {
+  key: string;
+  motherEntry: string;
+  initialQuantity: number;
+  remainingQuantity: number;
+  truckNumber?: string;
+  destination: string;
+  subtractedQuantity: number;
+  status?: string;
+  number: string;
+  product: string;
+  product_destination: string;
+  timestamp: number;
+  permitNumber?: string;
+}
+
 export default function EntriesPage() {
   const highlightText = useCallback((text: string, filter: string) => {
     if (!filter) return text;
@@ -174,21 +211,7 @@ export default function EntriesPage() {
     at20Quantity: ''
   })
   const [entriesUsedInPermits, setEntriesUsedInPermits] = useState<Entry[]>([])
-  interface Entry {
-    key: string;
-    motherEntry: string;
-    initialQuantity: number;
-    remainingQuantity: number;
-    truckNumber?: string;
-    destination: string;
-    subtractedQuantity: number;
-    status?: string;
-    number: string;
-    product: string;
-    product_destination: string;
-    timestamp: number;
-    permitNumber?: string;
-  }
+  const [permitAllocation, setPermitAllocation] = useState<any>(null);
 
   const [entriesData, setEntriesData] = useState<Entry[]>([])
   const [isLoading, setIsLoading] = useState(false)
@@ -196,18 +219,8 @@ export default function EntriesPage() {
   const [showSummary, setShowSummary] = useState(false)
   const [showUsage, setShowUsage] = useState(false)
   const [summaryData, setSummaryData] = useState<Summary[]>([])
-  interface UsageEntry {
-    key: string;
-    number: string;
-    initialQuantity: number;
-    remainingQuantity: number;
-    product: string;
-    destination: string;
-    usedBy: { truckNumber: string; quantity: number }[];
-    timestamp: number;
-  }
 
-  const [usageData, setUsageData] = useState<UsageEntry[]>([])
+  const [usageData, setUsageData] = useState<Entry[]>([])
   const [usageFilters, setUsageFilters] = useState({
     entryNumber: '',
     product: '',
@@ -301,7 +314,7 @@ export default function EntriesPage() {
     return email.toLowerCase().replace(/[@.]/g, '_') + '_com.jpg'
   }
 
-  const filterUsageData = (data: UsageEntry[]) => {
+  const filterUsageData = (data: Entry[]) => {
     return data.filter(entry => {
       const matchesEntry = entry.number.toLowerCase().includes(usageFilters.entryNumber.toLowerCase());
       const matchesProduct = entry.product.toLowerCase().includes(usageFilters.product.toLowerCase());
@@ -672,67 +685,150 @@ export default function EntriesPage() {
   };
 
   const fetchAvailableEntries = async (product: string, destination: string) => {
-    const db = getDatabase()
+    const db = getDatabase();
     try {
-      const snapshot = await get(dbRef(db, 'tr800'))
-      if (snapshot.exists()) {
-        const entries = Object.entries(snapshot.val())
-          .map(([key, value]: [string, any]) => ({
-            key,
-            ...value
-          }))
-          .filter(entry => 
-            entry.product.toLowerCase() === product.toLowerCase() &&
-            entry.destination.toLowerCase() === destination.toLowerCase() &&
-            entry.remainingQuantity > 0
-          )
-          .sort((a, b) => a.timestamp - b.timestamp)
+      if (!product || !destination) {
+        console.warn('Missing product or destination:', { product, destination });
+        setAvailableEntries([]);
+        addNotification(
+          "Invalid Parameters",
+          "Product and destination are required",
+          "error"
+        );
+        return;
+      }
 
-        let usedEntries: { [key: string]: string } = {};
+      console.log('Fetching entries for:', { product, destination });
+      
+      const snapshot = await get(dbRef(db, 'tr800'));
+      if (!snapshot.exists()) {
+        setAvailableEntries([]);
+        addNotification(
+          "No Data",
+          "No entries found in database",
+          "warning"
+        );
+        return;
+      }
+
+      const entries: Entry[] = [];
+      
+      snapshot.forEach((childSnapshot) => {
+        const data = childSnapshot.val();
+        const key = childSnapshot.key;
         
-        const permitAllocationsRef = dbRef(db, 'permitPreAllocations');
-        const permitAllocationsSnapshot = await get(permitAllocationsRef);
-        
-        if (permitAllocationsSnapshot.exists()) {
-          permitAllocationsSnapshot.forEach((childSnapshot) => {
-            const allocation = childSnapshot.val();
-            if (allocation.used && 
-                allocation.permitEntryId && 
-                allocation.destination.toLowerCase() === destination.toLowerCase()) {
-              usedEntries[allocation.permitEntryId] = allocation.truckNumber;
-            }
+        // Skip invalid entries
+        if (!data || !key || !data.product || !data.destination) {
+          console.warn('Invalid entry found:', { key, data });
+          return;
+        }
+
+        // Safely access properties with null checks
+        const entryProduct = String(data.product).toLowerCase();
+        const entryDestination = String(data.destination).toLowerCase();
+        const remainingQuantity = Number(data.remainingQuantity) || 0;
+
+        if (
+          entryProduct === product.toLowerCase() &&
+          entryDestination === destination.toLowerCase() &&
+          remainingQuantity > 0
+        ) {
+          entries.push({
+            key,
+            ...data,
+            // Ensure all required properties have default values
+            number: data.number || '',
+            initialQuantity: Number(data.initialQuantity) || 0,
+            remainingQuantity,
+            destination: data.destination,
+            product: data.product,
+            product_destination: `${data.product}-${data.destination}`,
+            timestamp: Number(data.timestamp) || Date.now(),
+            permitNumber: data.permitNumber || null
           });
         }
-        
-        const entriesWithUsageInfo = entries.map(entry => ({
-          ...entry,
-          usedByTruck: usedEntries[entry.key] || null
-        }));
+      });
 
-        setAvailableEntries(entriesWithUsageInfo)
-        
-        if (entries.length > 0) {
-          addNotification(
-            "Entries Found",
-            `Found ${entries.length} available entries for ${product.toUpperCase()} to ${destination.toUpperCase()}`,
-            "info"
-          )
-        } else {
-          addNotification(
-            "No Entries Available",
-            `No entries found for ${product.toUpperCase()} to ${destination.toUpperCase()}`,
-            "error"
-          )
-        }
+      // Sort entries by timestamp
+      entries.sort((a, b) => a.timestamp - b.timestamp);
+
+      setAvailableEntries(entries);
+      
+      if (entries.length > 0) {
+        addNotification(
+          "Entries Found",
+          `Found ${entries.length} entries for ${product.toUpperCase()} to ${destination.toUpperCase()}`,
+          "info"
+        );
+      } else {
+        addNotification(
+          "No Entries",
+          `No available entries found for ${product.toUpperCase()} to ${destination.toUpperCase()}`,
+          "warning"
+        );
       }
+
     } catch (error) {
+      console.error('Error fetching entries:', error);
+      setAvailableEntries([]);
       addNotification(
         "Error",
-        "Failed to fetch available entries",
+        "Failed to fetch available entries. Please try again.",
         "error"
-      )
+      );
     }
-  }
+  };
+
+  const checkPermitAllocation = useCallback(async () => {
+    if (!truckNumber || !destination || !product) return;
+
+    const db = getDatabase();
+    try {
+      interface PermitAllocation {
+        permitNumber?: string;
+        permitEntryId: string;
+      }
+      
+      const permit = await getPreAllocatedPermit(db, truckNumber, destination, product) as PermitAllocation | null;
+      setPermitAllocation(permit);
+      
+      if (permit) {
+        addNotification(
+          "Permit Found",
+          `Found pre-allocated permit for ${destination.toUpperCase()}. Using permit entry ${permit.permitNumber || 'unknown'}`,
+          "info"
+        );
+        setEntryUsedInPermit(permit.permitEntryId);
+      }
+    } catch (error) {
+      console.error('Error checking permit:', error);
+    }
+  }, [truckNumber, destination, product]);
+
+  useEffect(() => {
+    if (product && destination) {
+      console.log('Triggering entry fetch:', { product, destination });
+      fetchAvailableEntries(product, destination).catch(error => {
+        console.error('Effect error:', error);
+        setAvailableEntries([]); // Reset entries on error
+        addNotification(
+          "Error",
+          "Failed to fetch entries. Will retry shortly.",
+          "error"
+        );
+        
+        // Retry after delay
+        const retryTimer = setTimeout(() => {
+          fetchAvailableEntries(product, destination);
+        }, 2000);
+
+        return () => clearTimeout(retryTimer);
+      });
+    } else {
+      setAvailableEntries([]);
+      setSelectedEntries([]);
+    }
+  }, [product, destination]);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -851,18 +947,13 @@ export default function EntriesPage() {
   }, [product, destination])
 
   useEffect(() => {
-    if (product) {
-      const needsPermitEntry = destination.toLowerCase() === 'ssd' || 
-                              destination.toLowerCase() === 'drc';
-      
-      if (needsPermitEntry) {
-        fetchEntriesUsedInPermits(product, destination.toLowerCase());
-      } else {
-        setAvailablePermitEntries([]);
-        setEntryUsedInPermit('');
-      }
+    if (destination.toLowerCase() === 'ssd' || destination.toLowerCase() === 'drc') {
+      checkPermitAllocation();
+    } else {
+      setPermitAllocation(null);
+      setEntryUsedInPermit('');
     }
-  }, [product, destination])
+  }, [truckNumber, destination, product, checkPermitAllocation]);
 
   useEffect(() => {
     const checkReminders = async () => {
@@ -1073,7 +1164,10 @@ export default function EntriesPage() {
           throw new Error("Selected permit entry not found");
         }
       
-        const permitEntry = { key: permitEntrySnapshot.key, ...permitEntrySnapshot.val() };
+        const permitEntry = { 
+          key: permitEntrySnapshot.key, 
+          ...permitEntrySnapshot.val() 
+        } as Entry;
         let remainingToAllocate = requiredQuantity;
       
         tempOriginalData[permitEntry.key] = { ...permitEntry };
@@ -1097,7 +1191,8 @@ export default function EntriesPage() {
           number: permitEntry.number,
           product,
           product_destination: `${product}-${destination}`,
-          timestamp: Date.now()
+          timestamp: Date.now(),
+          usedBy: []
         });
       
         remainingToAllocate -= permitAllocation;
@@ -1130,7 +1225,8 @@ export default function EntriesPage() {
               number: entry.number,
               product,
               product_destination: `${product}-${destination}`,
-              timestamp: Date.now()
+              timestamp: Date.now(),
+              usedBy: []
             });
             
             remainingToAllocate -= toAllocate;
@@ -1167,7 +1263,8 @@ export default function EntriesPage() {
             number: entry.number,
             product,
             product_destination: `${product}-${destination}`,
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            usedBy: []
           });
           
           remainingToAllocate -= toAllocate;
@@ -1178,7 +1275,7 @@ export default function EntriesPage() {
         }
       }
   
-      const truckEntryKey = `${truckNumber.replace(/\//g, '-')}-${destination}${product}`.toUpperCase();
+      const truckEntryKey = `${truckNumber.replace(/\//g, '-')}-${destination}${entriesData[0].product}`.toUpperCase();
   
       for (const allocation of allocations) {
         const truckEntryData = {
@@ -1358,19 +1455,20 @@ export default function EntriesPage() {
         )
         return
       }
-  
-      let truckEntriesSnapshot;
+
+      let truckEntriesData = null;
       try {
-        truckEntriesSnapshot = await get(dbRef(db, 'truckEntries'))
+        const truckEntriesSnapshot = await get(dbRef(db, 'truckEntries'))
+        truckEntriesData = truckEntriesSnapshot.exists() ? truckEntriesSnapshot : null;
       } catch (error) {
-        truckEntriesSnapshot = null
+        console.error('Error fetching truck entries:', error);
       }
-  
-      let entries: UsageEntry[] = []
+
+      let entries: Entry[] = []
       const truckUsageMap: { [key: string]: { truckNumber: string; quantity: number }[] } = {}
-  
-      if (truckEntriesSnapshot && truckEntriesSnapshot.exists()) {
-        truckEntriesSnapshot.forEach((truckSnapshot) => {
+
+      if (truckEntriesData && truckEntriesData.exists()) {
+        truckEntriesData.forEach((truckSnapshot) => {
           const truckNumber = truckSnapshot.key?.replace(/-/g, '/') || 'Unknown'
           const truckData = truckSnapshot.val()
           
@@ -1387,7 +1485,7 @@ export default function EntriesPage() {
           })
         })
       }
-  
+
       tr800Snapshot.forEach((childSnapshot) => {
         const data = childSnapshot.val()
         if (data) {
@@ -1399,11 +1497,15 @@ export default function EntriesPage() {
             product: data.product || '',
             destination: data.destination || '',
             usedBy: truckUsageMap[data.number] || [],
-            timestamp: data.timestamp || Date.now()
+            timestamp: data.timestamp || Date.now(),
+            permitNumber: data.permitNumber || null,
+            subtractedQuantity: 0,
+            product_destination: ""
           })
         }
       })
 
+      // Filter and sort entries based on advanced filters
       const filteredEntries = entries.filter(entry => {
         if (advancedFilters.minQuantity && entry.remainingQuantity < parseFloat(advancedFilters.minQuantity)) return false;
         if (advancedFilters.maxQuantity && entry.remainingQuantity > parseFloat(advancedFilters.maxQuantity)) return false;
@@ -1432,7 +1534,7 @@ export default function EntriesPage() {
       setUsageData(entries)
       setShowUsage(true)
       setShowSummary(false)
-  
+
     } catch (error) {
       addNotification(
         "Error",
@@ -1963,7 +2065,17 @@ export default function EntriesPage() {
                     <TableBody>
                       {filterUsageData(usageData).map((entry, index) => (
                         <TableRow key={index}>
-                          <TableCell>{highlightText(entry.number, usageFilters.entryNumber)}</TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-2">
+                              {highlightText(entry.number, usageFilters.entryNumber)}
+                              {entry.permitNumber && (
+                                <Badge variant="outline" className="bg-blue-100/50 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300">
+                                  <Receipt className="h-3 w-3 mr-1" />
+                                  Permit
+                                </Badge>
+                              )}
+                            </div>
+                          </TableCell>
                           <TableCell>{entry.initialQuantity}</TableCell>
                           <TableCell>
                             {editMode === entry.key ? (
@@ -2289,7 +2401,9 @@ export default function EntriesPage() {
               />
             </div>
 
-            {(destination.toLowerCase() === 'ssd' || destination.toLowerCase() === 'drc') && (
+            {renderPermitInfo()}
+
+            {(destination.toLowerCase() === 'ssd' || destination.toLowerCase() === 'drc') && !permitAllocation && (
               <div className="mt-4">
                 <Label htmlFor="permitEntry" className="block text-sm font-medium mb-2">
                   Select Permit Entry (Required for {destination.toUpperCase()})
@@ -2309,11 +2423,6 @@ export default function EntriesPage() {
                     ))}
                   </SelectContent>
                 </Select>
-                {!entryUsedInPermit && (
-                  <p className="mt-2 text-sm text-red-500">
-                    Please select a permit entry for {destination.toUpperCase()} allocation
-                  </p>
-                )}
               </div>
             )}
 
@@ -2556,7 +2665,15 @@ export default function EntriesPage() {
           {availableEntries.map((entry) => (
             <div key={entry.key} className="p-4 border rounded-lg bg-card">
               <div className="flex items-center justify-between mb-2">
-                <div className="font-medium">{entry.number}</div>
+                <div className="font-medium flex items-center gap-2">
+                  {entry.number}
+                  {entry.permitNumber && (
+                    <Badge variant="outline" className="bg-blue-100/50 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300">
+                      <Receipt className="h-3 w-3 mr-1" />
+                      Permit Entry
+                    </Badge>
+                  )}
+                </div>
                 <div className="text-sm text-muted-foreground">
                   Available: {entry.remainingQuantity.toLocaleString()} liters
                 </div>
@@ -2652,7 +2769,9 @@ export default function EntriesPage() {
           number: entry.number,
           product,
           product_destination: `${product}-${destination}`,
-          timestamp: Date.now()
+          timestamp: Date.now(),
+          usedBy: [],
+          permitNumber: entry.permitNumber || null
         });
       }
   
@@ -2879,6 +2998,41 @@ export default function EntriesPage() {
 
     setEditingAllocation(null);
     setEditConfirmOpen(false);
+  };
+
+  const renderPermitInfo = () => {
+    if (!permitAllocation) return null;
+    
+    return (
+      <div className="mt-4 p-4 bg-blue-50/50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
+        <div className="flex items-center justify-between">
+          <div className="text-sm">
+            <span className="font-medium">Pre-allocated Permit: </span>
+            <Badge variant="outline" className="ml-2 bg-blue-100/50 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300">
+              {permitAllocation.permitNumber}
+            </Badge>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              setEntryUsedInPermit('');
+              setPermitAllocation(null);
+              addNotification(
+                "Permit Cleared",
+                "You can now select a different permit entry",
+                "info"
+              );
+            }}
+          >
+            Change Entry
+          </Button>
+        </div>
+        <p className="text-sm text-muted-foreground mt-2">
+          This truck has a pre-allocated permit that will be used automatically
+        </p>
+      </div>
+    );
   };
 
   return (
