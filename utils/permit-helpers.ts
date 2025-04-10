@@ -2,6 +2,7 @@ import { Database, ref, get, update } from 'firebase/database';
 import type { PermitEntry, PreAllocation } from '@/types/permits';
 
 export interface EntryAllocation {
+  allocatedVolume: number;
   entry: PermitEntry;
   quantity: number;
 }
@@ -61,8 +62,9 @@ export const findAvailablePermitEntries = async (
 
     if (allocationQuantity > 0) {
       allocations.push({
-        entry,
-        quantity: allocationQuantity
+          entry,
+          quantity: allocationQuantity,
+          allocatedVolume: 0
       });
       remainingQuantity -= allocationQuantity;
     }

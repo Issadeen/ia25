@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth/next';
-import { authOptions } from '@/app/api/auth/[...nextauth]/route';
+import { authOptions } from '@/lib/auth'; // Updated import path
 import { getDatabase } from 'firebase/database';
 import { ensureEntryInAllocations, syncAllocationsToEntriesDb } from '@/lib/allocation-sync';
 import { database } from '@/lib/firebase'; // Fixed: imported database instead of initFirebase

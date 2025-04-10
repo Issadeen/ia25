@@ -7,7 +7,7 @@ import { getDatabase, ref, onValue, get, update } from 'firebase/database'
 import { useSession } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
-import { ArrowLeft, RefreshCw, Copy, Circle, Save, Loader2, Edit } from 'lucide-react'
+import { ArrowLeft, RefreshCw, Copy, Circle, Save, Loader2, Edit, Receipt } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -35,6 +35,7 @@ import { cleanupDuplicateAllocations, validateAllocations, cleanupZeroQuantityAl
 import { resetPermitSystem } from '@/lib/permit-reset';
 import { Badge } from '@/components/ui/badge'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Label } from '@/components/ui/label'
 
 interface WorkDetailWithPermit {
   id: string
@@ -50,6 +51,8 @@ interface WorkDetailWithPermit {
 }
 
 interface PermitEntry {
+  permitNumber: any
+  key: any
   id: string
   product: string
   destination: string
@@ -103,6 +106,9 @@ export default function PermitsPage() {
   const [loadedTrucks, setLoadedTrucks] = useState<LoadedTruckInfo[]>([]);
   const [showLoadedHistory, setShowLoadedHistory] = useState(false);
   const [destinationFilter, setDestinationFilter] = useState('ALL');
+  const [at20Quantity, setAt20Quantity] = useState<string>('');
+  const [selectedEntriesWithVolumes, setSelectedEntriesWithVolumes] = useState<EntryAllocation[]>([]);
+  const [permitAllocation, setPermitAllocation] = useState<PermitAllocation | null>(null);
 
   // Add title click handler
   const handleTitleClick = () => {
@@ -113,6 +119,75 @@ export default function PermitsPage() {
     } else {
       setTitleClickCount(newCount);
     }
+  };
+
+  const renderManualAllocationContent = () => {
+    const requiredQuantity = parseFloat(at20Quantity || '0');
+    const totalAllocated = selectedEntriesWithVolumes.reduce((sum, item) => sum + item.allocatedVolume, 0);
+    const remaining = requiredQuantity - totalAllocated;
+
+    return (
+      <div className="mt-6">
+        <div className="flex justify-between items-center mb-4">
+          <Label className="text-lg font-semibold">Available Entries:</Label>
+          <div className="text-sm text-muted-foreground">
+            Required: {requiredQuantity.toLocaleString()} liters
+            <br />
+            Remaining: <span className={remaining > 0 ? 'text-yellow-600' : remaining < 0 ? 'text-red-600' : 'text-green-600'}>
+              {remaining.toLocaleString()} liters
+            </span>
+          </div>
+        </div>
+
+        {permitAllocation && (
+          <div className="mb-4 p-4 bg-blue-50/50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
+            <div className="flex items-center justify-between">
+              <div className="text-sm">
+                <span className="font-medium">Pre-allocated Permit: </span>
+                <Badge variant="outline" className="ml-2 bg-blue-100/50 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300">
+                  {permitAllocation.permitNumber}
+                </Badge>
+              </div>
+            </div>
+            <p className="text-sm text-muted-foreground mt-2">
+              Please prioritize allocating from this permit entry first
+            </p>
+          </div>
+        )}
+
+        <div className="space-y-4 mt-2">
+          {availableEntries.map((entry) => {
+            const isPermitEntry = permitAllocation && entry.key === permitAllocation.permitEntryId;
+            
+            return (
+              <div 
+                key={entry.key} 
+                className={cn(
+                  "p-4 border rounded-lg bg-card",
+                  isPermitEntry && "border-blue-200 dark:border-blue-800 bg-blue-50/50 dark:bg-blue-900/20"
+                )}
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <div className="font-medium flex items-center gap-2">
+                    {entry.number}
+                    {entry.permitNumber && (
+                      <Badge variant="outline" className="bg-blue-100/50 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300">
+                        <Receipt className="h-3 w-3 mr-1" />
+                        {isPermitEntry ? "Pre-allocated Permit Entry" : "Permit Entry"}
+                      </Badge>
+                    )}
+                  </div>
+                  <div className="text-sm text-muted-foreground">
+                    Available: {entry.remainingQuantity.toLocaleString()} liters
+                  </div>
+                </div>
+                {/* ... rest of entry content ... */}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
   };
 
   useEffect(() => {

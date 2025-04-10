@@ -14,6 +14,7 @@ export interface PermitEntry {
 }
 
 export interface PermitAllocation {
+  permitEntryId: any;
   used: any;
   allocatedAt: string | number | Date;
   permitNumber: any;
