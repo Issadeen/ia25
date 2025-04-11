@@ -42,6 +42,10 @@ export default function GatePassPage() {
   const [sessionWarningShown, setSessionWarningShown] = useState(false);
   const [isUserActive, setIsUserActive] = useState(true);
 
+  // Add new state
+  const [isUnpaidGatePass, setIsUnpaidGatePass] = useState(false)
+  const [isUnloadedGatePass, setIsUnloadedGatePass] = useState(false)
+
   // Update countdown effect with fixed redirect handling
   useEffect(() => {
     if (!isApproved) return;
@@ -229,13 +233,16 @@ export default function GatePassPage() {
       const approval = snapshot.val()
       if (approval.status === 'approved') {
         setIsApproved(true)
+        // Check if this is an unloaded or unpaid gate pass
+        setIsUnloadedGatePass(searchParams.get('isUnloadedGatePass') === 'true')
+        setIsUnpaidGatePass(searchParams.get('isUnpaidGatePass') === 'true')
       } else if (approval.status === 'rejected') {
         router.push('/dashboard/work/orders')
       }
     })
 
     return () => unsubscribe()
-  }, [approvalId, router])
+  }, [approvalId, router, searchParams])
 
   if (!mounted || isLoading) {
     return (
@@ -280,9 +287,21 @@ export default function GatePassPage() {
             >
               <ArrowLeft className="h-5 w-5" />
             </Button>
-            <h1 className="text-xl font-semibold bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">
-              Gate Pass Generator
-            </h1>
+            <div className="flex flex-col gap-1">
+              <h1 className="text-xl font-semibold bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">
+                Gate Pass Generator
+              </h1>
+              {isUnloadedGatePass && (
+                <Badge variant="destructive" className="mt-1">
+                  Unloaded Gate Pass
+                </Badge>
+              )}
+              {isUnpaidGatePass && (
+                <Badge variant="secondary" className="mt-1 bg-amber-100 text-amber-700 hover:bg-amber-100/80">
+                  Unpaid Gate Pass
+                </Badge>
+              )}
+            </div>
           </div>
           {/* Right side */}
           <div className="flex items-center gap-4">

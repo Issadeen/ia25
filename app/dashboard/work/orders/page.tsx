@@ -1551,18 +1551,24 @@ const handleGenerateGatePass = async (detail: WorkDetail) => {
   }
 
   try {
+    // Add warning for unpaid loaded gate pass
+    if (detail.loaded && !detail.paid) {
+      const confirmUnpaid = confirm(
+        "WARNING: You are generating a gate pass for an unpaid loaded truck. This should only be done with proper authorization. Continue?"
+      );
+      if (!confirmUnpaid) return;
+    }
+
     // For regeneration or when driver info exists
     if (detail.gatePassGenerated || detail.driverPhone) {
       const approvalId = await requestGatePassApproval(detail);
       if (approvalId) {
-        // Instead of navigating directly, wait for approval
         setIsAwaitingApproval(true);
         toast({
           title: "Approval Requested",
           description: "Please wait for approval to generate gate pass",
         });
 
-        // Add URL parameters
         const params = new URLSearchParams({
           orderNo: detail.orderno,
           destination: detail.destination,
@@ -1571,9 +1577,13 @@ const handleGenerateGatePass = async (detail: WorkDetail) => {
           quantity: detail.quantity.toString(),
           at20: detail.at20 || '',
           isLoaded: detail.loaded ? 'true' : 'false',
-          approvalId: approvalId // Add approval ID to params
+          isPaid: detail.paid ? 'true' : 'false',
+          approvalId: approvalId,
+          isUnloadedGatePass: (!detail.loaded).toString(),
+          isUnpaidGatePass: ((detail.loaded && !detail.paid) ?? false).toString()
         });
 
+        // Add URL parameters
         if (detail.driverPhone) {
           params.append('driverPhone', detail.driverPhone);
         }
@@ -2599,47 +2609,50 @@ const showTruckQuickView = (detail: WorkDetail) => {
                                               Sync Payment Status
                                             </DropdownMenuItem>
 
-                                            {/* Gate Pass Generation - Only show if paid */}
-                                            {detail.paid && (
-                                              !detail.gatePassGenerated ? (
-                                                <DropdownMenuItem 
-                                                  onClick={() => handleGenerateGatePass(detail)}
-                                                  disabled={isAwaitingApproval}
-                                                  className="relative"
-                                                >
-                                                  <FileText className="mr-2 h-4 w-4" />
-                                                  {isAwaitingApproval ? (
-                                                    <div className="flex items-center gap-2">
-                                                      <span className="text-amber-600">Awaiting Approval</span>
-                                                      <span className="text-xs text-muted-foreground">
-                                                        ({approvalCountdown}s)
-                                                      </span>
-                                                      <Loader2 className="h-3 w-3 animate-spin ml-auto text-amber-600" />
-                                                    </div>
+                                            {/* Gate Pass Generation */}
+                                            {detail.loaded && (
+                                              <>
+                                                {detail.paid ? (
+                                                  !detail.gatePassGenerated ? (
+                                                    <DropdownMenuItem 
+                                                      onClick={() => handleGenerateGatePass(detail)}
+                                                      disabled={isAwaitingApproval}
+                                                      className="relative"
+                                                    >
+                                                      <FileText className="mr-2 h-4 w-4" />
+                                                      {isAwaitingApproval ? (
+                                                        <div className="flex items-center gap-2">
+                                                          <span className="text-amber-600">Awaiting Approval</span>
+                                                          <span className="text-xs text-muted-foreground">
+                                                            ({approvalCountdown}s)
+                                                          </span>
+                                                          <Loader2 className="h-3 w-3 animate-spin ml-auto text-amber-600" />
+                                                        </div>
+                                                      ) : (
+                                                        "Generate Gate Pass"
+                                                      )}
+                                                    </DropdownMenuItem>
                                                   ) : (
-                                                    "Generate Gate Pass"
-                                                  )}
-                                                </DropdownMenuItem>
-                                              ) : (
-                                                <DropdownMenuItem 
-                                                  onClick={() => handleGenerateGatePass(detail)}
-                                                  disabled={isAwaitingApproval}
-                                                  className="relative"
-                                                >
-                                                  <FileText className="mr-2 h-4 w-4" />
-                                                  {isAwaitingApproval ? (
-                                                    <div className="flex items-center gap-2">
-                                                      <span className="text-amber-600">Awaiting Approval</span>
-                                                      <span className="text-xs text-muted-foreground">
-                                                        ({approvalCountdown}s)
-                                                      </span>
-                                                      <Loader2 className="h-3 w-3 animate-spin ml-auto text-amber-600" />
-                                                    </div>
-                                                  ) : (
-                                                    "Regenerate Gate Pass"
-                                                  )}
-                                                </DropdownMenuItem>
-                                              )
+                                                    <DropdownMenuItem 
+                                                      onClick={() => handleGenerateGatePass(detail)}
+                                                      disabled={isAwaitingApproval}
+                                                      className="relative"
+                                                    >
+                                                      <FileText className="mr-2 h-4 w-4" />
+                                                      Regenerate Gate Pass
+                                                    </DropdownMenuItem>
+                                                  )
+                                                ) : (
+                                                  <DropdownMenuItem 
+                                                    onClick={() => handleGenerateGatePass(detail)}
+                                                    disabled={isAwaitingApproval}
+                                                    className="relative text-amber-600 hover:text-amber-700"
+                                                  >
+                                                    <FileText className="mr-2 h-4 w-4" />
+                                                    Generate Unpaid Gate Pass
+                                                  </DropdownMenuItem>
+                                                )}
+                                              </>
                                             )}
                                           </>
                                         )}
