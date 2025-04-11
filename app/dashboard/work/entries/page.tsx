@@ -74,6 +74,13 @@ interface Entry {
   timestamp: number;
   status?: string;
 }
+
+interface PermitInfo {
+  permitNumber: string;
+  permitEntryId: string;
+  destination: string;
+}
+
 import { getPreAllocatedPermit, markPermitAsUsed } from '@/lib/permit-utils';
 import { useProfileImage } from '@/hooks/useProfileImage'
 import { Badge } from "@/components/ui/badge"
@@ -197,6 +204,16 @@ export default function EntriesPage() {
     );
   }, []);
 
+  const getTruckCapacityText = (quantity: number, product: string) => {
+    const capacity = product.toLowerCase() === 'ago' ? 36000 : 40000;
+    const fullTrucks = Math.floor(quantity / capacity);
+    const remainder = quantity % capacity;
+    
+    if (remainder === 0) return `(${fullTrucks} trucks)`;
+    const partialTruck = Math.round((remainder / capacity) * 100);
+    return `(${fullTrucks} trucks + ${partialTruck}% truck)`;
+  };
+
   const searchParams = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '');
 
   const [mounted, setMounted] = useState(false)
@@ -211,7 +228,7 @@ export default function EntriesPage() {
     at20Quantity: ''
   })
   const [entriesUsedInPermits, setEntriesUsedInPermits] = useState<Entry[]>([])
-  const [permitAllocation, setPermitAllocation] = useState<any>(null);
+  const [permitAllocation, setPermitAllocation] = useState<PermitInfo | null>(null);
 
   const [entriesData, setEntriesData] = useState<Entry[]>([])
   const [isLoading, setIsLoading] = useState(false)
@@ -779,29 +796,37 @@ export default function EntriesPage() {
     }
   };
 
+  interface PermitAllocation {
+    permitNumber: string;
+    permitEntryId: string;
+  }
+  
   const checkPermitAllocation = useCallback(async () => {
-    if (!truckNumber || !destination || !product) return;
-
-    const db = getDatabase();
-    try {
-      interface PermitAllocation {
-        permitNumber?: string;
-        permitEntryId: string;
-      }
-      
-      const permit = await getPreAllocatedPermit(db, truckNumber, destination, product) as PermitAllocation | null;
-      setPermitAllocation(permit);
-      
-      if (permit) {
+      if (!truckNumber || !destination || !product) return;
+  
+      const db = getDatabase();
+      try {
+        const permit = await getPreAllocatedPermit(db, truckNumber, destination, product) as PermitAllocation | null;
+        if (permit && permit.permitNumber) {
+        setPermitAllocation({
+          permitNumber: permit.permitNumber,
+          permitEntryId: permit.permitEntryId,
+          destination: destination
+        });
+        
         addNotification(
           "Permit Found",
-          `Found pre-allocated permit for ${destination.toUpperCase()}. Using permit entry ${permit.permitNumber || 'unknown'}`,
+          `Found pre-allocated permit ${permit.permitNumber} for ${destination.toUpperCase()}`,
           "info"
         );
         setEntryUsedInPermit(permit.permitEntryId);
+      } else {
+        setPermitAllocation(null);
+        setEntryUsedInPermit('');
       }
     } catch (error) {
       console.error('Error checking permit:', error);
+      setPermitAllocation(null);
     }
   }, [truckNumber, destination, product]);
 
@@ -936,15 +961,6 @@ export default function EntriesPage() {
   useEffect(() => {
     setEntryUsedInPermit('')
   }, [destination])
-
-  useEffect(() => {
-    if (product && destination) {
-      fetchAvailableEntries(product, destination)
-    } else {
-      setAvailableEntries([])
-      setSelectedEntries([])
-    }
-  }, [product, destination])
 
   useEffect(() => {
     if (destination.toLowerCase() === 'ssd' || destination.toLowerCase() === 'drc') {
@@ -1275,7 +1291,7 @@ export default function EntriesPage() {
         }
       }
   
-      const truckEntryKey = `${truckNumber.replace(/\//g, '-')}-${destination}${entriesData[0].product}`.toUpperCase();
+      const truckEntryKey = `${truckNumber.replace(/\//g, '-')}-${destination}${product}`.toUpperCase();
   
       for (const allocation of allocations) {
         const truckEntryData = {
@@ -1578,7 +1594,7 @@ export default function EntriesPage() {
         updates[`tr800/${key}`] = originalData[key]
       }
   
-      const truckEntryKey = `${truckNumber.replace(/\//g, '-')}-${destination}${entriesData[0].product}`.toUpperCase()
+      const truckEntryKey = `${truckNumber.replace(/\//g, '-')}-${destination}${product}`.toUpperCase()
   
       const truckEntriesRef = dbRef(db, `truckEntries/${truckEntryKey}`)
       const truckEntriesSnapshot = await get(truckEntriesRef)
@@ -1659,6 +1675,19 @@ export default function EntriesPage() {
       }),
       ageInDays: diffDays
     };
+  };
+
+  const getEstimatedTrucksText = (remaining: number, product: string) => {
+    const capacity = product.toLowerCase() === 'ago' ? 36000 : 40000;
+    const fullTrucks = Math.floor(remaining / capacity);
+    const remainder = remaining % capacity;
+    
+    let text = `${fullTrucks} truck${fullTrucks !== 1 ? 's' : ''}`;
+    if (remainder > 0) {
+      const partialTruck = Math.round((remainder / capacity) * 100);
+      text += ` + ${partialTruck}% of a truck`;
+    }
+    return text;
   };
 
   const renderStockInfo = () => {
@@ -1859,7 +1888,7 @@ export default function EntriesPage() {
                     <TableRow className="border-b border-emerald-500/20">
                       <TableHead className="text-emerald-700 dark:text-emerald-400">Product - Destination</TableHead>
                       <TableHead className="text-emerald-700 dark:text-emerald-400">Remaining Quantity</TableHead>
-                      <TableHead className="text-emerald-700 dark:text-emerald-400">Estimated Trucks</TableHead>
+                      <TableHead className="text-emerald-700 dark:text-emerald-400">Truck Capacity</TableHead>
                       <TableHead className="text-emerald-700 dark:text-emerald-400">Mother Entries</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -1903,7 +1932,12 @@ export default function EntriesPage() {
                               )}
                             </TableCell>
                             <TableCell>{item.remainingQuantity.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</TableCell>
-                            <TableCell>{item.estimatedTrucks.toFixed(2)}</TableCell>
+                            <TableCell>
+                              {getEstimatedTrucksText(item.remainingQuantity, item.productDestination.split(' - ')[0])}
+                              <div className="text-xs text-muted-foreground">
+                                ({item.productDestination.split(' - ')[0].toUpperCase()}: {item.productDestination.split(' - ')[0].toLowerCase() === 'ago' ? '36K' : '40K'} per truck)
+                              </div>
+                            </TableCell>
                             <TableCell>
                               {item.motherEntries.map((entry, entryIndex) => (
                                 <div key={entryIndex} className="relative flex items-center group mb-2">
@@ -1922,7 +1956,9 @@ export default function EntriesPage() {
                                                   dark:group-hover:bg-emerald-900/20 px-2 py-1 rounded transition-colors">
                                       <span className="font-medium">
                                         {highlightText(
-                                          `${entry.number} (${entry.remainingQuantity.toLocaleString()})`,
+                                          `${entry.number} (${entry.remainingQuantity.toLocaleString()}) ${
+                                            getTruckCapacityText(entry.remainingQuantity, item.productDestination.split(' - ')[0])
+                                          }`,
                                           summarySearch
                                         )}
                                       </span>
@@ -1936,7 +1972,13 @@ export default function EntriesPage() {
                                     </div>
                                     <div className="text-xs text-muted-foreground px-2 space-y-1">
                                       <div>Created: {entry.creationDate}</div>
-                                      <div>Usage Count: {entry.usageCount} allocations</div>
+                                      <div>
+                                        Usage Count: {entry.usageCount} allocations 
+                                        <span className="mx-1">•</span>
+                                        <span className="text-muted-foreground/75">
+                                          {getTruckCapacityText(entry.remainingQuantity, item.productDestination.split(' - ')[0])}
+                                        </span>
+                                      </div>
                                       {entry.ageInDays > 30 && (
                                         <div className="text-red-500 dark:text-red-400">
                                           ⚠️ Aging entry - needs attention
@@ -2930,7 +2972,6 @@ export default function EntriesPage() {
 
   const handleEditAllocation = async (confirmed: boolean) => {
     if (!editingAllocation || !confirmed) {
-      setEditingAllocation(null);
       setEditConfirmOpen(false);
       return;
     }
