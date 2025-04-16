@@ -12,6 +12,7 @@ import { ref, get, set, onValue } from "firebase/database"
 import { useTheme } from 'next-themes' // Add this import
 import { toast } from "@/components/ui/use-toast" // Update this import
 import { useSearchParams } from 'next/navigation'
+import { cn } from "@/lib/utils"
 
 interface ProductDetail {
   productName: string;
@@ -56,6 +57,26 @@ const getTimeAgoString = (timestamp: number) => {
   } else {
     return `${diffInMinutes} minute${diffInMinutes > 1 ? 's' : ''} ago`;
   }
+};
+
+// Add the Watermark component
+const Watermark = () => {
+  const params = useSearchParams();
+  const isUnloaded = params.get('isUnloadedGatePass') === 'true';
+  const isUnpaid = params.get('isUnpaidGatePass') === 'true';
+
+  if (!isUnloaded && !isUnpaid) return null;
+
+  return (
+    <div className="absolute inset-0 flex items-center justify-center select-none pointer-events-none">
+      <div className={cn(
+        "text-[150px] font-bold opacity-5 rotate-[-45deg] whitespace-nowrap",
+        isUnloaded ? "text-red-500" : "text-amber-500"
+      )}>
+        {isUnloaded ? "UNLOADED GATE PASS" : "UNPAID GATE PASS"}
+      </div>
+    </div>
+  );
 };
 
 export function GatePassForm() {
@@ -610,6 +631,7 @@ export function GatePassForm() {
               preparedBy={formData.preparedBy || ''}
               authorizedBy={formData.authorizedBy || ''}
             />
+            <Watermark />
           </div>
     </div>
   )

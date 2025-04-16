@@ -220,11 +220,7 @@ export default function PermitsPage() {
     if (workDetailsRef.exists()) {
       const data = workDetailsRef.val();
       const pendingTrucks: ExtendedWorkDetail[] = [];
-      
-      // Track truck numbers that already have pre-allocations
       const preAllocatedTrucks: { [key: string]: string[] } = {};
-      
-      // Build a map of pre-allocated trucks by destination
       if (preAllocationsRef.exists()) {
         const preAllocations = preAllocationsRef.val();
         Object.values(preAllocations as PreAllocation[]).forEach((allocation: PreAllocation) => {
@@ -238,55 +234,62 @@ export default function PermitsPage() {
       }
 
       // Iterate through work details and check if they need permits
-      Object.entries(data).forEach(([id, workDetail]: [string, any]) => {
-        const detail = { id, ...workDetail } as ExtendedWorkDetail;
-        
-        // Remove the condition that excluded non-SSD destinations
+      for (const [id, workDetail] of Object.entries(data)) {
+        const detail = { id, ...(workDetail as object) } as ExtendedWorkDetail;
         const needsPermit = 
           !detail.loaded && 
           (detail.destination.toLowerCase() === 'ssd' || detail.destination.toLowerCase() === 'drc');
-        
-        // Check if this truck already has a pre-allocation for this destination
         const hasPreAllocation = preAllocatedTrucks[detail.truck_number]?.includes(detail.destination.toLowerCase());
-        
         if (needsPermit && !hasPreAllocation && detail.status === "queued") {
+          // Try auto-allocate immediately for queued trucks
+          try {
+            const requiredQuantity = parseFloat(detail.quantity) * 1000;
+            const availableAllocations = await findAvailablePermitEntries(
+              db,
+              detail.product,
+              requiredQuantity
+            );
+            if (availableAllocations.length > 0) {
+              await handleMultipleAllocations(detail, availableAllocations);
+              // Optionally, show a toast or notification here if needed
+              continue; // Already allocated, skip adding to pending
+            }
+          } catch (e) {
+            // Ignore allocation errors here, still add to pending
+          }
           pendingTrucks.push(detail);
         }
-      });
-      
+      }
       setPendingPermits(pendingTrucks);
     }
-  }
+  };
 
   const fetchAvailableEntries = async (product: string, quantity: number, destination: string = 'ssd') => {
     const db = getDatabase();
     const allocationsRef = ref(db, 'allocations');
-    
     try {
-      // Get allocations with correct destination
       const snapshot = await get(allocationsRef);
       if (snapshot.exists()) {
-        const allocations = Object.entries(snapshot.val())
+        const allEntries = Object.entries(snapshot.val())
           .map(([key, value]: [string, any]) => ({
             id: key,
             ...value,
           }))
-          .filter(entry => {
-            // Match entries by product, sufficient quantity and correct destination
-            return (
-              entry.product.toLowerCase() === product.toLowerCase() &&
-              entry.destination?.toLowerCase() === destination.toLowerCase() && // Match destination
-              entry.remainingQuantity >= quantity * 1000
-            );
-          })
-          .sort((a, b) => a.timestamp - b.timestamp);
-          
-        setAvailableEntries(allocations);
+          .filter(entry =>
+            entry.product.toLowerCase() === product.toLowerCase() &&
+            entry.destination?.toLowerCase() === destination.toLowerCase() &&
+            entry.remainingQuantity > 0
+          )
+          .sort((a, b) => b.remainingQuantity - a.remainingQuantity); // Sort by most volume first
+
+        // Always show exactly 2 entries if available
+        const selected = allEntries.slice(0, 2);
+        setAvailableEntries(selected);
       } else {
         setAvailableEntries([]);
       }
     } catch (error) {
-      console.error('Error fetching available entries:', error);
+      console.error('Error fetching entries:', error);
       toast({
         title: "Error",
         description: "Failed to fetch available entries",
@@ -317,7 +320,7 @@ export default function PermitsPage() {
       return;
     }
 
-    const permitEntries = permitEntryIds.map(id => 
+    const permitEntries = permitEntryIds.map(id =>
       availableEntries.find(e => e.id === id)
     ).filter((e): e is PermitEntry => e !== undefined);
 
@@ -334,10 +337,11 @@ export default function PermitsPage() {
     const requiredQuantity = parseFloat(workDetail.quantity) * 1000;
     const totalAvailable = permitEntries.reduce((sum, entry) => sum + entry.remainingQuantity, 0);
 
-    if (totalAvailable < requiredQuantity) {
+    // Only allow allocation if exactly 2 entries and their sum is enough
+    if (permitEntries.length !== 2 || totalAvailable < requiredQuantity) {
       toast({
         title: "Insufficient Quantity",
-        description: `Selected entries have insufficient quantity. Required: ${requiredQuantity}, Available: ${totalAvailable}`,
+        description: "Not enough volume in 2 entries. Please click Clean Up and try again.",
         variant: "destructive"
       });
       return;
@@ -347,11 +351,10 @@ export default function PermitsPage() {
     const db = getDatabase();
 
     try {
-      // Allocate from multiple entries
+      // Allocate from 2 entries
       let remainingToAllocate = requiredQuantity;
       for (const permitEntry of permitEntries) {
         const quantityFromThisEntry = Math.min(permitEntry.remainingQuantity, remainingToAllocate);
-        
         await preAllocatePermitEntry(
           db,
           workDetail.truck_number,
@@ -362,7 +365,6 @@ export default function PermitsPage() {
           workDetail.destination,
           quantityFromThisEntry
         );
-        
         remainingToAllocate -= quantityFromThisEntry;
         if (remainingToAllocate <= 0) break;
       }
@@ -387,8 +389,12 @@ export default function PermitsPage() {
 
       toast({
         title: "Success",
-        description: `Allocated ${permitEntries.length} permit entries for truck ${workDetail.truck_number}`,
+        description: `Allocated 2 permit entries for truck ${workDetail.truck_number}`,
       });
+
+      // Always run cleanup after allocation
+      await handleCleanup();
+
     } catch (error) {
       toast({
         title: "Error",
@@ -400,11 +406,73 @@ export default function PermitsPage() {
     }
   };
 
+  const handleMultipleAllocations = async (workDetail: ExtendedWorkDetail, allocations: EntryAllocation[]) => {
+    const db = getDatabase();
+    try {
+      // Always get exactly 2 entries
+      const selected = allocations.slice(0, 2);
+      const requiredQuantity = parseFloat(workDetail.quantity) * 1000;
+      
+      // Calculate total available volume
+      const totalAvailable = selected.reduce((sum, a) => sum + (a.quantity || 0), 0);
+      
+      // Only proceed if we have enough volume in exactly 2 entries
+      if (selected.length !== 2 || totalAvailable < requiredQuantity) {
+        console.log(`Insufficient volume: need ${requiredQuantity}, have ${totalAvailable}`);
+        return;
+      }
+
+      // Allocate from both entries
+      let remainingToAllocate = requiredQuantity;
+      for (const allocation of selected) {
+        if (!allocation.quantity || allocation.quantity <= 0) continue;
+        
+        const quantityFromThisEntry = Math.min(allocation.quantity, remainingToAllocate);
+        
+        try {
+          await preAllocatePermitEntry(
+            db,
+            workDetail.truck_number,
+            workDetail.product,
+            workDetail.owner,
+            allocation.entry.id,
+            allocation.entry.number,
+            workDetail.destination,
+            quantityFromThisEntry
+          );
+          remainingToAllocate -= quantityFromThisEntry;
+        } catch (error) {
+          console.error('Failed to allocate permit entry:', error);
+          throw error;
+        }
+      }
+
+      // Run cleanup after successful allocation
+      await handleCleanup();
+      
+    } catch (error) {
+      console.error('Multiple allocation error:', error);
+      throw error;
+    }
+  };
+
   const renderPermitEntrySelect = (detail: ExtendedWorkDetail) => {
     const selectedEntries = selectedPermitEntries[detail.id]?.split(',') || [];
-    
+    const requiredQuantity = parseFloat(detail.quantity) * 1000;
+    const totalAvailable = availableEntries.reduce((sum, entry) => sum + entry.remainingQuantity, 0);
+    const insufficient = totalAvailable < requiredQuantity;
+    const hasExactlyTwo = availableEntries.length === 2;
+
     return (
       <div className="space-y-2">
+        <div className="text-sm mb-2">
+          Required: {requiredQuantity.toLocaleString()}L
+          {hasExactlyTwo && (
+            <span className={insufficient ? 'text-red-500' : 'text-green-500'}>
+              {' '}(Available: {totalAvailable.toLocaleString()}L)
+            </span>
+          )}
+        </div>
         {[0, 1].map((index) => (
           <Select
             key={index}
@@ -412,7 +480,6 @@ export default function PermitsPage() {
             onValueChange={(value) => {
               const newEntries = [...selectedEntries];
               newEntries[index] = value;
-              // Filter out empty values and join with comma
               setSelectedPermitEntries(prev => ({
                 ...prev,
                 [detail.id]: newEntries.filter(Boolean).join(',')
@@ -444,20 +511,19 @@ export default function PermitsPage() {
             </SelectContent>
           </Select>
         ))}
+        {!hasExactlyTwo && (
+          <div className="text-xs text-yellow-600 mt-1">
+            Need exactly 2 permit entries. Please clean up old allocations.
+          </div>
+        )}
+        {hasExactlyTwo && insufficient && (
+          <div className="text-xs text-red-600 mt-1">
+            Not enough volume in available entries. Please clean up and try again.
+          </div>
+        )}
       </div>
     );
   };
-
-  useEffect(() => {
-    const loadPermitData = async (detail: WorkDetailWithPermit) => {
-      if (selectedTruck === detail.id) {
-        // Fetch available entries for the specific destination
-        await fetchAvailableEntries(detail.product, parseFloat(detail.quantity), detail.destination);
-      }
-    };
-
-    pendingPermits.forEach(loadPermitData);
-  }, [pendingPermits, selectedTruck]);
 
   const handlePermitEntrySelect = async (detail: ExtendedWorkDetail) => {
     if (selectedTruck === detail.id) {
@@ -520,8 +586,17 @@ export default function PermitsPage() {
     });
   };
 
-  // Update the pre-allocation card content to include destination
+  // Add a helper to check if a pre-allocation is expired
+  const isPreAllocationExpired = (allocation: PreAllocation) => {
+    // Expired if older than 24h or for a loaded truck
+    const age = Date.now() - new Date(allocation.allocatedAt).getTime();
+    return age > 24 * 60 * 60 * 1000 || allocation.used;
+  };
+
+  // Update the pre-allocation card content to include destination and expired status
   const renderAllocationContent = (allocation: PreAllocation) => {
+    const expired = isPreAllocationExpired(allocation);
+
     if (editingAllocation === allocation.id) {
       return (
         <div className="space-y-2">
@@ -567,6 +642,9 @@ export default function PermitsPage() {
           >
             {allocation.destination?.toUpperCase() || 'UNKNOWN'}
           </Badge>
+          {expired && (
+            <Badge variant="destructive" className="ml-2">Expired</Badge>
+          )}
         </div>
         <div>Product: {allocation.product}</div>
         <div>Permit: {allocation.permitNumber}</div>
@@ -585,12 +663,14 @@ export default function PermitsPage() {
                   setSelectedForCleanup(prev => prev.filter(id => id !== allocation.id));
                 }
               }}
+              disabled={expired}
             />
           ) : (
             <Button 
               variant="outline" 
               size="sm"
               onClick={() => handleReallocation(allocation.truckNumber, allocation.destination)}
+              disabled={expired}
             >
               Reset
             </Button>
@@ -600,6 +680,7 @@ export default function PermitsPage() {
               variant="ghost" 
               size="sm"
               onClick={() => handleCopyPermit(allocation)}
+              disabled={expired}
             >
               <Copy className="h-4 w-4" />
             </Button>
@@ -607,11 +688,17 @@ export default function PermitsPage() {
               variant="ghost" 
               size="sm"
               onClick={() => setEditingAllocation(allocation.id)}
+              disabled={expired}
             >
               <Edit className="h-4 w-4" />
             </Button>
           </div>
         </div>
+        {expired && (
+          <div className="text-xs text-red-500 mt-1">
+            This permit allocation has expired and cannot be used.
+          </div>
+        )}
       </div>
     );
   };
@@ -656,31 +743,6 @@ export default function PermitsPage() {
   }, [refreshData])
 
   // Add new function to handle multiple allocations
-  const handleMultipleAllocations = async (
-    workDetail: ExtendedWorkDetail,
-    allocations: EntryAllocation[] 
-  ) => {
-    const db = getDatabase();
-    
-    for (const allocation of allocations) {
-      try {
-        await preAllocatePermitEntry(
-          db,
-          workDetail.truck_number,
-          workDetail.product,
-          workDetail.owner,
-          allocation.entry.id,
-          allocation.entry.number,
-          allocation.entry.destination // Pass the destination instead of quantity
-        );
-      } catch (error) {
-        console.error('Error allocating permit:', error);
-        throw error;
-      }
-    }
-  };
-
-  // Update auto allocation function
   const handleAutoAllocate = async () => {
     setIsAutoAllocating(true);
     let successCount = 0;
