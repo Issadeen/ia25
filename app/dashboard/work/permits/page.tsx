@@ -278,13 +278,12 @@ export default function PermitsPage() {
           .filter(entry =>
             entry.product.toLowerCase() === product.toLowerCase() &&
             entry.destination?.toLowerCase() === destination.toLowerCase() &&
-            entry.remainingQuantity > 0
+            entry.remainingQuantity > 0 &&
+            !entry.allocated // Add check for already allocated
           )
-          .sort((a, b) => b.remainingQuantity - a.remainingQuantity); // Sort by most volume first
+          .sort((a, b) => b.remainingQuantity - a.remainingQuantity);
 
-        // Always show exactly 2 entries if available
-        const selected = allEntries.slice(0, 2);
-        setAvailableEntries(selected);
+        setAvailableEntries(allEntries); // Show all available entries
       } else {
         setAvailableEntries([]);
       }
@@ -300,48 +299,40 @@ export default function PermitsPage() {
 
   const handlePermitAllocation = async (workDetail: ExtendedWorkDetail) => {
     const selectedEntry = selectedPermitEntries[workDetail.id];
-    if (!selectedEntry) {
-      toast({
-        title: "Permit Required",
-        description: `Please select permit entries for ${workDetail.destination.toUpperCase()}`,
-        variant: "destructive"
-      });
-      return;
-    }
+    if (!selectedEntry) return;
 
-    // Split the concatenated entry IDs
     const permitEntryIds = selectedEntry.split(',');
-    if (permitEntryIds.length > 2) {
+    if (permitEntryIds.length !== 2) {
       toast({
-        title: "Too Many Entries",
-        description: "Maximum 2 permit entries can be selected",
+        title: "Entry Required",
+        description: "Please select exactly 2 permit entries",
         variant: "destructive"
       });
       return;
     }
 
-    const permitEntries = permitEntryIds.map(id =>
-      availableEntries.find(e => e.id === id)
-    ).filter((e): e is PermitEntry => e !== undefined);
+    const permitEntries = permitEntryIds
+      .map(id => availableEntries.find(e => e.id === id))
+      .filter((e): e is PermitEntry => e !== undefined);
 
-    if (permitEntries.length === 0) {
+    // Check for duplicate permit numbers
+    const uniquePermitNumbers = new Set(permitEntries.map(e => e.number));
+    if (uniquePermitNumbers.size !== permitEntries.length) {
       toast({
-        title: "Entry Not Found",
-        description: "Selected permit entries not found",
+        title: "Invalid Selection",
+        description: "Cannot use the same permit number twice",
         variant: "destructive"
       });
       return;
     }
 
-    // Convert quantity to liters
     const requiredQuantity = parseFloat(workDetail.quantity) * 1000;
     const totalAvailable = permitEntries.reduce((sum, entry) => sum + entry.remainingQuantity, 0);
 
-    // Only allow allocation if exactly 2 entries and their sum is enough
-    if (permitEntries.length !== 2 || totalAvailable < requiredQuantity) {
+    if (totalAvailable < requiredQuantity) {
       toast({
         title: "Insufficient Quantity",
-        description: "Not enough volume in 2 entries. Please click Clean Up and try again.",
+        description: `Selected entries total (${totalAvailable}L) is less than required (${requiredQuantity}L)`,
         variant: "destructive"
       });
       return;
@@ -351,10 +342,17 @@ export default function PermitsPage() {
     const db = getDatabase();
 
     try {
-      // Allocate from 2 entries
+      // First mark entries as allocated to prevent concurrent use
+      await Promise.all(permitEntries.map(entry => 
+        update(ref(db, `allocations/${entry.id}`), { allocated: true })
+      ));
+
+      // Then allocate quantities
       let remainingToAllocate = requiredQuantity;
       for (const permitEntry of permitEntries) {
+        if (remainingToAllocate <= 0) break;
         const quantityFromThisEntry = Math.min(permitEntry.remainingQuantity, remainingToAllocate);
+        
         await preAllocatePermitEntry(
           db,
           workDetail.truck_number,
@@ -365,11 +363,11 @@ export default function PermitsPage() {
           workDetail.destination,
           quantityFromThisEntry
         );
+
         remainingToAllocate -= quantityFromThisEntry;
-        if (remainingToAllocate <= 0) break;
       }
 
-      // Mark the truck as having permits allocated
+      // Update work details
       await update(ref(db, `work_details/${workDetail.id}`), {
         permitRequired: true,
         permitAllocated: true,
@@ -378,7 +376,7 @@ export default function PermitsPage() {
         permitDestination: workDetail.destination
       });
 
-      // Update UI state
+      // Update UI
       setPendingPermits(prev => prev.filter(p => p.id !== workDetail.id));
       setSelectedTruck(null);
       setSelectedPermitEntries(prev => {
@@ -389,13 +387,18 @@ export default function PermitsPage() {
 
       toast({
         title: "Success",
-        description: `Allocated 2 permit entries for truck ${workDetail.truck_number}`,
+        description: `Allocated ${permitEntries.length} permit entries for truck ${workDetail.truck_number}`,
       });
 
-      // Always run cleanup after allocation
+      // Run cleanup
       await handleCleanup();
 
     } catch (error) {
+      // Cleanup failed allocations
+      await Promise.all(permitEntries.map(entry => 
+        update(ref(db, `allocations/${entry.id}`), { allocated: false })
+      ));
+      
       toast({
         title: "Error",
         description: error instanceof Error ? error.message : "Failed to allocate permit",

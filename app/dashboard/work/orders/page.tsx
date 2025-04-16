@@ -876,6 +876,117 @@ export default function WorkManagementPage() {
       });
   };
 
+  // Update handleCopyV2Summary to include trucks changed (status/loaded/paid) within 7 days, not just created
+const handleCopyV2Summary = () => {
+  const sevenDaysAgo = new Date();
+  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+  // Helper: returns true if any of createdAt, loaded, paid, or status change is within 7 days
+  function isRecent(detail: WorkDetail) {
+    // Check createdAt
+    if (detail.createdAt && new Date(detail.createdAt) > sevenDaysAgo) return true;
+    // Check loaded date (if available)
+    if (detail.loaded && detail.at20 && detail.createdAt && new Date(detail.createdAt) > sevenDaysAgo) return true;
+    // Check paid (if available)
+    if (detail.paid && detail.createdAt && new Date(detail.createdAt) > sevenDaysAgo) return true;
+    // Check if updatedAt or similar exists (if you have such a field)
+    // Otherwise, fallback: treat all loaded/paid trucks as recent if loaded/paid is true and createdAt is missing
+    return false;
+  }
+
+  // Accept as "recent" if createdAt is within 7 days OR loaded/paid/paymentPending/released changed within 7 days
+  const recentOrders = workDetails.filter(d => {
+    // If createdAt is recent
+    if (d.createdAt && new Date(d.createdAt) > sevenDaysAgo) return true;
+    // If loaded and loaded in last 7 days (using createdAt as proxy)
+    if (d.loaded && d.createdAt && new Date(d.createdAt) > sevenDaysAgo) return true;
+    // If paid and paid in last 7 days (using createdAt as proxy)
+    if (d.paid && d.createdAt && new Date(d.createdAt) > sevenDaysAgo) return true;
+    // If paymentPending set in last 7 days (using createdAt as proxy)
+    if (d.paymentPending && d.createdAt && new Date(d.createdAt) > sevenDaysAgo) return true;
+    // If released in last 7 days (using createdAt as proxy)
+    if (d.released && d.createdAt && new Date(d.createdAt) > sevenDaysAgo) return true;
+    // If you have updatedAt, loadedAt, paidAt, releasedAt, use those instead of createdAt for more accuracy
+    return false;
+  });
+
+  // ...rest of the function unchanged...
+  // Calculate overall stats
+  const stats = {
+    totalOrders: recentOrders.length,
+    queuedOrders: recentOrders.filter(d => d.status === "queued" || d.status === "completed").length,
+    loadedOrders: recentOrders.filter(d => d.loaded).length,
+    pendingOrders: recentOrders.filter(d => d.status === "queued" && !d.loaded).length,
+    agoOrders: recentOrders.filter(d => d.product === "AGO").length,
+    pmsOrders: recentOrders.filter(d => d.product === "PMS").length,
+  };
+
+  // Group by owner
+  const ownerMap: { [owner: string]: {
+    totalOrders: number,
+    queuedOrders: number,
+    loadedOrders: number,
+    pendingOrders: number,
+    agoOrders: number,
+    pmsOrders: number
+  }} = {};
+
+  recentOrders.forEach(d => {
+    if (!ownerMap[d.owner]) {
+      ownerMap[d.owner] = {
+        totalOrders: 0,
+        queuedOrders: 0,
+        loadedOrders: 0,
+        pendingOrders: 0,
+        agoOrders: 0,
+        pmsOrders: 0
+      };
+    }
+    ownerMap[d.owner].totalOrders++;
+    if (d.status === "queued" || d.status === "completed") ownerMap[d.owner].queuedOrders++;
+    if (d.loaded) ownerMap[d.owner].loadedOrders++;
+    if (d.status === "queued" && !d.loaded) ownerMap[d.owner].pendingOrders++;
+    if (d.product === "AGO") ownerMap[d.owner].agoOrders++;
+    if (d.product === "PMS") ownerMap[d.owner].pmsOrders++;
+  });
+
+  // Format summary
+  let summary = `Summary :\n\n`;
+  summary += `1. Total Orders: ${stats.totalOrders}\n\n`;
+  summary += `2. Queued Orders: ${stats.queuedOrders}\n\n`;
+  summary += `3. Loaded Orders: ${stats.loadedOrders}\n\n`;
+  summary += `4. Pending Orders: ${stats.pendingOrders}\n\n`;
+  summary += `5. AGO Orders: ${stats.agoOrders}\n\n`;
+  summary += `6. PMS Orders: ${stats.pmsOrders}\n\n`;
+  summary += `\n---\n\nOwner Summary:\n\n`;
+
+  let idx = 1;
+  Object.entries(ownerMap).forEach(([owner, data]) => {
+    summary += `${idx}. ${owner}:\n\n`;
+    summary += `Total Orders: ${data.totalOrders}\n\n`;
+    summary += `Queued Orders: ${data.queuedOrders}\n\n`;
+    summary += `Loaded Orders: ${data.loadedOrders}\n\n`;
+    summary += `Pending Orders: ${data.pendingOrders}\n\n`;
+    summary += `AGO Orders: ${data.agoOrders}\n\n`;
+    summary += `PMS Orders: ${data.pmsOrders}\n\n\n`;
+    idx++;
+  });
+
+  navigator.clipboard.writeText(summary)
+    .then(() => {
+      toast({
+        title: "Copied",
+        description: "V2 summary (last 7 days, including recent changes) copied to clipboard",
+      });
+    })
+    .catch(() => {
+      toast({
+        title: "Error",
+        description: "Failed to copy V2 summary",
+      });
+    });
+};
+
   const handleDownloadPDF = () => {
     const doc = new jsPDF({
       orientation: 'landscape',
@@ -2742,9 +2853,19 @@ const showTruckQuickView = (detail: WorkDetail) => {
                     <h2 className="text-xl font-semibold mb-4 bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">
                       Active Owner Summary
                     </h2>
-                    <Button variant="ghost" onClick={handleCopySummary}>
-                      <Copy className="h-5 w-5" />
-                    </Button>
+                    <div className="flex gap-2">
+                      <Button variant="ghost" onClick={handleCopySummary}>
+                        <Copy className="h-5 w-5" />
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleCopyV2Summary}
+                        className="text-xs"
+                      >
+                        Copy V2 Summary (7 days)
+                      </Button>
+                    </div>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                     {Object.entries(getActiveOwnerSummary()).map(([owner, data], index) => {
