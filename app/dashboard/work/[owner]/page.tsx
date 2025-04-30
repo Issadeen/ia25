@@ -85,7 +85,7 @@ interface BalanceUsage {
   timestamp: string
   usedFor: string[]
   paymentId: string
-  type: "deposit" | "usage" // Add this field
+  type: "deposit" | "usage" | "manual_adjustment" | "reconciliation_adjustment" // Add new types
   note?: string // Add optional note field
 }
 
@@ -1949,37 +1949,56 @@ export default function OwnerDetailsPage() {
                       <tbody>
                         {getFilteredOwnerPayments()
                           .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()) // Sort oldest first
-                          .map((payment) => (
-                          <tr key={payment.id} className={cn("border-t",payment.corrected && "bg-muted/50")}>
-                            <td className="p-2">{payment.id}</td>
-                            <td className="p-2">{payment.allocatedTrucks?.map((allocation: any) => {
-                              const truck = workDetails.find(t => t.id === allocation.truckId);
-                              return truck ? (
-                                <div key={allocation.truckId}>
-                                  <PaymentActions 
-                                    payment={payment}
-                                    truck={truck}
-                                    allocation={allocation}/>
-                                </div>
-                              ) : null;
-                            })}</td>
-                            <td className="p-2">${formatNumber(payment.amount)}</td>
-                            <td className="p-2">{new Date(payment.timestamp).toLocaleString()}</td>
-                            <td className="p-2">{payment.allocatedTrucks?.map((allocation: any) => {
-                              const truck = workDetails.find(t => t.id === allocation.truckId);
-                              return truck ? (
-                                <div key={allocation.truckId} className="flex items-center">
-                                  <span className="text-xs">
-                                    {truck.truck_number} (${formatNumber(allocation.amount)})
-                                    {payment.corrected && (
-                                      <span className="ml-1 text-muted-foreground">(Corrected)</span>
-                                    )}
-                                  </span>
-                                </div>
-                              ) : null;
-                            })}</td>
-                            <td className="p-2 whitespace-nowrap">{payment.note || '—'}</td></tr>
-                      ))}</tbody></table>
+                          .map((payment) => {
+                            // Find corresponding balance usage entry
+                            const balanceUsageEntry = balanceUsageHistory.find(
+                              (entry) => entry.type === 'usage' && entry.paymentId === payment.id
+                            );
+                            const balanceUsedAmount = balanceUsageEntry?.amount || 0;
+                            const totalPaymentValue = toFixed2(payment.amount + balanceUsedAmount);
+
+                            return (
+                              <tr key={payment.id} className={cn("border-t", payment.corrected && "bg-muted/50")}>
+                                <td className="p-2">{payment.id}</td>
+                                <td className="p-2">{payment.allocatedTrucks?.map((allocation: any) => {
+                                  const truck = workDetails.find(t => t.id === allocation.truckId);
+                                  return truck ? (
+                                    <div key={allocation.truckId}>
+                                      <PaymentActions 
+                                        payment={payment}
+                                        truck={truck}
+                                        allocation={allocation}/>
+                                    </div>
+                                  ) : null;
+                                })}</td>
+                                <td className="p-2">
+                                  ${formatNumber(totalPaymentValue)}
+                                  {balanceUsedAmount > 0 && (
+                                    <span className="ml-1 text-emerald-600" title={`Includes $${formatNumber(balanceUsedAmount)} from balance`}>
+                                      <Wallet2 className="h-3 w-3 inline-block" />
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="p-2">{new Date(payment.timestamp).toLocaleString()}</td>
+                                <td className="p-2">{payment.allocatedTrucks?.map((allocation: any) => {
+                                  const truck = workDetails.find(t => t.id === allocation.truckId);
+                                  return truck ? (
+                                    <div key={allocation.truckId} className="flex items-center">
+                                      <span className="text-xs">
+                                        {truck.truck_number} (${formatNumber(allocation.amount)})
+                                        {payment.corrected && (
+                                          <span className="ml-1 text-muted-foreground">(Corrected)</span>
+                                        )}
+                                      </span>
+                                    </div>
+                                  ) : null;
+                                })}</td>
+                                <td className="p-2 whitespace-nowrap">{payment.note || '—'}</td>
+                              </tr>
+                            );
+                          })}
+                      </tbody>
+                    </table>
                   </div>
                 </div>
               </Card>
@@ -2001,95 +2020,99 @@ export default function OwnerDetailsPage() {
                         <th className="text-left p-2">Date</th>
                         <th className="text-left p-2">Type</th>
                         <th className="text-right p-2">Amount</th>
-                        <th className="text-right p-2">Previous Balance</th>
-                        <th className="text-right p-2">New Balance</th>
                         <th className="text-left p-2">Details</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {getFilteredBalanceHistory()
-                        .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()) // Oldest first
-                        .reduce((acc: any[], entry, index, array) => {
-                          // Calculate running balance forwards
-                          const prevBalance = index === 0 ? 0 : acc[index - 1].newBalance;
-                          const changeAmount = entry.type === 'deposit' ? entry.amount : -entry.amount;
-                          const newBalance = prevBalance + changeAmount;
+                      {(() => {
+                        return getFilteredBalanceHistory()
+                          .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()) // Oldest first
+                          .map((entry, index) => {
+                            // Get related payment
+                            const relatedPayment = ownerPayments.find(p => p.id === entry.paymentId);
 
-                          // Get related truck numbers
-                          const relatedTrucks = entry.usedFor?.map(truckId => {
-                            const truck = workDetails.find(t => t.id === truckId);
-                            return truck?.truck_number;
-                          }).filter(Boolean);
+                            // Build detail message
+                            let details = '';
+                            if (entry.type === 'deposit') {
+                              details = `Prepayment added to balance.`;
+                            } else if (entry.type === 'usage') {
+                              // Find the payment associated with this usage entry
+                              const paymentDetails = ownerPayments.find(p => p.id === entry.paymentId);
+                              const balanceUsedAmount = entry.amount; // Amount from the balance usage entry
+                              const cashPaymentAmount = paymentDetails?.amount || 0; // Amount from the payment record
+                              const totalPaymentValue = toFixed2(cashPaymentAmount + balanceUsedAmount);
 
-                          // Get related payment
-                          const relatedPayment = ownerPayments.find(p => p.id === entry.paymentId);
+                              details = `Used $${formatNumber(balanceUsedAmount)} towards payment ID: ${entry.paymentId} (Total Payment: $${formatNumber(totalPaymentValue)}).`; // Updated detail string
 
-                          // Build detail message
-                          let details = '';
-                          if (entry.type === 'deposit') {
-                            details = 'Added to balance';
-                          } else if (entry.type === 'usage') {
-                            details = `Used for trucks: ${relatedTrucks?.join(', ')}`;
-                            if (relatedPayment) {
-                              details += ` (Payment: ${relatedPayment.id.slice(-6)})`;
+                              if (paymentDetails && paymentDetails.allocatedTrucks) {
+                                const allocationDetails = paymentDetails.allocatedTrucks.map((alloc: any) => {
+                                  const truck = workDetails.find(t => t.id === alloc.truckId);
+                                  return truck ? `${truck.truck_number} ($${formatNumber(alloc.amount)})` : `Unknown Truck ($${formatNumber(alloc.amount)})`;
+                                }).join(', ');
+                                details += ` Allocated: ${allocationDetails}.`;
+                              } else if (entry.usedFor) { // Fallback if payment details aren't found but usedFor exists
+                                  const relatedTrucks = entry.usedFor?.map(truckId => {
+                                  const truck = workDetails.find(t => t.id === truckId);
+                                  return truck?.truck_number;
+                                }).filter(Boolean);
+                                if (relatedTrucks && relatedTrucks.length > 0) {
+                                  details += ` Allocated to trucks: ${relatedTrucks.join(', ')}.`;
+                                }
+                              }
+                            } else if (entry.type === 'manual_adjustment') {
+                              details = 'Manual balance adjustment by admin.';
+                            } else if (entry.type === 'reconciliation_adjustment') {
+                              details = 'Balance adjustment due to reconciliation.';
+                            } else {
+                              details = 'Balance activity';
                             }
-                          } else if (entry.type === 'manual_adjustment') {
-                            details = 'Manual balance adjustment';
-                          }
 
-                          acc.push({
-                            ...entry,
-                            prevBalance,
-                            newBalance,
-                            details,
-                            relatedPayment
-                          });
-
-                          return acc;
-                        }, [])
-                        .map((entry, index) => (
-                          <tr key={entry.timestamp} className={cn(
-                            "border-t transition-colors",
-                            entry.type === 'deposit' ? 'bg-emerald-50/30 hover:bg-emerald-50/50' : 
-                            entry.type === 'manual_adjustment' ? 'bg-amber-50/30 hover:bg-amber-50/50' : 
-                            index % 2 === 0 ? 'bg-muted/5 hover:bg-muted/10' : 'hover:bg-muted/10'
-                          )}>
-                            <td className="p-2 whitespace-nowrap text-sm">
-                              {new Date(entry.timestamp).toLocaleString()}
-                            </td>
-                            <td className="p-2 whitespace-nowrap">
-                              <span className={cn(
-                                "px-2 py-1 rounded-full text-xs font-medium",
-                                entry.type === 'deposit' ? 'bg-emerald-100/50 text-emerald-700' : 
-                                entry.type === 'usage' ? 'bg-blue-100/50 text-blue-700' :
-                                'bg-amber-100/50 text-amber-700'
+                            return (
+                              <tr key={`${entry.timestamp}-${index}`} className={cn(
+                                "border-t transition-colors",
+                                entry.type === 'deposit' ? 'bg-emerald-50/30 hover:bg-emerald-50/50' :
+                                entry.type === 'manual_adjustment' ? 'bg-amber-50/30 hover:bg-amber-50/50' :
+                                entry.type === 'reconciliation_adjustment' ? 'bg-purple-50/30 hover:bg-purple-50/50' :
+                                index % 2 === 0 ? 'bg-muted/5 hover:bg-muted/10' : 'hover:bg-muted/10'
                               )}>
-                                {entry.type === 'deposit' ? 'Prepayment' :
-                                 entry.type === 'usage' ? 'Payment' :
-                                 'Adjustment'}
-                              </span>
-                            </td>
-                            <td className="p-2 text-right whitespace-nowrap font-medium">
-                              <span className={entry.type === 'deposit' ? 'text-emerald-600' : 'text-blue-600'}>
-                                {entry.type === 'deposit' ? '+' : '-'}${formatNumber(entry.amount)}
-                              </span>
-                            </td>
-                            <td className="p-2 text-right whitespace-nowrap text-muted-foreground">
-                              ${formatNumber(entry.prevBalance)}
-                            </td>
-                            <td className="p-2 text-right whitespace-nowrap font-medium">
-                              ${formatNumber(entry.newBalance)}
-                            </td>
-                            <td className="p-2 text-sm text-muted-foreground">
-                              {entry.details}
-                              {entry.note && entry.note !== entry.details && (
-                                <span className="ml-2">
-                                  ({entry.note})
-                                </span>
-                              )}
-                            </td>
-                          </tr>
-                        ))}
+                                <td className="p-2 whitespace-nowrap text-sm">
+                                  {new Date(entry.timestamp).toLocaleString()}
+                                </td>
+                                <td className="p-2 whitespace-nowrap">
+                                  <span className={cn(
+                                    "px-2 py-1 rounded-full text-xs font-medium",
+                                    entry.type === 'deposit' ? 'bg-emerald-100/50 text-emerald-700' :
+                                    entry.type === 'usage' ? 'bg-blue-100/50 text-blue-700' :
+                                    entry.type === 'manual_adjustment' ? 'bg-amber-100/50 text-amber-700' :
+                                    entry.type === 'reconciliation_adjustment' ? 'bg-purple-100/50 text-purple-700' :
+                                    'bg-gray-100/50 text-gray-700'
+                                  )}>
+                                    {entry.type === 'deposit' ? 'Prepayment' :
+                                     entry.type === 'usage' ? 'Payment Usage' :
+                                     entry.type === 'manual_adjustment' ? 'Manual Adj.' :
+                                     entry.type === 'reconciliation_adjustment' ? 'Recon. Adj.' :
+                                     'Activity'}
+                                  </span>
+                                </td>
+                                <td className="p-2 text-right whitespace-nowrap font-medium">
+                                  <span className={
+                                    entry.type === 'deposit' ? 'text-emerald-600' :
+                                    (entry.type === 'usage' || entry.type === 'manual_adjustment' || entry.type === 'reconciliation_adjustment') ? 'text-red-600' :
+                                    'text-gray-600'
+                                  }>
+                                    {entry.type === 'deposit' ? '+' : '-'}${formatNumber(entry.amount)}
+                                  </span>
+                                </td>
+                                <td className="p-2 text-sm text-muted-foreground">
+                                  {details}
+                                  {entry.note && entry.note !== details && (
+                                    <span className="block text-xs italic mt-1">Note: {entry.note}</span>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          });
+                      })()}
                     </tbody>
                   </table>
                   {getFilteredBalanceHistory().length === 0 && (
@@ -2139,8 +2162,11 @@ export default function OwnerDetailsPage() {
                         .filter(truck => truck.loaded && truck.truck_number.toLowerCase().includes(truckFilter.toLowerCase()))
                         .sort((a, b) => (paymentOrder[a.id] || 0) - (paymentOrder[b.id] || 0))
                         .map((truck, index) => {
+                          // Calculate total due for the truck
+                          const { totalDue } = getTruckAllocations(truck, truckPayments);
+
                           const payments = getFilteredOwnerPayments()
-                            .flatMap(payment => 
+                            .flatMap(payment =>
                               payment.allocatedTrucks
                                 ?.filter((allocation: any) => allocation.truckId === truck.id)
                                 .map((allocation: any) => ({
@@ -2157,13 +2183,14 @@ export default function OwnerDetailsPage() {
 
                           console.log("Payments for truck", truck.truck_number, payments.map(p => p.date.toLocaleDateString()));
 
-                          const total = payments.reduce((sum, p) => sum + p.amount, 0);
+                          const totalPaid = payments.reduce((sum, p) => sum + p.amount, 0);
 
                           return (
                             <React.Fragment key={truck.id}>
                               <tr className="bg-muted/10 font-medium">
                                 <td className="border p-2" rowSpan={payments.length + 1}>
                                   <div className="flex items-center gap-2 group">
+                                    {/* ... Move buttons ... */}
                                     <div className="opacity-0 group-hover:opacity-100 transition-opacity flex flex-col">
                                       <Button
                                         variant="ghost"
@@ -2187,16 +2214,22 @@ export default function OwnerDetailsPage() {
                                     <span>{index + 1}. {truck.truck_number}</span>
                                   </div>
                                 </td>
-                                <td className="border p-2" colSpan={2}>
-                                  Total Payments
+                                {/* Update summary row */}
+                                <td className="border p-2 text-sm text-muted-foreground" colSpan={1}> {/* Adjusted colSpan */}
+                                  Total Due:
                                 </td>
-                                <td className="border p-2 text-right text-green-600">
-                                  ${formatNumber(total)}
+                                <td className="border p-2 text-right font-semibold"> {/* Added cell for Total Due */}
+                                  ${formatNumber(totalDue)}
                                 </td>
-                                <td className="border p-2"></td>
+                                <td className="border p-2 text-sm text-muted-foreground"> {/* Added cell for Total Paid label */}
+                                  Total Paid:
+                                </td>
+                                <td className="border p-2 text-right text-green-600"> {/* Cell for Total Paid amount */}
+                                  ${formatNumber(totalPaid)}
+                                </td>
                               </tr>
                               {payments.map((payment, idx) => (
-                                <tr 
+                                <tr
                                   key={`${payment.paymentId}-${idx}`}
                                   className={idx % 2 === 0 ? 'bg-background' : 'bg-muted/5'}
                                 >

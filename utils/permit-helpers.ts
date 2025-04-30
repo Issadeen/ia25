@@ -13,10 +13,7 @@ const calculateAvailableQuantity = (entry: PermitEntry): number => {
 };
 
 export const findAvailablePermitEntries = async (
-  db: Database,
-  product: string,
-  quantity: number
-): Promise<EntryAllocation[]> => {
+db: Database, product: string, quantity: number, destination: string): Promise<EntryAllocation[]> => {
   const entriesRef = ref(db, 'allocations');
   const snapshot = await get(entriesRef);
   

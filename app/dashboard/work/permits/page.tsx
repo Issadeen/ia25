@@ -247,7 +247,8 @@ export default function PermitsPage() {
             const availableAllocations = await findAvailablePermitEntries(
               db,
               detail.product,
-              requiredQuantity
+              requiredQuantity,
+              detail.destination
             );
             if (availableAllocations.length > 0) {
               await handleMultipleAllocations(detail, availableAllocations);
@@ -412,50 +413,79 @@ export default function PermitsPage() {
   const handleMultipleAllocations = async (workDetail: ExtendedWorkDetail, allocations: EntryAllocation[]) => {
     const db = getDatabase();
     try {
-      // Always get exactly 2 entries
-      const selected = allocations.slice(0, 2);
       const requiredQuantity = parseFloat(workDetail.quantity) * 1000;
       
-      // Calculate total available volume
-      const totalAvailable = selected.reduce((sum, a) => sum + (a.quantity || 0), 0);
+      // Calculate total available volume from the provided entries
+      const totalAvailable = allocations.reduce((sum, a) => sum + (a.quantity || 0), 0);
       
-      // Only proceed if we have enough volume in exactly 2 entries
-      if (selected.length !== 2 || totalAvailable < requiredQuantity) {
-        console.log(`Insufficient volume: need ${requiredQuantity}, have ${totalAvailable}`);
-        return;
+      // Only proceed if we have enough total volume
+      if (totalAvailable < requiredQuantity) {
+        throw new Error(`Insufficient volume: need ${requiredQuantity.toLocaleString()}, have ${totalAvailable.toLocaleString()}`);
       }
 
-      // Allocate from both entries
       let remainingToAllocate = requiredQuantity;
-      for (const allocation of selected) {
-        if (!allocation.quantity || allocation.quantity <= 0) continue;
+      const allocatedPermitEntries: { id: string; number: string }[] = [];
+      const updates: Record<string, any> = {};
+
+      for (const allocation of allocations) {
+        if (remainingToAllocate <= 0) break;
+        // Use allocation.quantity which represents the available quantity for this entry
+        if (!allocation.quantity || allocation.quantity <= 0) continue; 
         
         const quantityFromThisEntry = Math.min(allocation.quantity, remainingToAllocate);
         
-        try {
-          await preAllocatePermitEntry(
-            db,
-            workDetail.truck_number,
-            workDetail.product,
-            workDetail.owner,
-            allocation.entry.id,
-            allocation.entry.number,
-            workDetail.destination,
-            quantityFromThisEntry
-          );
-          remainingToAllocate -= quantityFromThisEntry;
-        } catch (error) {
-          console.error('Failed to allocate permit entry:', error);
-          throw error;
+        if (quantityFromThisEntry > 0) {
+          try {
+            // Call preAllocatePermitEntry which now handles updating preAllocatedQuantity
+            await preAllocatePermitEntry(
+              db,
+              workDetail.truck_number,
+              workDetail.product,
+              workDetail.owner,
+              allocation.entry.id,
+              allocation.entry.number,
+              workDetail.destination,
+              quantityFromThisEntry // Pass the specific amount from this entry
+            );
+            
+            allocatedPermitEntries.push({ id: allocation.entry.id, number: allocation.entry.number });
+            remainingToAllocate -= quantityFromThisEntry;
+
+          } catch (error) {
+            console.error(`Failed to allocate from permit entry ${allocation.entry.number}:`, error);
+            // Decide if we should continue or stop the whole process
+            // For now, let's stop if one allocation fails within the loop
+            throw new Error(`Failed during allocation from ${allocation.entry.number}. Please check logs.`); 
+          }
         }
       }
 
-      // Run cleanup after successful allocation
-      await handleCleanup();
+      if (remainingToAllocate > 0) {
+         // This should theoretically not happen due to the initial check, but good to have a safeguard
+         throw new Error(`Allocation incomplete. ${remainingToAllocate.toLocaleString()} liters remaining.`);
+      }
+
+      // Update work details after all successful allocations
+      updates[`work_details/${workDetail.id}/permitRequired`] = true;
+      updates[`work_details/${workDetail.id}/permitAllocated`] = true;
+      updates[`work_details/${workDetail.id}/permitNumbers`] = allocatedPermitEntries.map(e => e.number);
+      updates[`work_details/${workDetail.id}/permitEntryIds`] = allocatedPermitEntries.map(e => e.id);
+      updates[`work_details/${workDetail.id}/permitDestination`] = workDetail.destination; // Store destination used for allocation
+
+      await update(ref(db), updates);
+
+      // Optional: Run cleanup after successful allocation batch
+      // await handleCleanup(); // Consider if cleanup is needed immediately after each multi-allocation
       
     } catch (error) {
       console.error('Multiple allocation error:', error);
-      throw error;
+      // Potentially add notification to user
+      toast({
+        title: "Allocation Error",
+        description: error instanceof Error ? error.message : "Failed to allocate permits.",
+        variant: "destructive"
+      });
+      throw error; // Re-throw to be caught by the caller if necessary
     }
   };
 
@@ -750,13 +780,13 @@ export default function PermitsPage() {
     setIsAutoAllocating(true);
     let successCount = 0;
     let failCount = 0;
+    const db = getDatabase();
 
     try {
       // Get existing allocations first
-      const db = getDatabase();
       const preAllocationsSnapshot = await get(ref(db, 'permitPreAllocations'));
       const existingAllocations = preAllocationsSnapshot.exists() 
-        ? Object.values(preAllocationsSnapshot.val()).map((pa: any) => pa.truckNumber)
+        ? Object.values(preAllocationsSnapshot.val() as Record<string, PreAllocation>).map((pa: PreAllocation) => pa.truckNumber)
         : [];
 
       // Filter out already allocated trucks
@@ -768,19 +798,26 @@ export default function PermitsPage() {
         try {
           const requiredQuantity = parseFloat(detail.quantity) * 1000;
           const availableAllocations = await findAvailablePermitEntries(
-            getDatabase(),
+            db,
             detail.product,
-            requiredQuantity
+            requiredQuantity,
+            detail.destination
           );
           
-          if (availableAllocations.length > 0) {
+          if (availableAllocations.length > 0) { 
             await handleMultipleAllocations(detail, availableAllocations);
             successCount++;
           } else {
+            console.log(`No available permit entries found for ${detail.truck_number} (${detail.product}, ${requiredQuantity}L, ${detail.destination})`);
             failCount++;
           }
         } catch (error) {
           console.error(`Failed to allocate permit for ${detail.truck_number}:`, error);
+          toast({
+            title: "Allocation Failed",
+            description: `Could not allocate permit for truck ${detail.truck_number}. Reason: ${error instanceof Error ? error.message : 'Unknown error'}`,
+            variant: "destructive"
+          });
           failCount++;
         }
       }
@@ -788,16 +825,16 @@ export default function PermitsPage() {
       toast({
         title: "Auto-Allocation Complete",
         description: `Successfully allocated: ${successCount}, Failed: ${failCount}`,
-        variant: successCount > 0 ? "default" : "destructive"
+        variant: successCount > 0 && failCount === 0 ? "default" : failCount > 0 ? "destructive" : "default"
       });
-
-      await refreshData();
       
+      await refreshData();
+
     } catch (error) {
-      console.error('Auto-allocation error:', error);
+      console.error('Auto-allocation process error:', error);
       toast({
         title: "Error",
-        description: "Failed to complete auto-allocation",
+        description: "An error occurred during the auto-allocation process.",
         variant: "destructive"
       });
     } finally {
