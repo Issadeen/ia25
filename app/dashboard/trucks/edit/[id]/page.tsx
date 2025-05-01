@@ -155,6 +155,16 @@ export default function EditTruckPage({ params }: { params: Promise<{ id: string
   const onSubmit = async (data: TruckFormData) => {
     setIsSaving(true);
     try {
+      // Fetch user info first
+      const userInfoRes = await fetch('/api/user-info');
+      let userEmail = 'unknown'; // Default fallback
+      if (userInfoRes.ok) {
+        const userInfo = await userInfoRes.json();
+        userEmail = userInfo.email || 'unknown'; // Get email from API response
+      } else {
+        console.warn("Failed to fetch user info for edit action.");
+      }
+
       const db = getDatabase();
       const truckRef = ref(db, `trucks/${id}`);
       
@@ -176,7 +186,7 @@ export default function EditTruckPage({ params }: { params: Promise<{ id: string
         ago_comps: data.ago_comps,
         pms_comps: data.pms_comps,
         updated_at: new Date().toISOString(),
-        updated_by: session?.user?.email || 'unknown',
+        updated_by: userEmail, // Use fetched email
       };
 
       // Add individual compartment fields for compatibility
