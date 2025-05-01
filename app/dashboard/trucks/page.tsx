@@ -206,18 +206,26 @@ PMS: ${formatCompartments(truck.pms_comps)} (Total: ${formatNumber(pmsTotal.toSt
   const verifyWorkId = async (workId: string): Promise<boolean> => {
     try {
       const db = getDatabase();
-      const userEmail = session?.user?.email;
-      
-      if (!userEmail) throw new Error('No user email found');
+
+      // Fetch user info first
+      const userInfoRes = await fetch('/api/user-info');
+      if (!userInfoRes.ok) {
+        throw new Error('Failed to fetch user info for verification');
+      }
+      const userInfo = await userInfoRes.json();
+      const userEmail = userInfo.email; // Get email from API response
+
+      if (!userEmail) throw new Error('No user email found in fetched info'); // Check if email exists in response
 
       const usersRef = dbRef(db, 'users');
       const snapshot = await get(usersRef);
-      
+
       if (!snapshot.exists()) return false;
 
       const users = Object.values(snapshot.val()) as FirebaseUserData[];
+      // Use the fetched email for comparison
       const user = users.find(u => u.email === userEmail);
-      
+
       if (!user || user.workId !== workId.trim()) {
         toast({
           title: "Error",
@@ -231,13 +239,13 @@ PMS: ${formatCompartments(truck.pms_comps)} (Total: ${formatNumber(pmsTotal.toSt
         router.push(`/dashboard/trucks/edit/${selectedTruckId}`);
         setIsVerifyingWorkId(false); // Close dialog after successful verification
       }
-      
+
       return true;
     } catch (error) {
       console.error('Work ID verification error:', error);
       toast({
         title: "Error",
-        description: "Verification failed",
+        description: error instanceof Error ? error.message : "Verification failed",
         variant: "destructive"
       });
       return false;
