@@ -122,7 +122,7 @@ export default function DriversPage() {
                 <Avatar className="h-8 w-8 ring-1 ring-pink-500/50">
                   <AvatarImage src={profilePicUrl || ''} alt="Profile" />
                   <AvatarFallback className="text-xs">
-                    {session?.user?.email?.[0]?.toUpperCase() || 'U'}
+                    {session?.user?.name?.[0]?.toUpperCase() || 'U'}
                   </AvatarFallback>
                 </Avatar>
               </div>
