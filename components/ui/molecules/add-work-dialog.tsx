@@ -1,264 +1,238 @@
 'use client'
 
-// ...existing imports...
-import { useState } from "react"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Label } from "@/components/ui/label"
-import { Loader2 } from "lucide-react"
-import { database } from "@/lib/firebase"
-import { ref, get, query, orderByChild, equalTo } from "firebase/database"
-import { toast } from "@/components/ui/use-toast"
+import { useState } from "react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Trash2, Plus } from 'lucide-react'; // Import icons
+import { formatNumber } from '@/lib/utils'; // For formatting numbers
+import { AddWorkFormData, MultiProductWorkFormData, ProductEntry } from "@/types/work";
 
+// Define the structure for an item within a work order
+interface WorkItem {
+  product: 'AGO' | 'PMS' | string;
+  quantity: number;
+  price: number;
+}
+
+// Define the expected structure for the form data
 interface WorkFormData {
-  owner: string
-  product: string
-  truck_number: string
-  quantity: string
-  status: string
-  orderno: string
-  depot: string
-  destination: string
-  price: string
+  owner: string;
+  items: WorkItem[]; // Keep this for backward compatibility
+  truck_number: string;
+  status: string;
+  orderno: string;
+  depot: string;
+  destination: string;
+  products: ProductEntry[]; // Add this for multiple products
 }
 
 interface AddWorkDialogProps {
-  onClose: () => void
-  onSave: (formData: WorkFormData) => Promise<{ success: boolean; id: string }>
+  onClose: () => void;
+  onSave: (data: AddWorkFormData | MultiProductWorkFormData) => Promise<{ success: boolean; id: string }>;
 }
 
 export function AddWorkDialog({ onClose, onSave }: AddWorkDialogProps) {
-  const [isLoading, setIsLoading] = useState(false)
-  const [orderError, setOrderError] = useState("")
+  // Update initial state
   const [formData, setFormData] = useState<WorkFormData>({
     owner: "",
-    product: "",
+    items: [{ product: "AGO", quantity: 0, price: 0 }],
+    products: [{ product: "AGO", quantity: "0", price: "0" }],
     truck_number: "",
-    quantity: "",
-    status: "not queued",
+    status: "queued",
     orderno: "",
     depot: "",
     destination: "",
-    price: ""
-  })
+  });
+  const [isSaving, setIsSaving] = useState(false);
+
+  // Handle changes for top-level fields
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({ ...prev, [name]: value }));
+  };
+
+  // Handle changes for status select
+  const handleStatusChange = (value: string) => {
+    setFormData(prev => ({ ...prev, status: value }));
+  };
+
+  // Add handler for multiple products
+  const handleProductChange = (index: number, field: keyof ProductEntry, value: string) => {
+    const newProducts = [...formData.products];
+    newProducts[index] = { ...newProducts[index], [field]: value };
+    setFormData(prev => ({ ...prev, products: newProducts }));
+  };
+
+  // Add new product entry
+  const addProduct = () => {
+    setFormData(prev => ({
+      ...prev,
+      products: [...prev.products, { product: "AGO", quantity: "0", price: "0" }]
+    }));
+  };
+
+  // Remove product entry
+  const removeProduct = (index: number) => {
+    if (formData.products.length <= 1) return;
+    const newProducts = formData.products.filter((_, i) => i !== index);
+    setFormData(prev => ({ ...prev, products: newProducts }));
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setIsLoading(true)
-    setOrderError("")
+    e.preventDefault();
+    setIsSaving(true);
     
-    try {
-      // Validate required fields
-      if (!formData.owner || !formData.product || !formData.truck_number || 
-          !formData.quantity || !formData.orderno || !formData.depot || 
-          !formData.destination || !formData.price) {
-        alert("All fields are required")
-        return
-      }
-
-      // Validate quantity is a number
-      if (isNaN(Number(formData.quantity))) {
-        alert("Quantity must be a number")
-        return
-      }
-
-      // Validate price is a number with up to 3 decimal places
-      const priceRegex = /^\d+(\.\d{0,3})?$/
-      if (!priceRegex.test(formData.price)) {
-        alert("Price must be a number with up to 3 decimal places")
-        return
-      }
-
-      // Check for duplicate order number - with more thorough validation
-      const orderRef = ref(database, 'work_details')
-      const orderQuery = query(
-        orderRef,
-        orderByChild('orderno')
-      )
-      const orderSnapshot = await get(orderQuery)
-
-      if (orderSnapshot.exists()) {
-        const orders = Object.values(orderSnapshot.val()) as any[]
-        const matchingOrder = orders.find(order => 
-          order.orderno.toLowerCase() === formData.orderno.toLowerCase() ||
-          order.orderno.replace(/\s+/g, '') === formData.orderno.replace(/\s+/g, '') ||
-          order.orderno.replace(/[-_]/g, '') === formData.orderno.replace(/[-_]/g, '')
-        )
-
-        if (matchingOrder) {
-          setOrderError(`Order number ${formData.orderno} (or similar) is already used by truck ${matchingOrder.truck_number}. Please use a different order number.`)
-          setIsLoading(false)
-          return
-        }
-      }
-
-      // Check stock availability
-      const stockRef = ref(database, `stocks/${formData.product.toLowerCase()}`)
-      const stockSnapshot = await get(stockRef)
-      const currentStock = stockSnapshot.val()?.quantity || 0
-      const requestedQuantity = parseFloat(formData.quantity)
-
-      if (currentStock < requestedQuantity) {
-        setOrderError(`Insufficient stock. Available ${formData.product}: ${currentStock.toLocaleString()} litres. Requested: ${requestedQuantity.toLocaleString()} litres`)
-        return
-      }
-
-      const result = await onSave({
-        ...formData,
-        price: formData.price,
-      })
-      
-      if (result.success) {
-        toast({
-          title: "Success",
-          description: "Work detail added successfully",
-        })
-        onClose()
-      }
-    } catch (error) {
-      console.error('Save error:', error)
-      setOrderError(error instanceof Error ? error.message : "Failed to save work detail")
-    } finally {
-      setIsLoading(false)
+    // Basic validation
+    if (formData.products.length === 0 || formData.products.every(p => parseFloat(p.quantity) <= 0)) {
+      alert("Please add at least one product with a quantity greater than 0.");
+      setIsSaving(false);
+      return;
     }
-  }
 
-  const handleChange = (field: keyof WorkFormData, value: string) => {
-    setFormData(prev => ({ ...prev, [field]: value }))
-  }
+    if (!formData.owner || !formData.truck_number || !formData.orderno) {
+      alert("Please fill in Owner, Truck Number, and Order Number.");
+      setIsSaving(false);
+      return;
+    }
+
+    const multiProductForm: MultiProductWorkFormData = {
+      owner: formData.owner,
+      truck_number: formData.truck_number,
+      status: formData.status,
+      orderno: formData.orderno,
+      depot: formData.depot,
+      destination: formData.destination,
+      products: formData.products
+    };
+
+    await onSave(multiProductForm);
+    setIsSaving(false);
+  };
+
+  // Calculate total quantity and value for display
+  const totalQuantity = formData.products.reduce((sum, product) => sum + parseFloat(product.quantity), 0);
+  const totalValue = formData.products.reduce((sum, product) => sum + (parseFloat(product.quantity) * parseFloat(product.price)), 0);
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* Owner Input */}
-        <div className="space-y-2">
+      {/* Top Level Fields */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div>
           <Label htmlFor="owner">Owner</Label>
-          <Input
-            id="owner"
-            value={formData.owner}
-            onChange={(e) => handleChange("owner", e.target.value)}
-            placeholder="Enter owner name"
-          />
+          <Input id="owner" name="owner" value={formData.owner} onChange={handleChange} required />
         </div>
-
-        {/* Product Select */}
-        <div className="space-y-2">
-          <Label htmlFor="product">Product</Label>
-          <Select
-            value={formData.product}
-            onValueChange={(value) => handleChange("product", value)}
-          >
-            <SelectTrigger>
-              <SelectValue placeholder="Select product" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="AGO">AGO</SelectItem>
-              <SelectItem value="PMS">PMS</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-
-        {/* Truck Number Input */}
-        <div className="space-y-2">
+        <div>
           <Label htmlFor="truck_number">Truck Number</Label>
-          <Input
-            id="truck_number"
-            value={formData.truck_number}
-            onChange={(e) => handleChange("truck_number", e.target.value)}
-            placeholder="Enter truck number"
-          />
+          <Input id="truck_number" name="truck_number" value={formData.truck_number} onChange={handleChange} required />
         </div>
-
-        {/* Quantity Input */}
-        <div className="space-y-2">
-          <Label htmlFor="quantity">Quantity</Label>
-          <Input
-            id="quantity"
-            type="number"
-            value={formData.quantity}
-            onChange={(e) => handleChange("quantity", e.target.value)}
-            placeholder="Enter quantity"
-          />
+        <div>
+          <Label htmlFor="orderno">Order No</Label>
+          <Input id="orderno" name="orderno" value={formData.orderno} onChange={handleChange} required />
         </div>
-
-        {/* Order Number Input */}
-        <div className="space-y-2">
-          <Label htmlFor="orderno">Order Number</Label>
-          <Input
-            id="orderno"
-            value={formData.orderno}
-            onChange={(e) => handleChange("orderno", e.target.value)}
-            placeholder="Enter order number"
-          />
-        </div>
-
-        {/* Depot Input */}
-        <div className="space-y-2">
-          <Label htmlFor="depot">Depot</Label>
-          <Input
-            id="depot"
-            value={formData.depot}
-            onChange={(e) => handleChange("depot", e.target.value)}
-            placeholder="Enter depot"
-          />
-        </div>
-
-        {/* Destination Input */}
-        <div className="space-y-2">
-          <Label htmlFor="destination">Destination</Label>
-          <Input
-            id="destination"
-            value={formData.destination}
-            onChange={(e) => handleChange("destination", e.target.value)}
-            placeholder="Enter destination"
-          />
-        </div>
-
-        {/* Price Input */}
-        <div className="space-y-2">
-          <Label htmlFor="price">Price</Label>
-          <Input
-            id="price"
-            type="number"
-            step="0.001"
-            value={formData.price}
-            onChange={(e) => handleChange("price", e.target.value)}
-            placeholder="Enter price (up to 3 decimal places)"
-          />
-        </div>
-
-        {/* Status Select */}
-        <div className="space-y-2">
+        <div>
           <Label htmlFor="status">Status</Label>
-          <Select
-            value={formData.status}
-            onValueChange={(value) => handleChange("status", value)}
-          >
-            <SelectTrigger>
+          <Select value={formData.status} onValueChange={handleStatusChange}>
+            <SelectTrigger id="status">
               <SelectValue placeholder="Select status" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="not queued">Not Queued</SelectItem>
               <SelectItem value="queued">Queued</SelectItem>
+              <SelectItem value="not queued">Not Queued</SelectItem>
+              {/* Add other statuses if needed */}
             </SelectContent>
           </Select>
         </div>
+        <div>
+          <Label htmlFor="depot">Depot</Label>
+          <Input id="depot" name="depot" value={formData.depot} onChange={handleChange} />
+        </div>
+        <div>
+          <Label htmlFor="destination">Destination</Label>
+          <Input id="destination" name="destination" value={formData.destination} onChange={handleChange} />
+        </div>
       </div>
 
-      {orderError && (
-        <div className="text-red-500 text-sm">{orderError}</div>
-      )}
+      {/* Products Section */}
+      <div className="space-y-3 border-t pt-4">
+        <h3 className="text-lg font-medium">Products</h3>
+        {formData.products.map((product, index) => (
+          <div key={index} className="grid grid-cols-1 sm:grid-cols-4 gap-2 items-end border p-3 rounded">
+            <div>
+              <Label htmlFor={`product-type-${index}`}>Product</Label>
+              <Select
+                value={product.product}
+                onValueChange={(value) => handleProductChange(index, 'product', value)}
+              >
+                <SelectTrigger id={`product-type-${index}`}>
+                  <SelectValue placeholder="Select product" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="AGO">AGO</SelectItem>
+                  <SelectItem value="PMS">PMS</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label htmlFor={`product-quantity-${index}`}>Quantity</Label>
+              <Input
+                id={`product-quantity-${index}`}
+                type="number"
+                value={product.quantity}
+                onChange={(e) => handleProductChange(index, 'quantity', e.target.value)}
+                min="0"
+                step="any"
+                required
+              />
+            </div>
+            <div>
+              <Label htmlFor={`product-price-${index}`}>Price</Label>
+              <Input
+                id={`product-price-${index}`}
+                type="number"
+                value={product.price}
+                onChange={(e) => handleProductChange(index, 'price', e.target.value)}
+                min="0"
+                step="any"
+                required
+              />
+            </div>
+            <div className="flex items-center">
+              {formData.products.length > 1 && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => removeProduct(index)}
+                  className="text-red-500 hover:text-red-700"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
+          </div>
+        ))}
+        <Button type="button" variant="outline" size="sm" onClick={addProduct} className="mt-2">
+          <Plus className="h-4 w-4 mr-2" /> Add Product
+        </Button>
+      </div>
 
-      <div className="flex justify-end gap-4">
-        <Button type="button" variant="outline" onClick={onClose}>
+      {/* Summary Display */}
+      <div className="border-t pt-4 flex justify-between text-sm font-medium">
+          <span>Total Quantity: {formatNumber(totalQuantity)}</span>
+          <span>Total Value: ${formatNumber(totalValue)}</span>
+      </div>
+
+      {/* Action Buttons */}
+      <div className="flex justify-end space-x-2 pt-4">
+        <Button type="button" variant="outline" onClick={onClose} disabled={isSaving}>
           Cancel
         </Button>
-        <Button type="submit" disabled={isLoading}>
-          {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-          Save
+        <Button type="submit" disabled={isSaving}>
+          {isSaving ? "Saving..." : "Save Work Detail"}
         </Button>
       </div>
     </form>
-  )
+  );
 }

@@ -1,5 +1,6 @@
 'use client'
 
+import { AddWorkFormData, MultiProductWorkFormData } from "@/types/work";
 // Add AnimatePresence and motion imports
 import { motion, AnimatePresence } from 'framer-motion'
 // Add Avatar imports
@@ -89,6 +90,8 @@ interface WorkDetail {
   gatePassGenerated?: boolean; // New field to track gate pass generation
   gatePassGeneratedAt?: string; // New field to track gate pass generation time
   driverPhone?: string; // Add this field to track driver phone number
+  isMultiProduct?: boolean; // Flag for multi-product orders
+  originalOrderNo?: string; // Original order number for multi-product orders
 }
 
 // Update the SummaryStats interface
@@ -408,79 +411,118 @@ export default function WorkManagementPage() {
 
   // 2. Define functions before useEffect hooks
   const updateSummaryData = (data: WorkDetail[]) => {
+    // First group orders by truck number and original order number
+    const groupedOrders = data.reduce((acc, detail) => {
+      const key = `${detail.truck_number}-${detail.originalOrderNo || detail.orderno}`;
+      if (!acc[key]) {
+        acc[key] = {
+          owner: detail.owner,
+          truck_number: detail.truck_number,
+          products: [],
+          status: detail.status,
+          loaded: detail.loaded,
+          destination: detail.destination,
+          orderno: detail.originalOrderNo || detail.orderno
+        };
+      }
+      acc[key].products.push({
+        product: detail.product,
+        quantity: detail.quantity
+      });
+      return acc;
+    }, {} as Record<string, any>);
+  
+    const groupedArray = Object.values(groupedOrders);
+  
     const stats: SummaryStats = {
-      totalOrders: 0,
+      totalOrders: groupedArray.length, // Count unique trucks
       queuedOrders: 0,
       unqueuedOrders: 0,
       agoOrders: 0,
       pmsOrders: 0,
       loadedOrders: 0,
       pendingOrders: 0,
-      pendingAgoOrders: 0,  // Add this
-      pendingPmsOrders: 0,  // Add this
-      unqueuedAgoOrders: 0,  // Add this
-      unqueuedPmsOrders: 0   // Add this
+      pendingAgoOrders: 0,
+      pendingPmsOrders: 0,
+      unqueuedAgoOrders: 0,
+      unqueuedPmsOrders: 0
     };
-    
-    const ownerSummaryData: OwnerSummary = {};
-
-    data.forEach(detail => {
-      stats.totalOrders++;
       
-      if (detail.loaded) stats.loadedOrders++;
-      if (detail.status === "queued" && !detail.loaded) stats.pendingOrders++;
-      if (detail.product.trim().toUpperCase() === "AGO") stats.agoOrders++;
-      if (detail.product.trim().toUpperCase() === "PMS") stats.pmsOrders++;
+    const ownerSummaryData: OwnerSummary = {};
+  
+    // Process grouped orders
+    groupedArray.forEach(truck => {
+      if (truck.loaded) stats.loadedOrders++;
+      if (truck.status === "queued" && !truck.loaded) stats.pendingOrders++;
       
       // Update status counting logic
-      if (detail.status === "queued") stats.queuedOrders++;
-      else if (detail.status === "completed") stats.queuedOrders++; // Count completed as queued
-      else stats.unqueuedOrders++;
-
-      // Add pending product counts
-      if (detail.status === "queued" && !detail.loaded) {
-        if (detail.product.trim().toUpperCase() === "AGO") stats.pendingAgoOrders++;
-        if (detail.product.trim().toUpperCase() === "PMS") stats.pendingPmsOrders++;
+      if (truck.status === "queued" || truck.status === "completed") {
+        stats.queuedOrders++;
+      } else {
+        stats.unqueuedOrders++;
       }
-
-      // Add unqueued product counts
-      if (detail.status !== "queued" && detail.status !== "completed") {
-        if (detail.product.trim().toUpperCase() === "AGO") stats.unqueuedAgoOrders++;
-        if (detail.product.trim().toUpperCase() === "PMS") stats.unqueuedPmsOrders++;
-      }
-
-      // Update owner summary with the same logic
-      if (!ownerSummaryData[detail.owner]) {
-        ownerSummaryData[detail.owner] = {
-          totalOrders: 1,
-          agoOrders: detail.product.trim().toUpperCase() === "AGO" ? 1 : 0,
-          pmsOrders: detail.product.trim().toUpperCase() === "PMS" ? 1 : 0,
-          queuedOrders: (detail.status === "queued" || detail.status === "completed") ? 1 : 0,
-          unqueuedOrders: (detail.status !== "queued" && detail.status !== "completed") ? 1 : 0,
-          loadedOrders: detail.loaded ? 1 : 0,
-          pendingOrders: detail.status === "queued" && !detail.loaded ? 1 : 0,
-          products: { [detail.product]: 1 },
-          loadedTrucks: detail.loaded ? [detail] : [],
-          pendingTrucks: detail.status === "queued" && !detail.loaded ? [detail] : []
+  
+      // Count products within each truck
+      truck.products.forEach((p: { product: string }) => {
+        if (p.product.trim().toUpperCase() === "AGO") {
+          stats.agoOrders++;
+          if (truck.status === "queued" && !truck.loaded) stats.pendingAgoOrders++;
+          if (truck.status !== "queued" && truck.status !== "completed") stats.unqueuedAgoOrders++;
+        }
+        if (p.product.trim().toUpperCase() === "PMS") {
+          stats.pmsOrders++;
+          if (truck.status === "queued" && !truck.loaded) stats.pendingPmsOrders++;
+          if (truck.status !== "queued" && truck.status !== "completed") stats.unqueuedPmsOrders++;
+        }
+      });
+  
+      // Update owner summary
+      if (!ownerSummaryData[truck.owner]) {
+        ownerSummaryData[truck.owner] = {
+          totalOrders: 1, // Count trucks, not products
+          agoOrders: 0,
+          pmsOrders: 0,
+          queuedOrders: 0,
+          unqueuedOrders: 0,
+          loadedOrders: 0,
+          pendingOrders: 0,
+          products: {},
+          loadedTrucks: [],
+          pendingTrucks: []
         };
       } else {
-        const ownerData = ownerSummaryData[detail.owner];
-        ownerData.totalOrders++;
-        if (detail.product.trim().toUpperCase() === "AGO") ownerData.agoOrders++;
-        if (detail.product.trim().toUpperCase() === "PMS") ownerData.pmsOrders++;
-        if (detail.status === "queued" || detail.status === "completed") ownerData.queuedOrders++;
-        else ownerData.unqueuedOrders++;
-        if (detail.loaded) {
-          ownerData.loadedOrders++;
-          ownerData.loadedTrucks.push(detail);
-        }
-        if (detail.status === "queued" && !detail.loaded) {
-          ownerData.pendingOrders++;
-          ownerData.pendingTrucks.push(detail);
-        }
+        ownerSummaryData[truck.owner].totalOrders++;
+      }
+  
+      const ownerData = ownerSummaryData[truck.owner];
+      truck.products.forEach((p: { product: string }) => {
+        if (p.product.trim().toUpperCase() === "AGO") ownerData.agoOrders++;
+        if (p.product.trim().toUpperCase() === "PMS") ownerData.pmsOrders++;
+      });
+  
+      if (truck.status === "queued" || truck.status === "completed") ownerData.queuedOrders++;
+      else ownerData.unqueuedOrders++;
+  
+      if (truck.loaded) {
+        ownerData.loadedOrders++;
+        // Find the original details for this truck
+        const truckDetails = data.filter(d => 
+          d.truck_number === truck.truck_number && 
+          (d.originalOrderNo === truck.orderno || d.orderno === truck.orderno)
+        );
+        ownerData.loadedTrucks.push(...truckDetails);
+      }
+  
+      if (truck.status === "queued" && !truck.loaded) {
+        ownerData.pendingOrders++;
+        const truckDetails = data.filter(d => 
+          d.truck_number === truck.truck_number && 
+          (d.originalOrderNo === truck.orderno || d.orderno === truck.orderno)
+        );
+        ownerData.pendingTrucks.push(...truckDetails);
       }
     });
-
+  
     setSummaryStats(stats);
     setOwnerSummary(ownerSummaryData);
   };
@@ -632,19 +674,7 @@ export default function WorkManagementPage() {
     }
   };
 
-  interface WorkFormData {
-    owner: string;
-    product: string;
-    truck_number: string;
-    quantity: string;
-    status: string;
-    orderno: string;
-    depot: string;
-    destination: string;
-    price: string;
-  }
-
-  const handleAddNew = async (formData: WorkFormData): Promise<{ success: boolean; id: string }> => {
+  const handleAddNew = async (formData: MultiProductWorkFormData): Promise<{ success: boolean; id: string }> => {
     try {
       // Check for duplicate order number
       const orderRef = ref(database, 'work_details')
@@ -655,58 +685,60 @@ export default function WorkManagementPage() {
       ))
 
       if (orderSnapshot.exists()) {
-        const existingOrder = Object.values(orderSnapshot.val())[0] as WorkDetail
         toast({
           title: "Duplicate Order Number",
-          description: `Order number ${formData.orderno} is already used by truck ${existingOrder.truck_number}`,
+          description: `Order number ${formData.orderno} is already used`,
         })
         return { success: false, id: '' }
       }
 
-      // Check stock availability
-      const stockRef = ref(database, `stocks/${formData.product.toLowerCase()}`)
-      const stockSnapshot = await get(stockRef)
-      const currentStock = stockSnapshot.val()?.quantity || 0
-      const requestedQuantity = parseFloat(formData.quantity)
-      
-      if (currentStock < requestedQuantity) {
-        toast({
-          title: "Insufficient Stock",
-          description: `Available ${formData.product}: ${currentStock.toLocaleString()} litres. Requested: ${requestedQuantity.toLocaleString()} litres`,
+      // Create separate entries for each product
+      const results = await Promise.all(formData.products.map(async (productEntry) => {
+        // Check stock availability
+        const stockRef = ref(database, `stocks/${productEntry.product.toLowerCase()}`)
+        const stockSnapshot = await get(stockRef)
+        const currentStock = stockSnapshot.val()?.quantity || 0
+        const requestedQuantity = parseFloat(productEntry.quantity)
+        
+        if (currentStock < requestedQuantity) {
+          throw new Error(`Insufficient ${productEntry.product} stock. Available: ${currentStock}, Requested: ${requestedQuantity}`);
+        }
+
+        // Create work detail reference
+        const newWorkDetailRef = push(ref(database, 'work_details'))
+        
+        const workDetailData = {
+          owner: formData.owner,
+          product: productEntry.product,
+          truck_number: formData.truck_number,
+          quantity: parseFloat(productEntry.quantity),
+          status: formData.status,
+          orderno: `${formData.orderno}-${productEntry.product}`, // Add product suffix to order number
+          depot: formData.depot,
+          destination: formData.destination,
+          price: parseFloat(productEntry.price),
+          loaded: false,
+          paid: false,
+          previous_trucks: [],
+          createdAt: new Date().toISOString(),
+          id: newWorkDetailRef.key,
+          isMultiProduct: true, // Add flag for multi-product orders
+          originalOrderNo: formData.orderno // Keep original order number for reference
+        }
+
+        // Save work detail
+        await set(newWorkDetailRef, workDetailData)
+
+        // Update stock
+        await update(ref(database, `stocks/${productEntry.product.toLowerCase()}`), {
+          quantity: currentStock - parseFloat(productEntry.quantity)
         })
-        return { success: false, id: '' }
-      }
 
-      // Create new work detail reference
-      const newWorkDetailRef = push(ref(database, 'work_details'))
-      
-      const workDetailData = {
-        owner: formData.owner,
-        product: formData.product,
-        truck_number: formData.truck_number,
-        quantity: parseFloat(formData.quantity),
-        status: formData.status,
-        orderno: formData.orderno,
-        depot: formData.depot,
-        destination: formData.destination,
-        price: parseFloat(formData.price),
-        loaded: false,
-        paid: false,
-        previous_trucks: [],
-        createdAt: new Date().toISOString(),
-        id: newWorkDetailRef.key
-      }
-
-      // Save work detail
-      await set(newWorkDetailRef, workDetailData)
-
-      // Update stock
-      await update(ref(database, `stocks/${formData.product.toLowerCase()}`), {
-        quantity: currentStock - parseFloat(formData.quantity)
-      })
+        return newWorkDetailRef.key;
+      }));
 
       // Set the last added ID to trigger the highlight effect
-      setLastAddedId(newWorkDetailRef.key)
+      setLastAddedId(results[0]);
       
       // Reset the highlight after 3 blinks (1.5 seconds)
       setTimeout(() => {
@@ -715,10 +747,10 @@ export default function WorkManagementPage() {
 
       toast({
         title: "Success",
-        description: "Work detail added successfully",
+        description: `Added ${results.length} product entries successfully`,
       })
       
-      return { success: true, id: newWorkDetailRef.key! }
+      return { success: true, id: results[0]! }
 
     } catch (error) {
       console.error('Save error:', error)
@@ -876,116 +908,189 @@ export default function WorkManagementPage() {
       });
   };
 
-  // Update handleCopyV2Summary to include trucks changed (status/loaded/paid) within 7 days, not just created
-const handleCopyV2Summary = () => {
-  const sevenDaysAgo = new Date();
-  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+  // Update handleCopyV2Summary to handle multiple products under the same truck number
+  const handleCopyV2Summary = () => {
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
-  // Helper: returns true if any of createdAt, loaded, paid, or status change is within 7 days
-  function isRecent(detail: WorkDetail) {
-    // Check createdAt
-    if (detail.createdAt && new Date(detail.createdAt) > sevenDaysAgo) return true;
-    // Check loaded date (if available)
-    if (detail.loaded && detail.at20 && detail.createdAt && new Date(detail.createdAt) > sevenDaysAgo) return true;
-    // Check paid (if available)
-    if (detail.paid && detail.createdAt && new Date(detail.createdAt) > sevenDaysAgo) return true;
-    // Check if updatedAt or similar exists (if you have such a field)
-    // Otherwise, fallback: treat all loaded/paid trucks as recent if loaded/paid is true and createdAt is missing
-    return false;
-  }
-
-  // Accept as "recent" if createdAt is within 7 days OR loaded/paid/paymentPending/released changed within 7 days
-  const recentOrders = workDetails.filter(d => {
-    // If createdAt is recent
-    if (d.createdAt && new Date(d.createdAt) > sevenDaysAgo) return true;
-    // If loaded and loaded in last 7 days (using createdAt as proxy)
-    if (d.loaded && d.createdAt && new Date(d.createdAt) > sevenDaysAgo) return true;
-    // If paid and paid in last 7 days (using createdAt as proxy)
-    if (d.paid && d.createdAt && new Date(d.createdAt) > sevenDaysAgo) return true;
-    // If paymentPending set in last 7 days (using createdAt as proxy)
-    if (d.paymentPending && d.createdAt && new Date(d.createdAt) > sevenDaysAgo) return true;
-    // If released in last 7 days (using createdAt as proxy)
-    if (d.released && d.createdAt && new Date(d.createdAt) > sevenDaysAgo) return true;
-    // If you have updatedAt, loadedAt, paidAt, releasedAt, use those instead of createdAt for more accuracy
-    return false;
-  });
-
-  // ...rest of the function unchanged...
-  // Calculate overall stats
-  const stats = {
-    totalOrders: recentOrders.length,
-    queuedOrders: recentOrders.filter(d => d.status === "queued" || d.status === "completed").length,
-    loadedOrders: recentOrders.filter(d => d.loaded).length,
-    pendingOrders: recentOrders.filter(d => d.status === "queued" && !d.loaded).length,
-    agoOrders: recentOrders.filter(d => d.product === "AGO").length,
-    pmsOrders: recentOrders.filter(d => d.product === "PMS").length,
-  };
-
-  // Group by owner
-  const ownerMap: { [owner: string]: {
-    totalOrders: number,
-    queuedOrders: number,
-    loadedOrders: number,
-    pendingOrders: number,
-    agoOrders: number,
-    pmsOrders: number
-  }} = {};
-
-  recentOrders.forEach(d => {
-    if (!ownerMap[d.owner]) {
-      ownerMap[d.owner] = {
-        totalOrders: 0,
-        queuedOrders: 0,
-        loadedOrders: 0,
-        pendingOrders: 0,
-        agoOrders: 0,
-        pmsOrders: 0
-      };
+    // Define the type for grouped orders
+    interface GroupedOrder {
+      truck_number: string;
+      owner: string;
+      products: Array<{
+        product: string;
+        quantity: number;
+        at20?: string;
+      }>;
+      status: string;
+      loaded: boolean;
+      paid: boolean;
+      createdAt?: string;
+      destination: string;
     }
-    ownerMap[d.owner].totalOrders++;
-    if (d.status === "queued" || d.status === "completed") ownerMap[d.owner].queuedOrders++;
-    if (d.loaded) ownerMap[d.owner].loadedOrders++;
-    if (d.status === "queued" && !d.loaded) ownerMap[d.owner].pendingOrders++;
-    if (d.product === "AGO") ownerMap[d.owner].agoOrders++;
-    if (d.product === "PMS") ownerMap[d.owner].pmsOrders++;
-  });
 
-  // Format summary
-  let summary = `Summary :\n\n`;
-  summary += `1. Total Orders: ${stats.totalOrders}\n\n`;
-  summary += `2. Queued Orders: ${stats.queuedOrders}\n\n`;
-  summary += `3. Loaded Orders: ${stats.loadedOrders}\n\n`;
-  summary += `4. Pending Orders: ${stats.pendingOrders}\n\n`;
-  summary += `5. AGO Orders: ${stats.agoOrders}\n\n`;
-  summary += `6. PMS Orders: ${stats.pmsOrders}\n\n`;
-  summary += `\n---\n\nOwner Summary:\n\n`;
+    // Define the type for owner map
+    interface OwnerMapData {
+      totalTrucks: number;
+      queuedTrucks: number;
+      loadedTrucks: number;
+      pendingTrucks: number;
+      agoProducts: number;
+      pmsProducts: number;
+      trucks: Array<{
+        truck_number: string;
+        products: Array<{
+          product: string;
+          quantity: number;
+          at20?: string;
+        }>;
+        status: string;
+        loaded: boolean;
+        destination: string;
+      }>;
+    }
 
-  let idx = 1;
-  Object.entries(ownerMap).forEach(([owner, data]) => {
-    summary += `${idx}. ${owner}:\n\n`;
-    summary += `Total Orders: ${data.totalOrders}\n\n`;
-    summary += `Queued Orders: ${data.queuedOrders}\n\n`;
-    summary += `Loaded Orders: ${data.loadedOrders}\n\n`;
-    summary += `Pending Orders: ${data.pendingOrders}\n\n`;
-    summary += `AGO Orders: ${data.agoOrders}\n\n`;
-    summary += `PMS Orders: ${data.pmsOrders}\n\n\n`;
-    idx++;
-  });
-
-  navigator.clipboard.writeText(summary)
-    .then(() => {
-      toast({
-        title: "Copied",
-        description: "V2 summary (last 7 days, including recent changes) copied to clipboard",
+    // Group orders by truck number and combine products
+    const groupedOrders = workDetails.reduce((acc, detail) => {
+      const key = `${detail.truck_number}-${detail.originalOrderNo || detail.orderno}`;
+      if (!acc[key]) {
+        acc[key] = {
+          truck_number: detail.truck_number,
+          owner: detail.owner,
+          products: [],
+          status: detail.status,
+          loaded: detail.loaded || false,
+          destination: detail.destination,
+          createdAt: detail.createdAt,
+          paid: detail.paid || false
+        };
+      }
+      acc[key].products.push({
+        product: detail.product,
+        quantity: parseFloat(detail.quantity.toString()),
+        at20: detail.at20
       });
-    })
-    .catch(() => {
-      toast({
-        title: "Error",
-        description: "Failed to copy V2 summary",
-      });
+      return acc;
+    }, {} as Record<string, GroupedOrder>);
+
+    // Filter recent orders
+    const recentOrders = Object.values(groupedOrders).filter(order => {
+      if (order.createdAt && new Date(order.createdAt) > sevenDaysAgo) return true;
+      if (order.loaded && order.createdAt && new Date(order.createdAt) > sevenDaysAgo) return true;
+      if (order.paid && order.createdAt && new Date(order.createdAt) > sevenDaysAgo) return true;
+      return false;
     });
-};
+
+    // Calculate stats based on grouped orders
+    const stats = recentOrders.reduce((acc, order) => {
+      acc.totalTrucks++;
+      if (order.status === "queued" || order.status === "completed") acc.queuedTrucks++;
+      if (order.loaded) acc.loadedTrucks++;
+      if (order.status === "queued" && !order.loaded) acc.pendingTrucks++;
+      
+      // Count products within each truck
+      order.products.forEach((p) => {
+        if (p.product === "AGO") acc.agoProducts++;
+        if (p.product === "PMS") acc.pmsProducts++;
+      });
+      
+      return acc;
+    }, {
+      totalTrucks: 0,
+      queuedTrucks: 0,
+      loadedTrucks: 0,
+      pendingTrucks: 0,
+      agoProducts: 0,
+      pmsProducts: 0
+    });
+
+    // Group by owner with combined products
+    const ownerMap = recentOrders.reduce((acc, order) => {
+      if (!acc[order.owner]) {
+        acc[order.owner] = {
+          totalTrucks: 0,
+          queuedTrucks: 0,
+          loadedTrucks: 0,
+          pendingTrucks: 0,
+          agoProducts: 0,
+          pmsProducts: 0,
+          trucks: []
+        };
+      }
+
+      const ownerData = acc[order.owner];
+      ownerData.totalTrucks++;
+      if (order.status === "queued" || order.status === "completed") ownerData.queuedTrucks++;
+      if (order.loaded) ownerData.loadedTrucks++;
+      if (order.status === "queued" && !order.loaded) ownerData.pendingTrucks++;
+      
+      order.products.forEach((p) => {
+        if (p.product === "AGO") ownerData.agoProducts++;
+        if (p.product === "PMS") ownerData.pmsProducts++;
+      });
+
+      ownerData.trucks.push({
+        truck_number: order.truck_number,
+        products: order.products,
+        status: order.status,
+        loaded: order.loaded,
+        destination: order.destination
+      });
+
+      return acc;
+    }, {} as Record<string, OwnerMapData>);
+
+    // Format summary
+    let summary = `Summary (Last 7 Days):\n\n`;
+    summary += `1. Total Trucks: ${stats.totalTrucks}\n`;
+    summary += `2. Queued Trucks: ${stats.queuedTrucks}\n`;
+    summary += `3. Loaded Trucks: ${stats.loadedTrucks}\n`;
+    summary += `4. Pending Trucks: ${stats.pendingTrucks}\n`;
+    summary += `5. Total Products:\n`;
+    summary += `   - AGO: ${stats.agoProducts}\n`;
+    summary += `   - PMS: ${stats.pmsProducts}\n\n`;
+    summary += `\n---\n\nOwner Summary:\n\n`;
+
+    Object.entries(ownerMap).forEach(([owner, data], index) => {
+      summary += `${index + 1}. ${owner}:\n\n`;
+      summary += `Trucks: ${data.totalTrucks}\n`;
+      summary += `Queued: ${data.queuedTrucks}\n`;
+      summary += `Loaded: ${data.loadedTrucks}\n`;
+      summary += `Pending: ${data.pendingTrucks}\n`;
+      summary += `Products:\n`;
+      summary += `- AGO: ${data.agoProducts}\n`;
+      summary += `- PMS: ${data.pmsProducts}\n\n`;
+      
+      summary += `Truck Details:\n`;
+      data.trucks.forEach((truck, idx) => {
+        summary += `${idx + 1}. ${truck.truck_number}\n`;
+        summary += `   Status: ${truck.status}\n`;
+        summary += `   Loaded: ${truck.loaded ? "Yes" : "No"}\n`;
+        summary += `   Destination: ${truck.destination}\n`;
+        summary += `   Products:\n`;
+        truck.products.forEach((p) => {
+          summary += `   - ${p.product}: ${p.quantity}${p.at20 ? ` (AT20: ${p.at20})` : ""}\n`;
+        });
+        summary += `\n`;
+      });
+      
+      summary += `\n`;
+    });
+
+    navigator.clipboard.writeText(summary)
+      .then(() => {
+        toast({
+          title: "Copied",
+          description: "V2 summary with combined products copied to clipboard",
+        });
+      })
+      .catch(() => {
+        toast({
+          title: "Error",
+          description: "Failed to copy V2 summary",
+        });
+      });
+  };
 
   const handleDownloadPDF = () => {
     const doc = new jsPDF({
@@ -2942,11 +3047,35 @@ const showTruckQuickView = (detail: WorkDetail) => {
                 <AddWorkDialog 
                   onClose={() => setIsAddModalOpen(false)} 
                   onSave={async (formData) => {
-                    const result = await handleAddNew(formData);
-                    if (result.success) {
-                      setIsAddModalOpen(false);
+                    if ('products' in formData) {
+                      // This is MultiProductWorkFormData
+                      const result = await handleAddNew(formData);
+                      if (result.success) {
+                        setIsAddModalOpen(false);
+                      }
+                      return result; // Return the full result object
+                    } else {
+                      // Handle AddWorkFormData case
+                      // Convert to MultiProductWorkFormData format
+                      const multiProductData: MultiProductWorkFormData = {
+                        owner: formData.owner,
+                        truck_number: formData.truck_number,
+                        status: formData.status,
+                        orderno: formData.orderno,
+                        depot: formData.depot,
+                        destination: formData.destination,
+                        products: [{
+                          product: formData.product,
+                          quantity: formData.quantity.toString(),
+                          price: formData.price.toString()
+                        }]
+                      };
+                      const result = await handleAddNew(multiProductData);
+                      if (result.success) {
+                        setIsAddModalOpen(false);
+                      }
+                      return result;
                     }
-                    return result; // Return the full result object
                   }} 
                 />
               </DialogContent>
@@ -3286,4 +3415,3 @@ const showTruckQuickView = (detail: WorkDetail) => {
 function arrayUnion(truck_number: string) {
   throw new Error('Function not implemented.')
 }
-

@@ -32,6 +32,34 @@ export interface WorkFormData {
   price: string;
 }
 
+export interface AddWorkFormData {
+  owner: string;
+  truck_number: string;
+  status: string;
+  orderno: string;
+  depot: string;
+  destination: string;
+  product: string;
+  quantity: string;
+  price: string;
+}
+
+export interface ProductEntry {
+  product: string;
+  quantity: string;
+  price: string;
+}
+
+export interface MultiProductWorkFormData {
+  owner: string;
+  truck_number: string;
+  status: string;
+  orderno: string;
+  depot: string;
+  destination: string;
+  products: ProductEntry[];
+}
+
 export interface SummaryStats {
   totalOrders: number;
   queuedOrders: number;
