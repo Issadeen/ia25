@@ -21,6 +21,8 @@ import { useInactivityTimer } from "@/hooks/useInactivityTimer";
 import { ParticlesBackground } from "@/components/Particles";
 import { AUTH_CONSTANTS } from "@/lib/constants";
 import { useProfileImage } from "@/hooks/useProfileImage";
+import { authOptions } from "@/lib/auth";
+import { getServerSession } from "next-auth/next";
 
 declare module "next-auth" {
   interface Session {
@@ -45,35 +47,35 @@ export default function DashboardPage() {
       try {
         localStorage.clear();
         sessionStorage.clear();
-        await signOut({ 
+        await signOut({
           redirect: true,
-          callbackUrl: '/login'
+          callbackUrl: "/login",
         });
       } catch (error) {
-        console.error('Logout error:', error);
-        window.location.href = '/login';
+        console.error("Logout error:", error);
+        window.location.href = "/login";
       }
     },
   });
 
   useEffect(() => {
     const handleActivity = () => resetInactivityTimer();
-    
+
     if (status === "authenticated") {
       setLastLogin(new Date().toLocaleString());
-      
-      window.addEventListener('mousemove', handleActivity);
-      window.addEventListener('keydown', handleActivity);
-      window.addEventListener('click', handleActivity);
-      window.addEventListener('scroll', handleActivity);
-      window.addEventListener('touchstart', handleActivity);
+
+      window.addEventListener("mousemove", handleActivity);
+      window.addEventListener("keydown", handleActivity);
+      window.addEventListener("click", handleActivity);
+      window.addEventListener("scroll", handleActivity);
+      window.addEventListener("touchstart", handleActivity);
 
       return () => {
-        window.removeEventListener('mousemove', handleActivity);
-        window.removeEventListener('keydown', handleActivity);
-        window.removeEventListener('click', handleActivity);
-        window.removeEventListener('scroll', handleActivity);
-        window.removeEventListener('touchstart', handleActivity);
+        window.removeEventListener("mousemove", handleActivity);
+        window.removeEventListener("keydown", handleActivity);
+        window.removeEventListener("click", handleActivity);
+        window.removeEventListener("scroll", handleActivity);
+        window.removeEventListener("touchstart", handleActivity);
       };
     }
   }, [status, resetInactivityTimer]);
@@ -87,13 +89,13 @@ export default function DashboardPage() {
       try {
         const response = await fetch("/api/auth/firebase-token");
         if (!response.ok) {
-          throw new Error('Failed to fetch Firebase token');
+          throw new Error("Failed to fetch Firebase token");
         }
-        
+
         const { customToken } = await response.json();
         const auth = getFirebaseAuth();
         if (!auth) {
-          throw new Error('Firebase auth is not initialized');
+          throw new Error("Firebase auth is not initialized");
         }
         await signInWithCustomToken(auth, customToken);
       } catch (error) {
@@ -113,7 +115,7 @@ export default function DashboardPage() {
     async (imageBlob: Blob) => {
       const auth = getFirebaseAuth();
       const storage = getFirebaseStorage();
-      const userEmail = session?.user?.email;
+      const userEmail = (session?.user as { email?: string | null })?.email;
 
       if (!auth || !auth.currentUser || !userEmail) {
         toast({
@@ -127,7 +129,7 @@ export default function DashboardPage() {
       try {
         const fileName = `profile-pics/${userEmail.replace(/[.@]/g, "_")}.jpg`;
         if (!storage) {
-          throw new Error('Firebase storage is not initialized');
+          throw new Error("Firebase storage is not initialized");
         }
         const imageRef = ref(storage, fileName);
 
@@ -166,7 +168,7 @@ export default function DashboardPage() {
         });
       }
     },
-    [session?.user?.email, toast, update]
+    [session?.user, toast, update]
   );
 
   if (status === "loading") return null;
@@ -182,7 +184,7 @@ export default function DashboardPage() {
 
       <main className="container mx-auto px-4 pt-16">
         <DashboardContent
-          userName={session?.user?.name || session?.user?.email || "User"}
+          userName={session?.user?.name || "User"}
           lastLogin={lastLogin}
         />
       </main>
