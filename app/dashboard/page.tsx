@@ -115,9 +115,8 @@ export default function DashboardPage() {
     async (imageBlob: Blob) => {
       const auth = getFirebaseAuth();
       const storage = getFirebaseStorage();
-      const userEmail = (session?.user as { email?: string | null })?.email;
 
-      if (!auth || !auth.currentUser || !userEmail) {
+      if (!auth || !auth.currentUser) {
         toast({
           title: "Error",
           description: "You must be logged in to upload images",
@@ -126,8 +125,26 @@ export default function DashboardPage() {
         return;
       }
 
+      let userEmailForFilename: string | null = null;
       try {
-        const fileName = `profile-pics/${userEmail.replace(/[.@]/g, "_")}.jpg`;
+        const userInfoRes = await fetch("/api/user-info");
+        if (!userInfoRes.ok) {
+          throw new Error("Failed to fetch user info");
+        }
+        const userInfo = await userInfoRes.json();
+        if (!userInfo.email) {
+          throw new Error("User email not found in fetched info");
+        }
+        userEmailForFilename = userInfo.email;
+
+        if (!userEmailForFilename) {
+          throw new Error("User email is null or undefined");
+        }
+        
+        const fileName = `profile-pics/${userEmailForFilename.replace(
+          /[.@]/g,
+          "_"
+        )}.jpg`;
         if (!storage) {
           throw new Error("Firebase storage is not initialized");
         }
@@ -136,7 +153,7 @@ export default function DashboardPage() {
         const metadata = {
           contentType: "image/jpeg",
           customMetadata: {
-            userEmail: userEmail,
+            userEmail: userEmailForFilename,
           },
         };
 
@@ -163,12 +180,12 @@ export default function DashboardPage() {
           description:
             error instanceof Error
               ? `Error: ${error.message}`
-              : "Failed to upload image",
+              : "Failed to upload image or fetch user info",
           variant: "destructive",
         });
       }
     },
-    [session?.user, toast, update]
+    [toast, update]
   );
 
   if (status === "loading") return null;

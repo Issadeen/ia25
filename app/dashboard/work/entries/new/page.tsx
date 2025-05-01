@@ -87,14 +87,14 @@ const AddEntriesPage: React.FC = () => {
         entryId: editingEntry.id,
         oldData: entries.find(e => e.id === editingEntry.id),
         newData: editingEntry,
-        changedBy: session?.user?.email,
+        changedBy: session?.user?.name || 'unknown',
         changedAt: new Date().toISOString()
       })
 
       // Update entry
       await set(entryRef, {
         ...editingEntry,
-        lastModifiedBy: session?.user?.email,
+        lastModifiedBy: session?.user?.name,
         lastModifiedAt: new Date().toISOString()
       })
 
@@ -171,7 +171,7 @@ const AddEntriesPage: React.FC = () => {
         destination: destination.trim().toLowerCase(),
         product_destination: `${product.trim().toLowerCase()}_${destination.trim().toLowerCase()}`,
         timestamp: Date.now(),
-        createdBy: session?.user?.email || 'unknown'
+        createdBy: session?.user?.name || 'unknown'
       }
 
       // Save to tr800
@@ -301,7 +301,7 @@ const AddEntriesPage: React.FC = () => {
                 alt={session?.user?.name || 'User Profile'}
               />
               <AvatarFallback className="bg-emerald-100 text-emerald-700">
-                {session?.user?.name?.[0] || session?.user?.email?.[0] || "U"}
+                {session?.user?.name?.[0] || "U"}
               </AvatarFallback>
             </Avatar>
           </div>

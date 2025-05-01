@@ -1375,6 +1375,14 @@ export default function OwnerDetailsPage() {
     e.preventDefault()
     
     try {
+      // Fetch user info first
+      const userInfoRes = await fetch('/api/user-info');
+      if (!userInfoRes.ok) {
+        throw new Error('Failed to fetch user info for reconciliation');
+      }
+      const userInfo = await userInfoRes.json();
+      const userEmail = userInfo.email || 'unknown'; // Get email from API response
+
       const ourBalance = ownerBalance?.amount || 0
       const theirBalance = reconciliationFormData.theirBalance
       const difference = ourBalance - theirBalance
@@ -1391,7 +1399,7 @@ export default function OwnerDetailsPage() {
         timestamp,
         status: 'pending',
         note: reconciliationFormData.note,
-        createdBy: session?.user?.email || 'unknown'
+        createdBy: userEmail // Use fetched email
       })
       
       toast({
@@ -1418,10 +1426,18 @@ export default function OwnerDetailsPage() {
   // Add function to handle reconciliation status update
   const handleReconciliationStatus = async (id: string, status: 'accepted' | 'rejected') => {
     try {
+      // Fetch user info first
+      const userInfoRes = await fetch('/api/user-info');
+      if (!userInfoRes.ok) {
+        throw new Error('Failed to fetch user info for reconciliation update');
+      }
+      const userInfo = await userInfoRes.json();
+      const userEmail = userInfo.email || 'unknown'; // Get email from API response
+
       await update(ref(database, `payment_reconciliations/${owner}/${id}`), {
         status,
         resolvedAt: new Date().toISOString(),
-        resolvedBy: session?.user?.email || 'unknown'
+        resolvedBy: userEmail // Use fetched email
       })
       
       toast({
@@ -1580,8 +1596,8 @@ export default function OwnerDetailsPage() {
                   src={profilePicUrl || ''} 
                   alt="Profile"
                 />
-                <AvatarFallback className="bg-pink-100 text-pink-700">
-                  {session?.user?.email?.[0]?.toUpperCase() || 'U'}
+                <AvatarFallback className="bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300">
+                  {session?.user?.name?.[0]?.toUpperCase() || 'U'}
                 </AvatarFallback>
               </Avatar>
             </div>
