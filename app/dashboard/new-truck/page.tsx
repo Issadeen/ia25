@@ -97,13 +97,15 @@ export default function NewTruckPage() {
         pmsCompsObj[`pms_${index + 1}`] = value || "0";
       });
 
+      const userEmail = (session?.user as { email?: string | null })?.email;
+
       const truckData = {
         truck_no: data.truck_no,
         driver: data.driver,
         owner: data.owner,
         transporter: data.transporter,
         created_at: new Date().toISOString(),
-        created_by: session?.user?.email || 'unknown',
+        created_by: userEmail || 'unknown',
         ...agoCompsObj, // Add individual AGO compartment fields
         ...pmsCompsObj, // Add individual PMS compartment fields
         ago_comps: data.ago_comps, // Store as array
