@@ -8,6 +8,7 @@ declare module "next-auth" {
     error?: string;
     // Keep user non-optional, but redefine its shape for the client-side session
     user: {
+      email: string | undefined;
       name?: string | null;
       image?: string | null;
       // id and email are intentionally omitted as they are not sent to the client

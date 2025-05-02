@@ -973,7 +973,12 @@ export default function EntriesPage() {
 
   useEffect(() => {
     const checkReminders = async () => {
-      const userEmail = session?.user?.email as string | undefined;
+      // Access email safely using type assertion
+      const user = session?.user;
+      const userEmail = typeof user === 'object' && user !== null
+        ? (user.email as string | undefined) || (user as any)?.email
+        : undefined;
+      
       if (!userEmail) return;
 
       const userId = userEmail.replace(/[.@]/g, '_');
