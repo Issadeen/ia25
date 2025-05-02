@@ -973,9 +973,10 @@ export default function EntriesPage() {
 
   useEffect(() => {
     const checkReminders = async () => {
-      if (!session?.user?.email) return;
+      const userEmail = session?.user?.email as string | undefined;
+      if (!userEmail) return;
 
-      const userId = session.user.email.replace(/[.@]/g, '_');
+      const userId = userEmail.replace(/[.@]/g, '_');
       const nextReminder = await reminderService.getNextReminder(userId);
       
       if (nextReminder) {
@@ -992,7 +993,7 @@ export default function EntriesPage() {
     const interval = setInterval(checkReminders, 15 * 60 * 1000);
 
     return () => clearInterval(interval);
-  }, [session?.user?.email]);
+  }, [session?.user]);
 
   useEffect(() => {
     if (mounted) {
@@ -2978,27 +2979,39 @@ export default function EntriesPage() {
 
     try {
       const db = getDatabase();
-      
+
+      // Fetch user info first
+      const userInfoRes = await fetch('/api/user-info');
+      if (!userInfoRes.ok) {
+        throw new Error('Failed to fetch user info for edit history');
+      }
+      const userInfo = await userInfoRes.json();
+      const userEmail = userInfo.email; // Get email from API response
+
+      if (!userEmail) {
+        throw new Error('User email not found in fetched info');
+      }
+
       const volumeDiff = editingAllocation.volume - editingAllocation.originalVolume;
-      
+
       const updates: { [key: string]: any } = {};
-      
+
       const tr800Ref = dbRef(db, `tr800/${editingAllocation.entryKey}`);
       const tr800Snapshot = await get(tr800Ref);
-      
+
       if (!tr800Snapshot.exists()) {
         throw new Error("Entry not found");
       }
 
       const entry = tr800Snapshot.val();
-      updates[`tr800/${editingAllocation.entryKey}/remainingQuantity`] = 
+      updates[`tr800/${editingAllocation.entryKey}/remainingQuantity`] =
         entry.remainingQuantity - volumeDiff;
 
       const oldTruckRef = dbRef(db, `truckEntries/${editingAllocation.originalTruck.replace(/\//g, '-')}`);
       const newTruckRef = dbRef(db, `truckEntries/${editingAllocation.truckNumber.replace(/\//g, '-')}`);
 
       updates[`truckEntries/${editingAllocation.originalTruck.replace(/\//g, '-')}/${editingAllocation.allocationId}`] = null;
-      
+
       const newAllocation = {
         entryNumber: entry.number,
         subtractedQuantity: editingAllocation.volume,
@@ -3015,7 +3028,8 @@ export default function EntriesPage() {
         newTruck: editingAllocation.truckNumber,
         originalVolume: editingAllocation.originalVolume,
         newVolume: editingAllocation.volume,
-        editedBy: session?.user?.email,
+        // Line 3019 Fix: Use fetched email
+        editedBy: userEmail,
         editedAt: new Date().toISOString()
       };
 
@@ -3032,7 +3046,7 @@ export default function EntriesPage() {
     } catch (error) {
       addNotification(
         "Error", 
-        "Failed to update allocation",
+        error instanceof Error ? error.message : "Failed to update allocation",
         "error"
       );
     }
@@ -3222,7 +3236,7 @@ export default function EntriesPage() {
                     alt={session?.user?.name || 'User Profile'}
                   />
                   <AvatarFallback className="bg-emerald-100 text-emerald-700">
-                    {session?.user?.email?.[0]?.toUpperCase() || 'U'}
+                    {session?.user?.name?.[0] || 'U'}
                   </AvatarFallback>
                 </Avatar>
               </div>
