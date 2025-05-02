@@ -53,6 +53,11 @@ import { useProfileImage } from '@/hooks/useProfileImage'
 import { Badge } from "@/components/ui/badge"
 import { ToastAction } from '@radix-ui/react-toast'
 
+// Define Zod schema for at20 input
+const at20Schema = z.string()
+  .transform(val => parseFloat(val)) // Convert string to number
+  .pipe(z.number().positive({ message: "AT20 must be a positive number" }));
+
 // Add new interfaces
 interface Payment {
   id: string;
@@ -596,35 +601,51 @@ export default function WorkManagementPage() {
     try {
       const workDetail = workDetails.find(detail => detail.id === id);
       if (workDetail && !workDetail.loaded) {
-        const at20 = prompt("Please enter at20 before marking as loaded");
-        if (at20) {
-          await update(ref(database, `work_details/${id}`), {
-            loaded: true,
-            at20
-          });
-          
-          toast({
-            title: "Updated",
-            description: "Order marked as loaded",
-          });
+        const at20Input = prompt("Please enter at20 before marking as loaded");
 
-          // Check if destination is non-local and redirect to entries
-          if (!workDetail.destination.toLowerCase().includes('local')) {
-            const params = new URLSearchParams({
-              truckNumber: workDetail.truck_number,
-              product: workDetail.product,
-              destination: workDetail.destination,
-              // Multiply at20 by 1000 for the entries page
-              at20Quantity: (parseFloat(at20) * 1000).toString()
-            });
-            router.push(`/dashboard/work/entries?${params.toString()}`);
-          }
+        // Validate the input using Zod
+        const validationResult = at20Schema.safeParse(at20Input);
+
+        if (!validationResult.success) {
+          // Show specific Zod error message
+          toast({
+            title: "Invalid AT20",
+            description: validationResult.error.errors[0]?.message || "Please enter a valid positive number for AT20.",
+            variant: "destructive",
+          });
+          return; // Stop execution if validation fails
+        }
+
+        // Use the validated number
+        const validatedAt20 = validationResult.data;
+
+        await update(ref(database, `work_details/${id}`), {
+          loaded: true,
+          at20: validatedAt20.toString() // Store as string in DB if needed, or keep as number
+        });
+
+        toast({
+          title: "Updated",
+          description: "Order marked as loaded",
+        });
+
+        // Check if destination is non-local and redirect to entries
+        if (!workDetail.destination.toLowerCase().includes('local')) {
+          const params = new URLSearchParams({
+            truckNumber: workDetail.truck_number,
+            product: workDetail.product,
+            destination: workDetail.destination,
+            // Multiply validatedAt20 by 1000 for the entries page
+            at20Quantity: (validatedAt20 * 1000).toString()
+          });
+          router.push(`/dashboard/work/entries?${params.toString()}`);
         }
       }
     } catch (error) {
       toast({
         title: "Error",
         description: error instanceof Error ? error.message : "Failed to update loaded status",
+        variant: "destructive", // Ensure variant is set for errors
       });
     }
   };
@@ -1557,7 +1578,6 @@ const calculateOwnerTotals = (owner: string | null) => {
   // Add to the existing state declarations
 const [showPrices, setShowPrices] = useState(false)
 const [priceEditMode, setPriceEditMode] = useState(false)
-const [priceEditPassword, setPriceEditPassword] = useState("")
 
 // Add this function near other handlers
 const handlePriceVisibilityToggle = (e: KeyboardEvent) => {
@@ -1566,28 +1586,50 @@ const handlePriceVisibilityToggle = (e: KeyboardEvent) => {
     e.preventDefault()
     if (!showPrices) {
       const password = prompt("Enter admin password to view prices:")
-      if (password === process.env.NEXT_PUBLIC_PRICE_VIEW_PASSWORD) {
+      // Add check for non-empty password before comparing
+      if (password && password === process.env.NEXT_PUBLIC_PRICE_VIEW_PASSWORD) {
         setShowPrices(true)
         toast({
           title: "Prices Visible",
           description: "Prices are now visible. Press Ctrl+Alt+P to hide.",
         })
+      } else if (password !== null) { // Only show error if user didn't cancel prompt
+        toast({
+          title: "Incorrect Password",
+          variant: "destructive"
+        })
       }
     } else {
       setShowPrices(false)
-      setPriceEditMode(false)
+      setPriceEditMode(false) // Also disable edit mode when hiding prices
+      toast({
+        title: "Prices Hidden",
+      })
     }
   }
-  
+
   // Ctrl + Alt + E to enable price editing
   if (e.ctrlKey && e.altKey && e.key === 'e' && showPrices) {
     e.preventDefault()
-    const password = prompt("Enter admin password to edit prices:")
-    if (password === process.env.NEXT_PUBLIC_PRICE_EDIT_PASSWORD) {
-      setPriceEditMode(true)
+    if (!priceEditMode) {
+      const password = prompt("Enter admin password to edit prices:")
+      // Add check for non-empty password before comparing
+      if (password && password === process.env.NEXT_PUBLIC_PRICE_EDIT_PASSWORD) {
+        setPriceEditMode(true)
+        toast({
+          title: "Price Edit Mode Enabled",
+          description: "You can now edit prices. Press Ctrl+Alt+E to disable.",
+        })
+      } else if (password !== null) { // Only show error if user didn't cancel prompt
+         toast({
+          title: "Incorrect Password",
+          variant: "destructive"
+        })
+      }
+    } else {
+      setPriceEditMode(false);
       toast({
-        title: "Price Edit Mode",
-        description: "You can now edit prices. Press Ctrl+Alt+E to disable.",
+        title: "Price Edit Mode Disabled",
       })
     }
   }
