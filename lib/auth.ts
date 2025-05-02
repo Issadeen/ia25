@@ -9,15 +9,19 @@ declare module "next-auth" {
     // Keep user non-optional, but redefine its shape for the client-side session
     user: {
       email: string | undefined;
+      // email is intentionally omitted here for client-side safety
       name?: string | null;
       image?: string | null;
-      // id and email are intentionally omitted as they are not sent to the client
+      // Add id ONLY if needed client-side (generally avoid)
+      // id?: string;
     }
+    // Add a server-side only property if needed, though accessing token is better
+    // serverSideUser?: { id: string; email: string; name?: string | null; image?: string | null; }
   }
   // Also ensure the JWT token can hold the necessary fields server-side
   interface JWT {
-    id?: string;
-    // email?: string | null; // Already part of default JWT
+    id?: string; // Corresponds to FirebaseUser workId
+    email?: string | null; // Ensure email is part of JWT
     // name?: string | null; // Already part of default JWT
     // picture?: string | null; // Already part of default JWT
   }
@@ -36,7 +40,7 @@ import bcrypt from 'bcrypt';
 
 interface FirebaseUser {
   email: string;
-  password: string;
+  password: string; // Hashed password
   workId: string;
   name?: string;
   image?: string;
@@ -61,10 +65,9 @@ export const authOptions: NextAuthOptions = {
         password: { label: "Password", type: "password" }
       },
       async authorize(credentials): Promise<User | null> { // Add return type hint
-        console.log("[Auth] Authorize function started."); // Add entry log
         if (!credentials?.email || !credentials?.password) {
           console.log("[Auth] Missing credentials");
-          return null;
+          throw new Error("Missing credentials");
         }
 
         try {
@@ -78,19 +81,17 @@ export const authOptions: NextAuthOptions = {
 
           if (!snapshot.exists()) {
             console.log("[Auth] No users found in database");
-            return null;
+            throw new Error("No user found with this email.");
           }
 
           const users = snapshot.val() as Record<string, FirebaseUser>;
-          // console.log("[Auth] Database users:", users); // Optional: uncomment if needed
-
           const userEntry = Object.entries(users).find(
             ([, u]) => u.email.toLowerCase() === credentials.email.toLowerCase()
           );
 
           if (!userEntry) {
             console.log("[Auth] User not found:", credentials.email);
-            return null;
+            throw new Error("No user found with this email.");
           }
 
           const [userId, user] = userEntry; // Get the user ID (workId) and user data
@@ -120,7 +121,7 @@ export const authOptions: NextAuthOptions = {
 
           if (!passwordMatch) {
             console.log(`[Auth] Invalid password for user: ${user.email}`);
-            return null;
+            throw new Error("Invalid password.");
           }
 
           // If plain text password matched, hash it and update using ADMIN SDK
@@ -141,14 +142,17 @@ export const authOptions: NextAuthOptions = {
           console.log("[Auth] Authentication successful for:", user.email);
           // Password is correct
           return {
-            id: user.workId,
+            id: user.workId, // Map workId to id for next-auth User object
             email: user.email,
             name: user.name || user.email, // Provide a fallback name
             image: user.image || null
           };
         } catch (error) {
           console.error('[Auth] Error in authorize function:', error); // Log specific error
-          return null; // Ensure null is returned on error
+          if (error instanceof Error) {
+            throw error; // Re-throw specific errors
+          }
+          throw new Error("Authentication failed."); // Generic error
         }
       }
     }),
@@ -163,46 +167,45 @@ export const authOptions: NextAuthOptions = {
   },
   pages: {
     signIn: '/login',
-    error: '/login', // Or a dedicated error page: '/auth/error'
+    error: '/login', // Redirect to login page on error
   },
   callbacks: {
     async jwt({ token, user, account }: { token: JWT; user?: User | AdapterUser; account?: Account | null }): Promise<JWT> {
-      try {
-        // Persist the necessary user info from the User object to the token
-        if (user) {
-          token.id = user.id; // Keep id server-side in the token
-          // email, name, picture are usually added by default if available in user object
-        }
-        // Add logic for OAuth providers if necessary
-        // if (account?.provider === "google" && profile) { ... }
-        return token;
-      } catch (error) {
-        console.error("[Auth Callback] Error in JWT callback:", error);
-        // Return token potentially modified to indicate error, or original token
-        return { ...token, error: "JwtCallbackError" };
+      // This runs *before* the session callback
+      // Persist the necessary user info to the token right after sign-in
+      if (user) {
+        token.id = user.id; // user.id comes from authorize return (mapped from workId)
+        token.email = user.email; // Ensure email is in the token
+        token.name = user.name;
+        token.picture = user.image;
       }
+      return token; // The token is encrypted and stored in the session cookie
     },
     async session({ session, token }: { session: Session; token: JWT }): Promise<Session> {
+      // This runs *after* the jwt callback, using the token data
+      // Only expose *non-sensitive* data to the client-side session object
       try {
-        // Only add properties to session.user that you want exposed client-side
         if (token && session.user) {
-          // Assign only the properties defined in the augmented Session['user'] type
+          // Assign only the properties defined in the augmented Session['user'] type for the client
           session.user.name = token.name;
           session.user.image = token.picture;
+          // session.user.id = token.id; // Add this ONLY if client-side ID is absolutely necessary
+
+          // DO NOT add email here: session.user.email = token.email;
+          // This keeps the email out of the client-side session object
 
           if (token.error) {
             session.error = token.error as string;
           }
-        } else if (session.user) {
-           // If token is somehow missing but session.user exists, clear sensitive fields
-           // delete session.user.email; // Not needed if email is already excluded by type
-           // delete session.user.id; // Not needed if id is already excluded by type
         }
-        return session; // Return the modified session object
+        // Note: Server-side calls to getServerSession will also receive this pruned session object.
+        // Accessing the token directly (like in the api/user-info route) is needed for sensitive data server-side.
+        return session; // Return the modified session object intended for the client
       } catch (error) {
         console.error("[Auth Callback] Error in Session callback:", error);
-        // Return session potentially modified to indicate error
-        return { ...session, error: "SessionCallbackError" };
+        return { ...session, error: "SessionCallbackError", user: {
+          email: undefined
+        } }; // Clear user on error
       }
     }
   },
