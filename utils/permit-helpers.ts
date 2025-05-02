@@ -1,19 +1,15 @@
 import { Database, ref, get, update } from 'firebase/database';
 import type { PermitEntry, PreAllocation } from '@/types/permits';
 
-export interface EntryAllocation {
-  allocatedVolume: number;
-  entry: PermitEntry;
-  quantity: number;
-}
-
-const calculateAvailableQuantity = (entry: PermitEntry): number => {
-  const preAllocated = entry.preAllocatedQuantity || 0;
-  return entry.remainingQuantity - preAllocated;
-};
+// Interface for the result of findAvailablePermitEntries (now just the entry itself)
+export type FoundPermitEntry = PermitEntry;
 
 export const findAvailablePermitEntries = async (
-db: Database, product: string, quantity: number, destination: string): Promise<EntryAllocation[]> => {
+  db: Database, 
+  product: string, 
+  quantity: number, // Keep quantity for potential future optimizations, but don't use for filtering here
+  destination: string
+): Promise<FoundPermitEntry[]> => {
   const entriesRef = ref(db, 'allocations');
   const snapshot = await get(entriesRef);
   
@@ -22,153 +18,75 @@ db: Database, product: string, quantity: number, destination: string): Promise<E
   const availableEntries: PermitEntry[] = [];
   
   snapshot.forEach((child) => {
-    const entry = child.val();
-    const availableQuantity = calculateAvailableQuantity(entry);
-    
+    const entry = child.val() as PermitEntry;
+    const entryId = child.key;
+
+    if (!entryId) return; // Skip if key is somehow null
+
+    // Strict filtering based on product, destination, and positive remaining quantity
     if (
       entry.product?.toLowerCase() === product.toLowerCase() &&
-      entry.destination?.toLowerCase() === 'ssd' &&
-      availableQuantity > 0 && // Any available quantity might be useful
-      !entry.used
+      entry.destination?.toLowerCase() === destination.toLowerCase() && // Match exact destination
+      entry.remainingQuantity > 0 &&
+      !entry.used // Assuming 'used' flag on entry means fully depleted or manually marked
     ) {
       availableEntries.push({
         ...entry,
-        id: child.key!,
-        allocatedTo: entry.allocatedTo || [],
-        preAllocatedQuantity: entry.preAllocatedQuantity || 0,
-        availableQuantity: availableQuantity // Now TypeScript knows this is valid
+        id: entryId, // Ensure ID is included
       });
     }
   });
 
-  // Sort by timestamp (oldest first) and available quantity (most available first)
-  availableEntries.sort((a, b) => {
-    if (a.timestamp !== b.timestamp) return a.timestamp - b.timestamp;
-    return calculateAvailableQuantity(b) - calculateAvailableQuantity(a);
-  });
+  // Sort by timestamp (oldest first) - FIFO
+  availableEntries.sort((a, b) => a.timestamp - b.timestamp);
 
-  let remainingQuantity = quantity;
-  const allocations: EntryAllocation[] = [];
-
-  // Try to fill the required quantity using multiple entries if needed
-  for (const entry of availableEntries) {
-    if (remainingQuantity <= 0) break;
-
-    const availableQuantity = calculateAvailableQuantity(entry);
-    const allocationQuantity = Math.min(availableQuantity, remainingQuantity);
-
-    if (allocationQuantity > 0) {
-      allocations.push({
-          entry,
-          quantity: allocationQuantity,
-          allocatedVolume: 0
-      });
-      remainingQuantity -= allocationQuantity;
-    }
-  }
-
-  return allocations;
+  // Return all matching entries; the allocation logic will determine how much to take from each
+  return availableEntries;
 };
 
 export const findAvailablePermitEntry = async (
   db: Database,
   product: string,
-  quantity: number
+  quantity: number, // Quantity check will happen via checkEntryVolumes before allocation
+  destination: string // Add destination parameter
 ): Promise<PermitEntry | null> => {
   const entriesRef = ref(db, 'allocations');
   const snapshot = await get(entriesRef);
   
   if (!snapshot.exists()) return null;
 
-  let bestMatch: PermitEntry | null = null;
-  
+  const candidates: PermitEntry[] = [];
   snapshot.forEach((child) => {
-    const entry = child.val();
-    const availableQuantity = calculateAvailableQuantity(entry);
-    
-    console.log('Checking entry:', {
-      entry,
-      product: entry.product?.toLowerCase(),
-      requestedProduct: product.toLowerCase(),
-      availableQuantity,
-      requestedQuantity: quantity,
-      destination: entry.destination?.toLowerCase()
-    });
+    const entry = child.val() as PermitEntry;
+    const entryId = child.key;
+    if (!entryId) return;
 
-    // Update validation criteria to match allocation node structure
+    // Strict filtering
     if (
       entry.product?.toLowerCase() === product.toLowerCase() &&
-      entry.destination?.toLowerCase() === 'ssd' &&
-      entry.remainingQuantity >= quantity && // Check remaining quantity directly
-      !entry.used // Add check for used flag if needed
+      entry.destination?.toLowerCase() === destination.toLowerCase() && // Match destination
+      entry.remainingQuantity > 0 && // Check base remaining quantity
+      !entry.used
     ) {
-      if (!bestMatch || entry.timestamp < bestMatch.timestamp) {
-        bestMatch = {
-          ...entry,
-          id: child.key!,
-          allocatedTo: entry.allocatedTo || [],
-          preAllocatedQuantity: entry.preAllocatedQuantity || 0
-        };
-      }
+      candidates.push({ ...entry, id: entryId });
     }
   });
 
-  return bestMatch;
-};
+  // Sort candidates by FIFO
+  candidates.sort((a, b) => a.timestamp - b.timestamp);
 
-export const validatePermitEntry = async (
-  db: Database,
-  permitEntry: PermitEntry,
-  quantity: number
-): Promise<boolean> => {
-  const entryRef = ref(db, `allocations/${permitEntry.id}`);
-  const snapshot = await get(entryRef);
-  
-  if (!snapshot.exists()) return false;
-  
-  const currentEntry = snapshot.val();
-  const availableQuantity = currentEntry.remainingQuantity - (currentEntry.preAllocatedQuantity || 0);
-  
-  return (
-    currentEntry.product === permitEntry.product &&
-    currentEntry.destination?.toLowerCase() === 'ssd' &&
-    availableQuantity >= quantity
-  );
-};
-
-export const getPermitEntryStatus = async (
-  db: Database,
-  permitEntryId: string
-): Promise<{
-  remainingQuantity: number;
-  preAllocatedQuantity: number;
-  availableQuantity: number;
-}> => {
-  const entryRef = ref(db, `allocations/${permitEntryId}`);
-  const snapshot = await get(entryRef);
-  
-  if (!snapshot.exists()) {
-    throw new Error('Permit entry not found');
-  }
-  
-  const entry = snapshot.val();
-  const preAllocatedQuantity = entry.preAllocatedQuantity || 0;
-  const remainingQuantity = entry.remainingQuantity;
-  const availableQuantity = remainingQuantity - preAllocatedQuantity;
-  
-  return {
-    remainingQuantity,
-    preAllocatedQuantity,
-    availableQuantity
-  };
+  // The caller should use checkEntryVolumes on the returned candidate before allocating
+  // This function just finds the *first* potential match based on FIFO.
+  return candidates.length > 0 ? candidates[0] : null; 
 };
 
 export interface VolumeCheck {
-  available: number;
-  allocated: number;
-  preAllocated: number;
-  remaining: number;
-  isValid: boolean;
+  entryId: string;
+  initialVolume: number; // Added for clarity
+  currentVolume: number; // Renamed from available
+  preAllocatedVolume: number; // Renamed from preAllocated
+  remainingVolume: number; // Renamed from remaining
+  isValid: boolean; // Indicates if currentVolume >= preAllocatedVolume
 }
 
 export const checkEntryVolumes = async (
@@ -176,80 +94,76 @@ export const checkEntryVolumes = async (
   entryId: string
 ): Promise<VolumeCheck> => {
   try {
-    // Get all data in parallel
+    // Get entry data and all pre-allocations in parallel
     const [entrySnapshot, preAllocationsSnapshot] = await Promise.all([
       get(ref(db, `allocations/${entryId}`)),
-      get(ref(db, 'permitPreAllocations'))
+      get(ref(db, 'permitPreAllocations')) // Fetch all pre-allocations
     ]);
 
     if (!entrySnapshot.exists()) {
-      throw new Error('Permit entry not found');
+      throw new Error(`Permit entry ${entryId} not found in allocations`);
     }
 
     const entry = entrySnapshot.val() as PermitEntry;
     
-    // Calculate actual pre-allocated volume from all active pre-allocations
-    const preAllocatedVolume = preAllocationsSnapshot.exists() 
+    // Calculate actual pre-allocated volume by summing quantities from active pre-allocations for this entry
+    const activePreAllocations = preAllocationsSnapshot.exists() 
       ? Object.values(preAllocationsSnapshot.val() as Record<string, PreAllocation>)
-          .filter(pa => pa.permitEntryId === entryId && !pa.used)
-          .reduce((sum, pa) => sum + (pa.quantity || 0), 0)
-      : 0;
+          .filter(pa => pa.permitEntryId === entryId && !pa.used) // Filter by entryId and not used
+      : [];
+      
+    const preAllocatedVolume = activePreAllocations.reduce((sum, pa) => sum + (pa.quantity || 0), 0);
 
-    // Calculate remaining volume
-    const availableVolume = entry.remainingQuantity;
-    const remainingVolume = availableVolume - preAllocatedVolume;
+    // Calculate remaining volume based on current entry quantity and summed pre-allocations
+    const currentVolume = entry.remainingQuantity || 0;
+    const initialVolume = entry.initialQuantity || 0;
+    const remainingVolume = currentVolume - preAllocatedVolume; // This is the actual available volume
 
     console.info('Volume check details:', {
       entryId,
-      availableVolume,
-      preAllocatedVolume,
-      remainingVolume
+      initialVolume,
+      currentVolume, // The value stored in allocations/{id}/remainingQuantity
+      preAllocatedVolume, // Sum of active pre-allocations for this entry
+      remainingVolume, // currentVolume - preAllocatedVolume
+      isValid: remainingVolume >= 0 // Check if calculations are sound
     });
 
     return {
-      available: availableVolume,
-      allocated: entry.preAllocatedQuantity || 0,
-      preAllocated: preAllocatedVolume,
-      remaining: remainingVolume,
-      isValid: remainingVolume >= 0
+      entryId,
+      initialVolume,
+      currentVolume,
+      preAllocatedVolume,
+      remainingVolume, // This is the key value representing what's actually available
+      isValid: remainingVolume >= 0 // Basic sanity check
     };
   } catch (error) {
-    console.error('Volume check error:', {
+    console.error(`Error checking volumes for entry ${entryId}:`, error);
+    // Return a default error state or re-throw
+    return {
       entryId,
-      error: error instanceof Error ? error.message : 'Unknown error'
-    });
-    throw error;
+      initialVolume: 0,
+      currentVolume: 0,
+      preAllocatedVolume: 0,
+      remainingVolume: -1, // Indicate error or unavailability
+      isValid: false
+    };
   }
-};
-
-export const getEntryStatus = (volumeCheck: VolumeCheck): 'available' | 'low' | 'exhausted' => {
-  if (volumeCheck.remaining <= 0) return 'exhausted';
-  if (volumeCheck.remaining < volumeCheck.available * 0.2) return 'low';
-  return 'available';
 };
 
 export const updateEntryVolume = async (
   db: Database,
-  entryId: string, 
+  permitEntryId: string,
   newVolume: number
 ): Promise<void> => {
   try {
-    const entryRef = ref(db, `allocations/${entryId}`);
-    const snapshot = await get(entryRef);
-
-    if (!snapshot.exists()) {
-      throw new Error('Permit entry not found');
-    }
-
-    const entry = snapshot.val() as PermitEntry;
-    const preAllocated = entry.preAllocatedQuantity || 0;
-
-    // Validate new volume against pre-allocated amount
-    if (newVolume < preAllocated) {
-      throw new Error(
-        `New volume (${newVolume}) cannot be less than pre-allocated volume (${preAllocated})`
-      );
-    }
+    const entryRef = ref(db, `allocations/${permitEntryId}`);
+    
+    // Optional: Add a check here against current pre-allocations if needed,
+    // though the allocation logic itself should prevent overdrawing.
+    // const volumeCheck = await checkEntryVolumes(db, permitEntryId);
+    // if (newVolume < volumeCheck.preAllocatedVolume) {
+    //   throw new Error(`New volume (${newVolume}) cannot be less than currently pre-allocated volume (${volumeCheck.preAllocatedVolume})`);
+    // }
 
     await update(entryRef, {
       remainingQuantity: newVolume,
@@ -260,28 +174,4 @@ export const updateEntryVolume = async (
     console.error('Volume update error:', error);
     throw error;
   }
-};
-
-export const getAvailableVolume = async (db: Database, permitEntryId: string): Promise<number> => {
-  const entryRef = ref(db, `allocations/${permitEntryId}`);
-  const snapshot = await get(entryRef);
-  
-  if (!snapshot.exists()) {
-    throw new Error('Permit entry not found');
-  }
-  
-  const entry = snapshot.val();
-  const remaining = entry.remainingQuantity || 0;
-  const preAllocated = entry.preAllocatedQuantity || 0;
-  
-  return remaining - preAllocated;
-};
-
-export const checkVolumeAvailability = async (
-  db: Database, 
-  permitEntryId: string,
-  requiredQuantity: number
-): Promise<boolean> => {
-  const availableVolume = await getAvailableVolume(db, permitEntryId);
-  return availableVolume >= requiredQuantity;
 };

@@ -1,13 +1,11 @@
 'use client'
 
-// Update imports to include useProfileImage
 import { useProfileImage } from '@/hooks/useProfileImage'
 import { useState, useEffect, useCallback } from 'react'
-import { getDatabase, ref, onValue, get, update } from 'firebase/database'
+import { getDatabase, ref, onValue, get, update, query, orderByChild, equalTo } from 'firebase/database'
 import { useSession } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
-import { motion } from 'framer-motion'
-import { ArrowLeft, RefreshCw, Copy, Circle, Save, Loader2, Edit, Receipt } from 'lucide-react'
+import { ArrowLeft, RefreshCw, Circle, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -19,25 +17,21 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { migrateExistingTrucks } from '@/lib/migrations/permit-migration'
 import { useToast } from '@/components/ui/use-toast'
 import { ThemeToggle } from '@/components/theme-toggle'
 import { Avatar, AvatarImage } from '@/components/ui/avatar'
 import { AvatarFallback } from '@/components/ui/avatar'
-import { cn } from '@/lib/utils'
-import { getStorage, ref as storageRef, getDownloadURL } from 'firebase/storage'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select'
-import { preAllocatePermitEntry, resetTruckAllocation, updatePermitAllocation } from '@/lib/permit-allocation'
-import type { PermitAllocation, PreAllocation } from '@/types/permits' // Add this line
-import { findAvailablePermitEntries, type EntryAllocation } from '@/utils/permit-helpers';
-import { cleanupOrphanedAllocations, consolidatePermitAllocations } from '@/lib/permit-allocation';
-import { cleanupDuplicateAllocations, validateAllocations, cleanupZeroQuantityAllocations } from '@/lib/permit-cleanup';
-import { resetPermitSystem } from '@/lib/permit-reset';
+import { cleanupOrphanedAllocations, preAllocatePermitEntry, releasePreAllocation } from '@/lib/permit-allocation'
+import { findAvailablePermitEntries, checkEntryVolumes, FoundPermitEntry, VolumeCheck } from '@/utils/permit-helpers'
+import { cleanupZeroQuantityAllocations } from '@/lib/permit-cleanup'
 import { Badge } from '@/components/ui/badge'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
+import { PermitEntry } from '@/types/permits'
 
 interface WorkDetailWithPermit {
+  createdAt: number
   id: string
   truck_number: string
   product: string
@@ -50,732 +44,344 @@ interface WorkDetailWithPermit {
   permitAllocated?: boolean
 }
 
-interface PermitEntry {
-  permitNumber: any
-  key: any
+interface PreAllocation {
   id: string
+  truckNumber: string
   product: string
+  owner: string
+  quantity: number
+  permitNumber: string
   destination: string
-  remainingQuantity: number
-  allocated: boolean
-  number: string
-  timestamp: number
+  allocatedAt: string
+  used: boolean
 }
 
-// Add new interface to track permit allocation status
-interface ExtendedWorkDetail extends WorkDetailWithPermit {
-  permitAllocated?: boolean;
-  permitNumber?: string;
-}
-
-// Add this new interface to track truck loading status
 interface LoadedTruckInfo {
-  truckId: string;
-  truckNumber: string;
-  allocationId: string;
-  loadedAt: string;
-  product: string;
-  owner: string;
-  permitNumber?: string; // Add permit number field
-  previousTruckNumber?: string; // Add previous truck number field
+  truckId: string
+  truckNumber: string
+  allocationId: string
+  loadedAt: string
+  product: string
+  owner: string
+  permitNumber?: string
+  previousTruckNumber?: string
+}
+
+interface ExtendedWorkDetail extends WorkDetailWithPermit {
+  destination: string
 }
 
 export default function PermitsPage() {
-  const { data: session, status } = useSession()
+  const { data: session } = useSession()
   const router = useRouter()
-  const profilePicUrl = useProfileImage()  // Add this line
+  const profilePicUrl = useProfileImage()
   const { toast } = useToast()
-  const [permits, setPermits] = useState<{ [key: string]: PermitAllocation }>({})
-  const [searchTerm, setSearchTerm] = useState('')
-  const [isRefreshing, setIsRefreshing] = useState(false)
   const [pendingPermits, setPendingPermits] = useState<WorkDetailWithPermit[]>([])
-  const [availableEntries, setAvailableEntries] = useState<PermitEntry[]>([])
-  const [selectedPermitEntries, setSelectedPermitEntries] = useState<{ [truckId: string]: string }>({});
-  const [allocatingPermit, setAllocatingPermit] = useState(false)
-  const [selectedTruck, setSelectedTruck] = useState<string | null>(null);
-  const [preAllocations, setPreAllocations] = useState<PreAllocation[]>([]);
-  const [preAllocationSearch, setPreAllocationSearch] = useState('');
-  const [titleClickCount, setTitleClickCount] = useState(0);
+  const [preAllocations, setPreAllocations] = useState<PreAllocation[]>([])
+  const [loadedTrucks, setLoadedTrucks] = useState<LoadedTruckInfo[]>([])
+  const [isRefreshing, setIsRefreshing] = useState(false)
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date())
-  const [isAutoAllocating, setIsAutoAllocating] = useState(false);
-  const [cleanupClickCount, setCleanupClickCount] = useState(0);
-  const [manualCleanupMode, setManualCleanupMode] = useState(false);
-  const [selectedForCleanup, setSelectedForCleanup] = useState<string[]>([]);
-  const [editingAllocation, setEditingAllocation] = useState<string | null>(null);
-  const [editQuantity, setEditQuantity] = useState<number>(0);
-  const [loadedTrucks, setLoadedTrucks] = useState<LoadedTruckInfo[]>([]);
-  const [showLoadedHistory, setShowLoadedHistory] = useState(false);
-  const [destinationFilter, setDestinationFilter] = useState('ALL');
-  const [at20Quantity, setAt20Quantity] = useState<string>('');
-  const [selectedEntriesWithVolumes, setSelectedEntriesWithVolumes] = useState<EntryAllocation[]>([]);
-  const [permitAllocation, setPermitAllocation] = useState<PermitAllocation | null>(null);
+  const [showLoadedHistory, setShowLoadedHistory] = useState(false)
+  const [destinationFilter, setDestinationFilter] = useState('ALL')
+  const [preAllocationSearch, setPreAllocationSearch] = useState('')
+  const [manualCleanupMode, setManualCleanupMode] = useState(false)
+  const [selectedForCleanup, setSelectedForCleanup] = useState<string[]>([])
+  const [isReleasing, setIsReleasing] = useState<string | null>(null)
+  const [selectedTruck, setSelectedTruck] = useState<string | null>(null)
+  const [availableEntries, setAvailableEntries] = useState<FoundPermitEntry[]>([])
+  const [isLoadingEntries, setIsLoadingEntries] = useState(false)
+  const [selectedEntries, setSelectedEntries] = useState<string[]>([])
+  const [isAutoAllocating, setIsAutoAllocating] = useState(false)
 
-  // Add title click handler
-  const handleTitleClick = () => {
-    const newCount = titleClickCount + 1;
-    if (newCount === 3) {
-      setTitleClickCount(0);
-      router.push('/dashboard/work/permits/admin');
-    } else {
-      setTitleClickCount(newCount);
-    }
-  };
-
-  const renderManualAllocationContent = () => {
-    const requiredQuantity = parseFloat(at20Quantity || '0');
-    const totalAllocated = selectedEntriesWithVolumes.reduce((sum, item) => sum + item.allocatedVolume, 0);
-    const remaining = requiredQuantity - totalAllocated;
-
-    return (
-      <div className="mt-6">
-        <div className="flex justify-between items-center mb-4">
-          <Label className="text-lg font-semibold">Available Entries:</Label>
-          <div className="text-sm text-muted-foreground">
-            Required: {requiredQuantity.toLocaleString()} liters
-            <br />
-            Remaining: <span className={remaining > 0 ? 'text-yellow-600' : remaining < 0 ? 'text-red-600' : 'text-green-600'}>
-              {remaining.toLocaleString()} liters
-            </span>
-          </div>
-        </div>
-
-        {permitAllocation && (
-          <div className="mb-4 p-4 bg-blue-50/50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
-            <div className="flex items-center justify-between">
-              <div className="text-sm">
-                <span className="font-medium">Pre-allocated Permit: </span>
-                <Badge variant="outline" className="ml-2 bg-blue-100/50 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300">
-                  {permitAllocation.permitNumber}
-                </Badge>
-              </div>
-            </div>
-            <p className="text-sm text-muted-foreground mt-2">
-              Please prioritize allocating from this permit entry first
-            </p>
-          </div>
-        )}
-
-        <div className="space-y-4 mt-2">
-          {availableEntries.map((entry) => {
-            const isPermitEntry = permitAllocation && entry.key === permitAllocation.permitEntryId;
-            
-            return (
-              <div 
-                key={entry.key} 
-                className={cn(
-                  "p-4 border rounded-lg bg-card",
-                  isPermitEntry && "border-blue-200 dark:border-blue-800 bg-blue-50/50 dark:bg-blue-900/20"
-                )}
-              >
-                <div className="flex items-center justify-between mb-2">
-                  <div className="font-medium flex items-center gap-2">
-                    {entry.number}
-                    {entry.permitNumber && (
-                      <Badge variant="outline" className="bg-blue-100/50 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300">
-                        <Receipt className="h-3 w-3 mr-1" />
-                        {isPermitEntry ? "Pre-allocated Permit Entry" : "Permit Entry"}
-                      </Badge>
-                    )}
-                  </div>
-                  <div className="text-sm text-muted-foreground">
-                    Available: {entry.remainingQuantity.toLocaleString()} liters
-                  </div>
-                </div>
-                {/* ... rest of entry content ... */}
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    );
-  };
-
-  useEffect(() => {
-    if (status === 'unauthenticated') {
-      router.push('/login')
-      return
-    }
-
-    const db = getDatabase()
-    const permitsRef = ref(db, 'permit_allocations')
-    
-    const unsubscribe = onValue(permitsRef, (snapshot) => {
-      if (snapshot.exists()) {
-        setPermits(snapshot.val())
-      } else {
-        setPermits({})
-      }
-    })
-
-    return () => unsubscribe()
-  }, [status, router])
-
-  const fetchPendingPermits = async () => {
-    const db = getDatabase()
-    const [workDetailsRef, preAllocationsRef] = await Promise.all([
-      get(ref(db, 'work_details')),
-      get(ref(db, 'permitPreAllocations'))
-    ]);
-    
-    if (workDetailsRef.exists()) {
-      const data = workDetailsRef.val();
-      const pendingTrucks: ExtendedWorkDetail[] = [];
-      const preAllocatedTrucks: { [key: string]: string[] } = {};
-      if (preAllocationsRef.exists()) {
-        const preAllocations = preAllocationsRef.val();
-        Object.values(preAllocations as PreAllocation[]).forEach((allocation: PreAllocation) => {
-          if (!allocation.used) {
-            if (!preAllocatedTrucks[allocation.truckNumber]) {
-              preAllocatedTrucks[allocation.truckNumber] = [];
-            }
-            preAllocatedTrucks[allocation.truckNumber].push(allocation.destination.toLowerCase());
-          }
-        });
-      }
-
-      // Iterate through work details and check if they need permits
-      for (const [id, workDetail] of Object.entries(data)) {
-        const detail = { id, ...(workDetail as object) } as ExtendedWorkDetail;
-        const needsPermit = 
-          !detail.loaded && 
-          (detail.destination.toLowerCase() === 'ssd' || detail.destination.toLowerCase() === 'drc');
-        const hasPreAllocation = preAllocatedTrucks[detail.truck_number]?.includes(detail.destination.toLowerCase());
-        if (needsPermit && !hasPreAllocation && detail.status === "queued") {
-          // Try auto-allocate immediately for queued trucks
-          try {
-            const requiredQuantity = parseFloat(detail.quantity) * 1000;
-            const availableAllocations = await findAvailablePermitEntries(
-              db,
-              detail.product,
-              requiredQuantity,
-              detail.destination
-            );
-            if (availableAllocations.length > 0) {
-              await handleMultipleAllocations(detail, availableAllocations);
-              // Optionally, show a toast or notification here if needed
-              continue; // Already allocated, skip adding to pending
-            }
-          } catch (e) {
-            // Ignore allocation errors here, still add to pending
-          }
-          pendingTrucks.push(detail);
-        }
-      }
-      setPendingPermits(pendingTrucks);
-    }
-  };
-
-  const fetchAvailableEntries = async (product: string, quantity: number, destination: string = 'ssd') => {
-    const db = getDatabase();
-    const allocationsRef = ref(db, 'allocations');
-    try {
-      const snapshot = await get(allocationsRef);
-      if (snapshot.exists()) {
-        const allEntries = Object.entries(snapshot.val())
-          .map(([key, value]: [string, any]) => ({
-            id: key,
-            ...value,
-          }))
-          .filter(entry =>
-            entry.product.toLowerCase() === product.toLowerCase() &&
-            entry.destination?.toLowerCase() === destination.toLowerCase() &&
-            entry.remainingQuantity > 0 &&
-            !entry.allocated // Add check for already allocated
-          )
-          .sort((a, b) => b.remainingQuantity - a.remainingQuantity);
-
-        setAvailableEntries(allEntries); // Show all available entries
-      } else {
-        setAvailableEntries([]);
-      }
-    } catch (error) {
-      console.error('Error fetching entries:', error);
-      toast({
-        title: "Error",
-        description: "Failed to fetch available entries",
-        variant: "destructive"
-      });
-    }
-  };
-
-  const handlePermitAllocation = async (workDetail: ExtendedWorkDetail) => {
-    const selectedEntry = selectedPermitEntries[workDetail.id];
-    if (!selectedEntry) return;
-
-    const permitEntryIds = selectedEntry.split(',');
-    if (permitEntryIds.length !== 2) {
-      toast({
-        title: "Entry Required",
-        description: "Please select exactly 2 permit entries",
-        variant: "destructive"
-      });
-      return;
-    }
-
-    const permitEntries = permitEntryIds
-      .map(id => availableEntries.find(e => e.id === id))
-      .filter((e): e is PermitEntry => e !== undefined);
-
-    // Check for duplicate permit numbers
-    const uniquePermitNumbers = new Set(permitEntries.map(e => e.number));
-    if (uniquePermitNumbers.size !== permitEntries.length) {
-      toast({
-        title: "Invalid Selection",
-        description: "Cannot use the same permit number twice",
-        variant: "destructive"
-      });
-      return;
-    }
-
-    const requiredQuantity = parseFloat(workDetail.quantity) * 1000;
-    const totalAvailable = permitEntries.reduce((sum, entry) => sum + entry.remainingQuantity, 0);
-
-    if (totalAvailable < requiredQuantity) {
-      toast({
-        title: "Insufficient Quantity",
-        description: `Selected entries total (${totalAvailable}L) is less than required (${requiredQuantity}L)`,
-        variant: "destructive"
-      });
-      return;
-    }
-
-    setAllocatingPermit(true);
-    const db = getDatabase();
-
-    try {
-      // First mark entries as allocated to prevent concurrent use
-      await Promise.all(permitEntries.map(entry => 
-        update(ref(db, `allocations/${entry.id}`), { allocated: true })
-      ));
-
-      // Then allocate quantities
-      let remainingToAllocate = requiredQuantity;
-      for (const permitEntry of permitEntries) {
-        if (remainingToAllocate <= 0) break;
-        const quantityFromThisEntry = Math.min(permitEntry.remainingQuantity, remainingToAllocate);
-        
-        await preAllocatePermitEntry(
-          db,
-          workDetail.truck_number,
-          workDetail.product,
-          workDetail.owner,
-          permitEntry.id,
-          permitEntry.number,
-          workDetail.destination,
-          quantityFromThisEntry
-        );
-
-        remainingToAllocate -= quantityFromThisEntry;
-      }
-
-      // Update work details
-      await update(ref(db, `work_details/${workDetail.id}`), {
-        permitRequired: true,
-        permitAllocated: true,
-        permitNumbers: permitEntries.map(e => e.number),
-        permitEntryIds: permitEntries.map(e => e.id),
-        permitDestination: workDetail.destination
-      });
-
-      // Update UI
-      setPendingPermits(prev => prev.filter(p => p.id !== workDetail.id));
-      setSelectedTruck(null);
-      setSelectedPermitEntries(prev => {
-        const newState = { ...prev };
-        delete newState[workDetail.id];
-        return newState;
-      });
-
-      toast({
-        title: "Success",
-        description: `Allocated ${permitEntries.length} permit entries for truck ${workDetail.truck_number}`,
-      });
-
-      // Run cleanup
-      await handleCleanup();
-
-    } catch (error) {
-      // Cleanup failed allocations
-      await Promise.all(permitEntries.map(entry => 
-        update(ref(db, `allocations/${entry.id}`), { allocated: false })
-      ));
-      
-      toast({
-        title: "Error",
-        description: error instanceof Error ? error.message : "Failed to allocate permit",
-        variant: "destructive"
-      });
-    } finally {
-      setAllocatingPermit(false);
-    }
-  };
-
-  const handleMultipleAllocations = async (workDetail: ExtendedWorkDetail, allocations: EntryAllocation[]) => {
-    const db = getDatabase();
-    try {
-      const requiredQuantity = parseFloat(workDetail.quantity) * 1000;
-      
-      // Calculate total available volume from the provided entries
-      const totalAvailable = allocations.reduce((sum, a) => sum + (a.quantity || 0), 0);
-      
-      // Only proceed if we have enough total volume
-      if (totalAvailable < requiredQuantity) {
-        throw new Error(`Insufficient volume: need ${requiredQuantity.toLocaleString()}, have ${totalAvailable.toLocaleString()}`);
-      }
-
-      let remainingToAllocate = requiredQuantity;
-      const allocatedPermitEntries: { id: string; number: string }[] = [];
-      const updates: Record<string, any> = {};
-
-      for (const allocation of allocations) {
-        if (remainingToAllocate <= 0) break;
-        // Use allocation.quantity which represents the available quantity for this entry
-        if (!allocation.quantity || allocation.quantity <= 0) continue; 
-        
-        const quantityFromThisEntry = Math.min(allocation.quantity, remainingToAllocate);
-        
-        if (quantityFromThisEntry > 0) {
-          try {
-            // Call preAllocatePermitEntry which now handles updating preAllocatedQuantity
-            await preAllocatePermitEntry(
-              db,
-              workDetail.truck_number,
-              workDetail.product,
-              workDetail.owner,
-              allocation.entry.id,
-              allocation.entry.number,
-              workDetail.destination,
-              quantityFromThisEntry // Pass the specific amount from this entry
-            );
-            
-            allocatedPermitEntries.push({ id: allocation.entry.id, number: allocation.entry.number });
-            remainingToAllocate -= quantityFromThisEntry;
-
-          } catch (error) {
-            console.error(`Failed to allocate from permit entry ${allocation.entry.number}:`, error);
-            // Decide if we should continue or stop the whole process
-            // For now, let's stop if one allocation fails within the loop
-            throw new Error(`Failed during allocation from ${allocation.entry.number}. Please check logs.`); 
-          }
-        }
-      }
-
-      if (remainingToAllocate > 0) {
-         // This should theoretically not happen due to the initial check, but good to have a safeguard
-         throw new Error(`Allocation incomplete. ${remainingToAllocate.toLocaleString()} liters remaining.`);
-      }
-
-      // Update work details after all successful allocations
-      updates[`work_details/${workDetail.id}/permitRequired`] = true;
-      updates[`work_details/${workDetail.id}/permitAllocated`] = true;
-      updates[`work_details/${workDetail.id}/permitNumbers`] = allocatedPermitEntries.map(e => e.number);
-      updates[`work_details/${workDetail.id}/permitEntryIds`] = allocatedPermitEntries.map(e => e.id);
-      updates[`work_details/${workDetail.id}/permitDestination`] = workDetail.destination; // Store destination used for allocation
-
-      await update(ref(db), updates);
-
-      // Optional: Run cleanup after successful allocation batch
-      // await handleCleanup(); // Consider if cleanup is needed immediately after each multi-allocation
-      
-    } catch (error) {
-      console.error('Multiple allocation error:', error);
-      // Potentially add notification to user
-      toast({
-        title: "Allocation Error",
-        description: error instanceof Error ? error.message : "Failed to allocate permits.",
-        variant: "destructive"
-      });
-      throw error; // Re-throw to be caught by the caller if necessary
-    }
-  };
-
-  const renderPermitEntrySelect = (detail: ExtendedWorkDetail) => {
-    const selectedEntries = selectedPermitEntries[detail.id]?.split(',') || [];
-    const requiredQuantity = parseFloat(detail.quantity) * 1000;
-    const totalAvailable = availableEntries.reduce((sum, entry) => sum + entry.remainingQuantity, 0);
-    const insufficient = totalAvailable < requiredQuantity;
-    const hasExactlyTwo = availableEntries.length === 2;
-
-    return (
-      <div className="space-y-2">
-        <div className="text-sm mb-2">
-          Required: {requiredQuantity.toLocaleString()}L
-          {hasExactlyTwo && (
-            <span className={insufficient ? 'text-red-500' : 'text-green-500'}>
-              {' '}(Available: {totalAvailable.toLocaleString()}L)
-            </span>
-          )}
-        </div>
-        {[0, 1].map((index) => (
-          <Select
-            key={index}
-            value={selectedEntries[index] || ''}
-            onValueChange={(value) => {
-              const newEntries = [...selectedEntries];
-              newEntries[index] = value;
-              setSelectedPermitEntries(prev => ({
-                ...prev,
-                [detail.id]: newEntries.filter(Boolean).join(',')
-              }));
-            }}
-            onOpenChange={(open) => {
-              if (open) {
-                handlePermitEntrySelect(detail);
-              }
-            }}
-          >
-            <SelectTrigger className="w-full sm:w-[200px]">
-              <SelectValue placeholder={`Select permit entry ${index + 1}`} />
-            </SelectTrigger>
-            <SelectContent>
-              {availableEntries.length === 0 ? (
-                <SelectItem value="none" disabled>
-                  No available entries found
-                </SelectItem>
-              ) : (
-                availableEntries
-                  .filter(entry => !selectedEntries.includes(entry.id) || selectedEntries[index] === entry.id)
-                  .map((entry) => (
-                    <SelectItem key={entry.id} value={entry.id}>
-                      {renderEntryOption(entry)}
-                    </SelectItem>
-                  ))
-              )}
-            </SelectContent>
-          </Select>
-        ))}
-        {!hasExactlyTwo && (
-          <div className="text-xs text-yellow-600 mt-1">
-            Need exactly 2 permit entries. Please clean up old allocations.
-          </div>
-        )}
-        {hasExactlyTwo && insufficient && (
-          <div className="text-xs text-red-600 mt-1">
-            Not enough volume in available entries. Please clean up and try again.
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  const handlePermitEntrySelect = async (detail: ExtendedWorkDetail) => {
-    if (selectedTruck === detail.id) {
-      setSelectedTruck(null);
-      setAvailableEntries([]);
-    } else {
-      setSelectedTruck(detail.id);
-      // Fetch entries for the specific destination of this detail
-      await fetchAvailableEntries(detail.product, parseFloat(detail.quantity), detail.destination);
-    }
-  };
-
-  const filteredPermits = Object.entries(permits)
-    .filter(([_, permit]) => {
-      if (!searchTerm) return true
-      const searchLower = searchTerm.toLowerCase()
-      return (
-        permit.truckNumber.toLowerCase().includes(searchLower) ||
-        permit.owner.toLowerCase().includes(searchLower) ||
-        permit.permitNumber.toLowerCase().includes(searchLower)
-      )
-    })
-    .sort((a, b) => new Date(b[1].allocatedAt).getTime() - new Date(a[1].allocatedAt).getTime())
-
-  useEffect(() => {
-    const db = getDatabase();
-    const preAllocationsRef = ref(db, 'permitPreAllocations');
-    
-    const unsubscribe = onValue(preAllocationsRef, (snapshot) => {
-      if (snapshot.exists()) {
-        const allocations = Object.values(snapshot.val() as { [key: string]: PreAllocation });
-        setPreAllocations(allocations.filter(alloc => !alloc.used));
-      } else {
-        setPreAllocations([]);
-      }
-    });
-
-    return () => unsubscribe();
-  }, []);
-
-  // Update filter function for pre-allocations to always show data
-  const getFilteredPreAllocations = () => {
-    // Filter out used allocations first regardless of cleanup mode
-    const unusedPreAllocations = preAllocations.filter(allocation => !allocation.used);
-
-    if (!preAllocationSearch && destinationFilter === 'ALL') {
-      return unusedPreAllocations;
-    }
-    
-    return unusedPreAllocations.filter(allocation => {
-      const matchesSearch = !preAllocationSearch || 
-        allocation.truckNumber.toLowerCase().includes(preAllocationSearch.toLowerCase()) ||
-        allocation.product.toLowerCase().includes(preAllocationSearch.toLowerCase()) ||
-        allocation.permitNumber.toLowerCase().includes(preAllocationSearch.toLowerCase());
-        
-      const matchesDestination = destinationFilter === 'ALL' || 
-        allocation.destination?.toLowerCase() === destinationFilter.toLowerCase();
-        
-      return matchesSearch && matchesDestination;
-    });
-  };
-
-  // Add a helper to check if a pre-allocation is expired
-  const isPreAllocationExpired = (allocation: PreAllocation) => {
-    // Expired if older than 24h or for a loaded truck
-    const age = Date.now() - new Date(allocation.allocatedAt).getTime();
-    return age > 24 * 60 * 60 * 1000 || allocation.used;
-  };
-
-  // Update the pre-allocation card content to include destination and expired status
-  const renderAllocationContent = (allocation: PreAllocation) => {
-    const expired = isPreAllocationExpired(allocation);
-
-    if (editingAllocation === allocation.id) {
-      return (
-        <div className="space-y-2">
-          <div>
-            <label className="text-sm text-muted-foreground">Quantity:</label>
-            <Input 
-              type="number" 
-              value={editQuantity}
-              onChange={(e) => setEditQuantity(parseFloat(e.target.value))}
-              className="mt-1"
-            />
-          </div>
-          <div className="flex justify-end space-x-2 mt-2">
-            <Button 
-              size="sm" 
-              variant="outline"
-              onClick={() => setEditingAllocation(null)}
-            >
-              Cancel
-            </Button>
-            <Button 
-              size="sm"
-              onClick={() => handleSaveAllocation(allocation)}
-            >
-              Save
-            </Button>
-          </div>
-        </div>
-      );
-    }
-
-    return (
-      <div className="space-y-2">
-        <div className="flex justify-between items-center">
-          <div className="font-semibold">{allocation.truckNumber}</div>
-          <Badge 
-            variant={
-              allocation.destination?.toLowerCase() === 'ssd' ? 'default' : 
-              allocation.destination?.toLowerCase() === 'drc' ? 'secondary' : 
-              'outline'
-            }
-            className="ml-2"
-          >
-            {allocation.destination?.toUpperCase() || 'UNKNOWN'}
-          </Badge>
-          {expired && (
-            <Badge variant="destructive" className="ml-2">Expired</Badge>
-          )}
-        </div>
-        <div>Product: {allocation.product}</div>
-        <div>Permit: {allocation.permitNumber}</div>
-        <div>Quantity: {(allocation.quantity / 1000).toFixed(2)}K</div>
-        <div className="text-xs text-muted-foreground">
-          {new Date(allocation.allocatedAt).toLocaleString()}
-        </div>
-        <div className="flex justify-between mt-2">
-          {manualCleanupMode ? (
-            <Checkbox 
-              checked={selectedForCleanup.includes(allocation.id)}
-              onCheckedChange={(checked) => {
-                if (checked) {
-                  setSelectedForCleanup(prev => [...prev, allocation.id]);
-                } else {
-                  setSelectedForCleanup(prev => prev.filter(id => id !== allocation.id));
-                }
-              }}
-              disabled={expired}
-            />
-          ) : (
-            <Button 
-              variant="outline" 
-              size="sm"
-              onClick={() => handleReallocation(allocation.truckNumber, allocation.destination)}
-              disabled={expired}
-            >
-              Reset
-            </Button>
-          )}
-          <div className="flex gap-2">
-            <Button 
-              variant="ghost" 
-              size="sm"
-              onClick={() => handleCopyPermit(allocation)}
-              disabled={expired}
-            >
-              <Copy className="h-4 w-4" />
-            </Button>
-            <Button 
-              variant="ghost" 
-              size="sm"
-              onClick={() => setEditingAllocation(allocation.id)}
-              disabled={expired}
-            >
-              <Edit className="h-4 w-4" />
-            </Button>
-          </div>
-        </div>
-        {expired && (
-          <div className="text-xs text-red-500 mt-1">
-            This permit allocation has expired and cannot be used.
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  // Add refresh function
   const refreshData = useCallback(async () => {
     setIsRefreshing(true)
     try {
-      const db = getDatabase();
-      
-      // Clean up duplicate allocations
-      await cleanupOrphanedAllocations(db);
-      
-      // Consolidate allocations for each truck
-      const uniqueTrucks = new Set(preAllocations.map(a => `${a.truckNumber}-${a.product}`));
-      for (const key of uniqueTrucks) {
-        const [truckNumber, product] = key.split('-');
-        await consolidatePermitAllocations(db, truckNumber, product);
+      const db = getDatabase()
+
+      const workDetailsRef = query(ref(db, 'work_details'), orderByChild('permitAllocated'), equalTo(false))
+      const workSnapshot = await get(workDetailsRef)
+      const pending: WorkDetailWithPermit[] = []
+      if (workSnapshot.exists()) {
+        Object.entries(workSnapshot.val()).forEach(([id, detail]: [string, any]) => {
+          if (!detail.loaded && detail.permitRequired !== false) {
+            pending.push({ id, ...detail })
+          }
+        })
       }
-      
-      await Promise.all([
-        fetchPendingPermits(),
-        selectedTruck && pendingPermits.find(p => p.id === selectedTruck)?.product && 
-          fetchAvailableEntries(
-            pendingPermits.find(p => p.id === selectedTruck)!.product,
-            parseFloat(pendingPermits.find(p => p.id === selectedTruck)!.quantity),
-            pendingPermits.find(p => p.id === selectedTruck)!.destination
-          )
-      ])
+      setPendingPermits(pending.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0)))
+
+      const preAllocRef = ref(db, 'permitPreAllocations')
+      const preAllocSnapshot = await get(preAllocRef)
+      const preAllocs: PreAllocation[] = []
+      if (preAllocSnapshot.exists()) {
+        Object.entries(preAllocSnapshot.val()).forEach(([id, alloc]: [string, any]) => {
+          if (!alloc.used) {
+            preAllocs.push({ id, ...alloc })
+          }
+        })
+      }
+      setPreAllocations(preAllocs.sort((a, b) => new Date(b.allocatedAt).getTime() - new Date(a.allocatedAt).getTime()))
+
+      const loadedTrucksRef = query(ref(db, 'work_details'), orderByChild('loaded'), equalTo(true))
+      const loadedSnapshot = await get(loadedTrucksRef)
+      const loaded: LoadedTruckInfo[] = []
+      if (loadedSnapshot.exists()) {
+        Object.entries(loadedSnapshot.val()).forEach(([id, detail]: [string, any]) => {
+          const allocation = preAllocations.find(pa => pa.truckNumber === detail.truck_number && pa.destination === detail.destination && pa.used)
+          loaded.push({
+            truckId: id,
+            truckNumber: detail.truck_number,
+            allocationId: allocation?.id || 'N/A',
+            loadedAt: detail.loadedAt || new Date().toISOString(),
+            product: detail.product,
+            owner: detail.owner,
+            permitNumber: Array.isArray(detail.permitNumbers) ? detail.permitNumbers.map((p: any) => p.number).join(', ') : detail.permitNumbers?.number || 'N/A',
+            previousTruckNumber: detail.previous_trucks?.slice(-1)[0]
+          })
+        })
+      }
+      setLoadedTrucks(loaded.sort((a, b) => new Date(b.loadedAt).getTime() - new Date(a.loadedAt).getTime()))
+
       setLastRefresh(new Date())
+      setSelectedTruck(null)
+      setAvailableEntries([])
+      setSelectedEntries([])
     } catch (error) {
-      console.error('Refresh error:', error)
+      console.error("Refresh error:", error)
+      toast({ title: "Error", description: "Failed to refresh data.", variant: "destructive" })
     } finally {
       setIsRefreshing(false)
     }
-  }, [selectedTruck, pendingPermits, preAllocations])
+  }, [toast])
 
-  // Update auto-refresh effect (every 10 minutes)
-  useEffect(() => {
-    const intervalId = setInterval(refreshData, 600000) // 10 minutes = 600000ms
-    return () => clearInterval(intervalId)
-  }, [refreshData])
+  const handleCleanup = async () => {
+    setIsRefreshing(true)
+    try {
+      const db = getDatabase()
 
-  // Add new function to handle multiple allocations
+      const zeroQtyCleaned = await cleanupZeroQuantityAllocations(db)
+      console.log(`Cleaned ${zeroQtyCleaned} zero-quantity allocations.`)
+
+      const orphanedResult = await cleanupOrphanedAllocations(db)
+      console.log(`Cleaned ${orphanedResult.cleaned || 0} orphaned/old allocations.`)
+
+      toast({ title: "Cleanup Complete", description: `Finished cleanup tasks. Cleaned ${zeroQtyCleaned + (orphanedResult.cleaned || 0)} items.` })
+      refreshData()
+    } catch (error) {
+      console.error("Cleanup Error:", error)
+      toast({ title: "Cleanup Error", description: `Cleanup failed: ${error instanceof Error ? error.message : 'Unknown error'}`, variant: "destructive" })
+    } finally {
+      setIsRefreshing(false)
+    }
+  }
+
+  const renderLoadedTrucksSection = () => {
+    return (
+      <Card className="mb-6 border-blue-500/20">
+        <CardHeader>
+          <CardTitle className="text-xl font-semibold bg-gradient-to-r from-blue-600 via-sky-500 to-cyan-500 bg-clip-text text-transparent flex justify-between items-center">
+            <span>Loaded Trucks History</span>
+            <Button variant="outline" size="sm" onClick={() => setShowLoadedHistory(!showLoadedHistory)}>
+              {showLoadedHistory ? 'Hide' : 'Show'} History ({loadedTrucks.length})
+            </Button>
+          </CardTitle>
+        </CardHeader>
+        {showLoadedHistory && (
+          <CardContent>
+            {loadedTrucks.length > 0 ? (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Truck</TableHead>
+                    <TableHead>Product</TableHead>
+                    <TableHead>Permit(s)</TableHead>
+                    <TableHead>Loaded At</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {loadedTrucks.slice(0, 10).map((truck) => (
+                    <TableRow key={truck.truckId}>
+                      <TableCell>
+                        {truck.truckNumber}
+                        {truck.previousTruckNumber && (
+                          <span className="text-xs text-muted-foreground ml-1 line-through">({truck.previousTruckNumber})</span>
+                        )}
+                      </TableCell>
+                      <TableCell>{truck.product}</TableCell>
+                      <TableCell className="text-xs">{truck.permitNumber || 'N/A'}</TableCell>
+                      <TableCell>{new Date(truck.loadedAt).toLocaleString()}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            ) : (
+              <div className="text-center text-muted-foreground py-4">No loaded trucks found.</div>
+            )}
+          </CardContent>
+        )}
+      </Card>
+    )
+  }
+
+  const findEntriesForTruck = async (truckDetail: ExtendedWorkDetail) => {
+    if (!truckDetail || !truckDetail.product || !truckDetail.quantity || !truckDetail.destination) {
+      console.error("Missing truck details for finding entries", truckDetail);
+      toast({ title: "Error", description: "Missing truck details.", variant: "destructive" });
+      return;
+    }
+    setIsLoadingEntries(true);
+    setSelectedEntries([]); // Clear previous selection
+    try {
+      const db = getDatabase();
+      const requiredQuantity = parseFloat(truckDetail.quantity); // Treat quantity directly as liters
+
+      const entries = await findAvailablePermitEntries(
+        db,
+        truckDetail.product,
+        requiredQuantity, // Use quantity directly
+        truckDetail.destination
+      );
+
+      setAvailableEntries(entries);
+
+      if (entries.length === 0) {
+         toast({ title: "No Permits", description: `No available ${truckDetail.product} permit entries found for destination ${truckDetail.destination.toUpperCase()}.`, variant: "default" });
+      }
+
+    } catch (error) {
+      console.error("Error finding permit entries:", error);
+      toast({ title: "Error", description: "Failed to fetch available permit entries.", variant: "destructive" });
+      setAvailableEntries([]);
+    } finally {
+      setIsLoadingEntries(false);
+    }
+  };
+
+  const handleMultipleAllocations = async (workDetail: ExtendedWorkDetail, entriesToUse: FoundPermitEntry[]) => {
+    const db = getDatabase();
+    const requiredQuantity = parseFloat(workDetail.quantity); // Treat quantity directly as liters
+    let remainingToAllocate = requiredQuantity;
+    const allocatedPermitInfo: { id: string; number: string; quantity: number }[] = [];
+    const updates: Record<string, any> = {};
+
+    console.log(`Starting allocation for ${workDetail.truck_number}: ${requiredQuantity}L of ${workDetail.product} to ${workDetail.destination}`); // Log as L
+
+    try {
+      entriesToUse.sort((a, b) => a.timestamp - b.timestamp);
+
+      for (const entry of entriesToUse) {
+        if (remainingToAllocate <= 0) break;
+        console.log(`Checking entry: ${entry.number} (${entry.id})`);
+        const volumeCheck: VolumeCheck = await checkEntryVolumes(db, entry.id);
+
+        if (!volumeCheck.isValid || volumeCheck.remainingVolume <= 0) {
+          console.log(`Skipping entry ${entry.number}: No available volume (${volumeCheck.remainingVolume}) or invalid state.`);
+          continue;
+        }
+
+        const quantityFromThisEntry = Math.min(volumeCheck.remainingVolume, remainingToAllocate);
+        console.log(`Entry ${entry.number}: Available=${volumeCheck.remainingVolume}, Needed=${remainingToAllocate}, Allocating=${quantityFromThisEntry}`);
+
+        if (quantityFromThisEntry > 0) {
+          const allocationResult = await preAllocatePermitEntry(
+            db,
+            workDetail.truck_number,
+            workDetail.product,
+            workDetail.owner,
+            entry.id,
+            entry.number,
+            workDetail.destination,
+            quantityFromThisEntry
+          );
+
+          if (allocationResult.success && allocationResult.data) {
+            allocatedPermitInfo.push({
+                id: entry.id,
+                number: entry.number,
+                quantity: quantityFromThisEntry
+            });
+            remainingToAllocate -= quantityFromThisEntry;
+            console.log(`Successfully allocated ${quantityFromThisEntry}L from ${entry.number}. Remaining needed: ${remainingToAllocate}L`);
+          } else {
+            console.error(`Failed to allocate from permit entry ${entry.number}: ${allocationResult.error}`);
+            throw new Error(`Failed during allocation from ${entry.number}. Reason: ${allocationResult.error || 'Unknown'}. Please check logs.`);
+          }
+        }
+      }
+
+      if (remainingToAllocate > 0.01) {
+         console.error(`Allocation incomplete for ${workDetail.truck_number}. Still need ${remainingToAllocate.toLocaleString()} L.`);
+         throw new Error(`Allocation incomplete. ${remainingToAllocate.toLocaleString()} liters remaining. Check permit availability and logs.`);
+      }
+
+      updates[`work_details/${workDetail.id}/permitRequired`] = true;
+      updates[`work_details/${workDetail.id}/permitAllocated`] = true;
+      updates[`work_details/${workDetail.id}/permitNumbers`] = allocatedPermitInfo;
+      updates[`work_details/${workDetail.id}/permitEntryIds`] = allocatedPermitInfo.map(p => p.id);
+      updates[`work_details/${workDetail.id}/permitDestination`] = workDetail.destination;
+
+      await update(ref(db), updates);
+
+      toast({
+        title: "Allocation Successful",
+        description: `Allocated ${requiredQuantity.toLocaleString()}L for truck ${workDetail.truck_number} using ${allocatedPermitInfo.length} permit(s).`,
+      });
+
+      refreshData();
+
+    } catch (error) {
+      console.error(`Allocation process failed for truck ${workDetail.truck_number}:`, error);
+      toast({
+        title: "Allocation Failed",
+        description: error instanceof Error ? error.message : "An unknown error occurred during allocation.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleAllocateSelected = async () => {
+    if (!selectedTruck || selectedEntries.length === 0) {
+      toast({ title: "Error", description: "Please select a truck and at least one permit entry.", variant: "destructive" });
+      return;
+    }
+
+    const workDetail = pendingPermits.find(p => p.id === selectedTruck);
+    if (!workDetail) {
+      toast({ title: "Error", description: "Selected truck details not found.", variant: "destructive" });
+      return;
+    }
+
+    if (!workDetail.destination) {
+       toast({ title: "Error", description: `Truck ${workDetail.truck_number} is missing destination information.`, variant: "destructive" });
+       return;
+    }
+
+    const entriesToUse = selectedEntries
+        .map(entryId => availableEntries.find(entry => entry.id === entryId))
+        .filter((entry): entry is FoundPermitEntry => entry !== undefined);
+
+    if (entriesToUse.length !== selectedEntries.length) {
+        toast({ title: "Error", description: "Some selected entries could not be found. Please refresh.", variant: "destructive" });
+        return;
+    }
+
+    setIsAutoAllocating(true);
+    await handleMultipleAllocations(workDetail as ExtendedWorkDetail, entriesToUse);
+    setIsAutoAllocating(false);
+  };
+
+  const renderEntryOption = (entry: FoundPermitEntry) => {
+    const baseRemainingText = entry.remainingQuantity.toLocaleString();
+    return `${entry.number} - ${baseRemainingText}L (${entry.destination.toUpperCase()})`;
+  };
+
+  const handlePermitAllocation = async (detail: WorkDetailWithPermit) => {
+    console.log("Select Permit button clicked for:", detail.truck_number);
+    setSelectedTruck(detail.id);
+    await findEntriesForTruck(detail as ExtendedWorkDetail);
+    toast({ title: "Select Entries", description: `Select permit entries for ${detail.truck_number} below.` });
+  };
+
   const handleAutoAllocate = async () => {
     setIsAutoAllocating(true);
     let successCount = 0;
@@ -783,58 +389,56 @@ export default function PermitsPage() {
     const db = getDatabase();
 
     try {
-      // Get existing allocations first
-      const preAllocationsSnapshot = await get(ref(db, 'permitPreAllocations'));
-      const existingAllocations = preAllocationsSnapshot.exists() 
-        ? Object.values(preAllocationsSnapshot.val() as Record<string, PreAllocation>).map((pa: PreAllocation) => pa.truckNumber)
-        : [];
+      const preAllocSnapshot = await get(query(ref(db, 'permitPreAllocations'), orderByChild('used'), equalTo(false)));
+      const activeAllocations = preAllocSnapshot.exists() ? preAllocSnapshot.val() : {};
+      const allocatedTrucks = new Set(Object.values(activeAllocations).map((a: any) => `${a.truckNumber}-${a.destination?.toLowerCase()}-${a.product?.toLowerCase()}`));
 
-      // Filter out already allocated trucks
       const unallocatedPending = pendingPermits.filter(
-        detail => !existingAllocations.includes(detail.truck_number)
+        detail => detail.destination && !allocatedTrucks.has(`${detail.truck_number}-${detail.destination?.toLowerCase()}-${detail.product?.toLowerCase()}`)
       );
+
+      if (unallocatedPending.length === 0) {
+          toast({ title: "Auto-Allocate", description: "No pending trucks require allocation.", variant: "default" });
+          setIsAutoAllocating(false);
+          return;
+      }
+
+      toast({ title: "Auto-Allocate", description: `Attempting to allocate for ${unallocatedPending.length} trucks...`, variant: "default" });
 
       for (const detail of unallocatedPending) {
         try {
-          const requiredQuantity = parseFloat(detail.quantity) * 1000;
+          const requiredQuantity = parseFloat(detail.quantity);
           const availableAllocations = await findAvailablePermitEntries(
             db,
             detail.product,
             requiredQuantity,
             detail.destination
           );
-          
-          if (availableAllocations.length > 0) { 
-            await handleMultipleAllocations(detail, availableAllocations);
+
+          if (availableAllocations.length > 0) {
+            await handleMultipleAllocations(detail as ExtendedWorkDetail, availableAllocations);
             successCount++;
           } else {
-            console.log(`No available permit entries found for ${detail.truck_number} (${detail.product}, ${requiredQuantity}L, ${detail.destination})`);
+            console.log(`Auto-Allocate: No suitable permits found for ${detail.truck_number} (${detail.product} to ${detail.destination})`);
             failCount++;
           }
         } catch (error) {
-          console.error(`Failed to allocate permit for ${detail.truck_number}:`, error);
-          toast({
-            title: "Allocation Failed",
-            description: `Could not allocate permit for truck ${detail.truck_number}. Reason: ${error instanceof Error ? error.message : 'Unknown error'}`,
-            variant: "destructive"
-          });
-          failCount++;
+           console.error(`Auto-Allocate failed for truck ${detail.truck_number}:`, error);
+           failCount++;
         }
       }
 
       toast({
-        title: "Auto-Allocation Complete",
-        description: `Successfully allocated: ${successCount}, Failed: ${failCount}`,
-        variant: successCount > 0 && failCount === 0 ? "default" : failCount > 0 ? "destructive" : "default"
+        title: "Auto-Allocate Complete",
+        description: `Processed ${unallocatedPending.length} trucks. Successful: ${successCount}, Failed/Skipped: ${failCount}.`,
       });
-      
-      await refreshData();
+      refreshData();
 
     } catch (error) {
-      console.error('Auto-allocation process error:', error);
+      console.error('Auto-allocation main loop error:', error);
       toast({
-        title: "Error",
-        description: "An error occurred during the auto-allocation process.",
+        title: "Auto-Allocate Error",
+        description: "An unexpected error occurred during the auto-allocation process.",
         variant: "destructive"
       });
     } finally {
@@ -842,467 +446,90 @@ export default function PermitsPage() {
     }
   };
 
-  // Update the cleanup function to be more selective
-  const handleCleanup = async () => {
-    setIsRefreshing(true);
-    try {
-      const db = getDatabase();
-      
-      // Get work details to check loaded status
-      const workDetailsRef = ref(db, 'work_details');
-      const workSnapshot = await get(workDetailsRef);
-      const loadedTrucks = new Map();
-      
-      if (workSnapshot.exists()) {
-        Object.values(workSnapshot.val()).forEach((detail: any) => {
-          if (detail.loaded && detail.truck_number) {
-            loadedTrucks.set(detail.truck_number, detail.loadedAt || new Date().toISOString());
-          }
-        });
-      }
+  const renderPermitEntrySelect = (detail: WorkDetailWithPermit) => {
+     if (selectedTruck !== detail.id) {
+        return <Button variant="outline" onClick={() => handlePermitAllocation(detail)} disabled={isRefreshing || isAutoAllocating}>Select Permit</Button>;
+     }
 
-      // Check pre-allocations
-      const preAllocationsRef = ref(db, 'permitPreAllocations');
-      const preAllocSnapshot = await get(preAllocationsRef);
-      const updates: { [key: string]: null } = {};
-      let cleanedCount = 0;
+     if (isLoadingEntries) {
+        return <div className="flex items-center justify-center p-4"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
+     }
 
-      if (preAllocSnapshot.exists()) {
-        preAllocSnapshot.forEach((child) => {
-          const allocation = child.val();
-          const loadInfo = loadedTrucks.get(allocation.truckNumber);
-          
-          // Clean up if:
-          // 1. Truck is loaded and allocation is not marked as used
-          // 2. Allocation is older than 24 hours
-          const isOld = new Date().getTime() - new Date(allocation.allocatedAt).getTime() > 24 * 60 * 60 * 1000;
-          
-          if ((loadInfo && !allocation.used) || isOld) {
-            updates[`permitPreAllocations/${child.key}`] = null;
-            cleanedCount++;
-          }
-        });
-      }
-
-      if (cleanedCount > 0) {
-        await update(ref(db), updates);
-        toast({
-          title: "Cleanup Complete",
-          description: `Removed ${cleanedCount} pre-allocations`,
-        });
-      } else {
-        toast({
-          title: "No Cleanup Needed",
-          description: "No invalid allocations were found",
-        });
-      }
-
-      await refreshData();
-
-    } catch (error) {
-      console.error('Cleanup error:', error);
-      toast({
-        title: "Error",
-        description: "Failed to clean up allocations",
-        variant: "destructive"
-      });
-    } finally {
-      setIsRefreshing(false);
-    }
-  };
-
-  // Add a new handler for manual reallocation
-  const handleReallocation = async (truckNumber: string, destination?: string) => {
-    try {
-      const db = getDatabase();
-      await resetTruckAllocation(db, truckNumber, destination);
-      
-      toast({
-        title: "Reset Complete",
-        description: destination 
-          ? `Reset allocation for ${truckNumber} to ${destination.toUpperCase()}` 
-          : "You can now reallocate a permit for this truck",
-      });
-
-      await refreshData();
-    } catch (error) {
-      toast({
-        title: "Error",
-        description: "Failed to reset allocation",
-        variant: "destructive"
-      });
-    }
-  };
-
-  // Add this function to your component
-  const handleReset = async () => {
-    if (!confirm('⚠️ WARNING: This will reset the entire permit system. All pre-allocations will be deleted. Are you sure?')) {
-      return;
-    }
-    
-    setIsRefreshing(true);
-    try {
-      const db = getDatabase();
-      const result = await resetPermitSystem(db);
-      
-      toast({
-        title: result.success ? "Reset Complete" : "Reset Failed",
-        description: result.message,
-        variant: result.success ? "default" : "destructive"
-      });
-
-      if (result.success) {
-        // Refresh the page data
-        await refreshData();
-      }
-    } catch (error) {
-      toast({
-        title: "Error",
-        description: "Failed to reset permit system",
-        variant: "destructive"
-      });
-    } finally {
-      setIsRefreshing(false);
-    }
-  };
-
-  // Add handler for cleanup button clicks
-  const handleCleanupClick = () => {
-    const newCount = cleanupClickCount + 1;
-    if (newCount === 5) { // Require 5 clicks to show reset
-      setCleanupClickCount(0);
-      if (confirm('Show system reset button? This is a dangerous operation.')) {
-        toast({
-          title: "Reset Button Enabled",
-          description: "System reset button is now visible. Please be careful.",
-          variant: "destructive"
-        });
-        // You could set a state here to show the reset button temporarily
-        setTimeout(() => {
-          handleReset();
-        }, 100);
-      }
-    } else {
-      setCleanupClickCount(newCount);
-    }
-  };
-
-  // Add new function to handle double click on title
-  const handlePreAllocatedTitleDoubleClick = () => {
-    setManualCleanupMode(!manualCleanupMode);
-    setSelectedForCleanup([]);
-    toast({
-      title: manualCleanupMode ? "Manual Cleanup Mode Disabled" : "Manual Cleanup Mode Enabled",
-      description: manualCleanupMode ? 
-        "Exiting cleanup mode" : 
-        "Click on pre-allocations to select them for cleanup",
-    });
-  };
-
-  // Add function to handle manual cleanup
-  const handleManualCleanup = async () => {
-    if (!selectedForCleanup.length) return;
-
-    try {
-      const db = getDatabase();
-      const updates: { [key: string]: any } = {};
-
-      // Mark each selected allocation as loaded
-      selectedForCleanup.forEach(allocationId => {
-        updates[`permitPreAllocations/${allocationId}`] = null;
-      });
-
-      await update(ref(db), updates);
-
-      toast({
-        title: "Cleanup Complete",
-        description: `Removed ${selectedForCleanup.length} pre-allocations`,
-      });
-
-      setSelectedForCleanup([]);
-      setManualCleanupMode(false);
-    } catch (error) {
-      console.error('Manual cleanup error:', error);
-      toast({
-        title: "Error",
-        description: "Failed to cleanup selected pre-allocations",
-        variant: "destructive"
-      });
-    }
-  };
-
-  // Update the entries display to show remaining balance
-  const renderEntryOption = (entry: PermitEntry) => {
-    const remainingText = entry.remainingQuantity.toLocaleString();
-    return `${entry.number} - ${remainingText}L remaining (${entry.destination.toUpperCase()})`;
-  };
-
-  // Add new handler for editing allocation
-  const handleEditAllocation = (allocation: PreAllocation) => {
-    if (!allocation.quantity || allocation.quantity <= 0) {
-      handleReallocation(allocation.truckNumber, allocation.destination);
-      return;
-    }
-    setEditingAllocation(allocation.id);
-    setEditQuantity(allocation.quantity); // Store in liters
-  };
-
-  // Add save handler
-  const handleSaveAllocation = async (allocation: PreAllocation) => {
-    if (editQuantity <= 0) {
-      toast({
-        title: "Error",
-        description: "Quantity must be greater than 0",
-        variant: "destructive"
-      });
-      return;
-    }
-
-    try {
-      const db = getDatabase();
-      await updatePermitAllocation(db, allocation.id, editQuantity, allocation.quantity);
-      
-      toast({
-        title: "Success",
-        description: `Updated quantity to ${(editQuantity/1000).toFixed(1)}K`,
-      });
-      
-      setEditingAllocation(null);
-      await refreshData();
-    } catch (error) {
-      toast({
-        title: "Error",
-        description: error instanceof Error ? error.message : "Failed to update allocation",
-        variant: "destructive"
-      });
-    }
-  };
-
-  // Add function to copy permit information to clipboard
-  const handleCopyPermit = (allocation: PreAllocation) => {
-    const textToCopy = `Truck: ${allocation.truckNumber}
-Product: ${allocation.product}
-Permit: ${allocation.permitNumber}
-Destination: ${allocation.destination?.toUpperCase() || 'Unknown'}
-Quantity: ${(allocation.quantity / 1000).toFixed(2)}K
-Date: ${new Date(allocation.allocatedAt).toLocaleString()}`;
-
-    navigator.clipboard.writeText(textToCopy)
-      .then(() => {
-        toast({
-          title: "Copied",
-          description: "Permit information copied to clipboard",
-        });
-      })
-      .catch((error) => {
-        console.error('Failed to copy:', error);
-        toast({
-          title: "Error",
-          description: "Failed to copy permit information",
-          variant: "destructive"
-        });
-      });
-  };
-
-  // Add function to fetch loaded trucks that had pre-allocated permits
-  const fetchLoadedTrucks = async () => {
-    try {
-      const db = getDatabase();
-      
-      // Get all work details
-      const workDetailsRef = ref(db, 'work_details');
-      const workSnapshot = await get(workDetailsRef);
-      
-      if (!workSnapshot.exists()) return;
-      
-      // Get pre-allocations
-      const preAllocationsRef = ref(db, 'permitPreAllocations');
-      const preAllocationsSnapshot = await get(preAllocationsRef);
-      const preAllocations = preAllocationsSnapshot.exists() ? preAllocationsSnapshot.val() : {};
-
-      // Create a map of truck numbers to pre-allocations
-      const truckAllocations: { [truckNumber: string]: any } = {};
-      Object.entries(preAllocations).forEach(([id, alloc]: [string, any]) => {
-        truckAllocations[alloc.truckNumber] = {
-          id,
-          ...alloc
-        };
-      });
-      
-      // Find loaded trucks that had pre-allocations
-      const loaded: LoadedTruckInfo[] = [];
-      
-      Object.entries(workSnapshot.val()).forEach(([id, work]: [string, any]) => {
-        if (work.loaded) {
-          // Check if this truck has an allocation
-          let allocation = truckAllocations[work.truck_number];
-          
-          // If no direct allocation, check if this truck was changed from another one
-          if (!allocation && work.previous_trucks && work.previous_trucks.length > 0) {
-            for (const prevTruck of work.previous_trucks) {
-              if (truckAllocations[prevTruck]) {
-                allocation = truckAllocations[prevTruck];
-                allocation.previousTruckNumber = prevTruck;
-                break;
-              }
-            }
-          }
-          
-          if (allocation) {
-            loaded.push({
-              truckId: id,
-              truckNumber: work.truck_number,
-              allocationId: allocation.id,
-              loadedAt: work.loadedAt || new Date().toISOString(),
-              product: work.product,
-              owner: work.owner,
-              permitNumber: allocation.permitNumber,
-              previousTruckNumber: allocation.previousTruckNumber
-            });
-          }
-        }
-      });
-      
-      setLoadedTrucks(loaded);
-      
-      // Mark these allocations as used in the database
-      const updates: { [key: string]: any } = {};
-      for (const truck of loaded) {
-        if (preAllocations[truck.allocationId] && !preAllocations[truck.allocationId].used) {
-          updates[`permitPreAllocations/${truck.allocationId}/used`] = true;
-          updates[`permitPreAllocations/${truck.allocationId}/loadedAt`] = truck.loadedAt;
-          updates[`permitPreAllocations/${truck.allocationId}/actualTruckNumber`] = truck.truckNumber;
-          
-          if (truck.previousTruckNumber) {
-            updates[`permitPreAllocations/${truck.allocationId}/previousTruckNumber`] = truck.previousTruckNumber;
-          }
-        }
-      }
-      
-      if (Object.keys(updates).length > 0) {
-        await update(ref(db), updates);
-      }
-      
-    } catch (error) {
-      console.error('Error fetching loaded trucks:', error);
-      toast({
-        title: "Error",
-        description: "Failed to fetch loaded trucks data",
-        variant: "destructive"
-      });
-    }
-  };
-
-  // Add this hook to fetch loaded trucks periodically
-  useEffect(() => {
-    // Initial fetch
-    fetchLoadedTrucks();
-    
-    // Fetch every minute
-    const interval = setInterval(fetchLoadedTrucks, 60000);
-    
-    return () => clearInterval(interval);
-  }, []);
-
-  // Add a section to display loaded trucks with their allocations
-  const renderLoadedTrucksSection = () => {
-    if (loadedTrucks.length === 0) return null;
-    
-    return (
-      <Card className="mb-6 border-emerald-500/20">
-        <CardHeader>
-          <div className="flex justify-between items-center">
-            <CardTitle className="text-xl font-semibold bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">
-              Recently Loaded Trucks
-            </CardTitle>
+     return (
+       <div className="space-y-2">
+         <Label className="text-sm font-medium">Available Entries ({availableEntries.length})</Label>
+         {availableEntries.length > 0 ? (
+           <div className="max-h-48 overflow-y-auto border rounded p-2 space-y-1 bg-background">
+             {availableEntries.map(entry => (
+               <div key={entry.id} className="flex items-center space-x-2 p-1 hover:bg-muted/50 rounded">
+                 <Checkbox
+                   id={`entry-${detail.id}-${entry.id}`}
+                   checked={selectedEntries.includes(entry.id)}
+                   onCheckedChange={(checked) => {
+                     setSelectedEntries(prev =>
+                       checked
+                         ? [...prev, entry.id]
+                         : prev.filter(id => id !== entry.id)
+                     );
+                   }}
+                 />
+                 <Label htmlFor={`entry-${detail.id}-${entry.id}`} className="text-sm font-normal cursor-pointer flex-grow">
+                   {renderEntryOption(entry)}
+                 </Label>
+               </div>
+             ))}
+           </div>
+         ) : (
+           <div className="text-sm text-muted-foreground p-2 border rounded">No suitable permit entries found for this product/destination.</div>
+         )}
+         {availableEntries.length > 0 && (
             <Button
-              variant="outline"
+              onClick={handleAllocateSelected}
+              disabled={isAutoAllocating || selectedEntries.length === 0 || isRefreshing}
+              className="w-full sm:w-auto"
               size="sm"
-              onClick={() => setShowLoadedHistory(!showLoadedHistory)}
             >
-              {showLoadedHistory ? "Hide History" : "Show History"}
+              {isAutoAllocating ? (
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+              ) : null}
+              Allocate Selected ({selectedEntries.length})
             </Button>
-          </div>
-        </CardHeader>
-        <CardContent>
-          {showLoadedHistory ? (
-            <div className="space-y-4">
-              {loadedTrucks.map((truck) => (
-                <div 
-                  key={`${truck.truckId}-${truck.loadedAt}`} 
-                  className="flex flex-col sm:flex-row sm:items-center sm:justify-between p-4 border rounded-lg space-y-4 sm:space-y-0"
-                >
-                  <div>
-                    <div className="font-medium">{truck.truckNumber}</div>
-                    {truck.previousTruckNumber && (
-                      <div className="text-xs text-orange-600 font-medium">
-                        Previous: {truck.previousTruckNumber}
-                      </div>
-                    )}
-                    <div className="text-sm text-muted-foreground">
-                      {truck.owner} - {truck.product} - Loaded at: {new Date(truck.loadedAt).toLocaleString()}
-                    </div>
-                  </div>
-                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-4">
-                    <Badge variant="secondary" className="flex gap-2 items-center">
-                      <span>Permit Used: {truck.permitNumber}</span>
-                    </Badge>
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="text-center text-muted-foreground py-4">
-              {loadedTrucks.length} loaded truck(s) with allocated permits
-            </div>
-          )}
-        </CardContent>
-      </Card>
-    );
+         )}
+         <Button variant="ghost" size="sm" onClick={() => { setSelectedTruck(null); setAvailableEntries([]); setSelectedEntries([]); }}>Cancel</Button>
+       </div>
+     );
   };
 
-  // Add cleanup on component mount
-  useEffect(() => {
-    const cleanup = async () => {
-      try {
-        const db = getDatabase();
-        const cleanedCount = await cleanupZeroQuantityAllocations(db);
-        if (cleanedCount > 0) {
-          toast({
-            title: "Cleanup Complete",
-            description: `Removed ${cleanedCount} invalid permit allocations`,
-            variant: "default"
-          });
-        }
-      } catch (error) {
-        console.error('Cleanup error:', error);
-      }
-    };
-    
-    cleanup();
-  }, []);
+  const handlePreAllocatedTitleDoubleClick = () => {
+    setManualCleanupMode(prev => !prev);
+    if (manualCleanupMode) {
+      setSelectedForCleanup([]);
+      toast({
+        title: "Manual Cleanup Mode Disabled",
+        description: "Exited manual cleanup mode",
+        variant: "default"
+      });
+    } else {
+      toast({
+        title: "Manual Cleanup Mode Enabled",
+        description: "Select items to manually clean up pre-allocations",
+        variant: "default"
+      });
+    }
+  };
 
-  // Update the pre-allocations rendering with proper keys
-  const renderPreAllocations = () => (
-    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-      {getFilteredPreAllocations().map((allocation) => (
-        <Card key={allocation.id || `${allocation.truckNumber}-${allocation.timestamp}`} className="overflow-hidden">
-          <CardContent className="p-4">
-            {renderAllocationContent(allocation)}
-          </CardContent>
-        </Card>
-      ))}
-    </div>
-  );
+  useEffect(() => {
+    refreshData()
+    const intervalId = setInterval(refreshData, 300000)
+    return () => clearInterval(intervalId)
+  }, [refreshData])
 
   return (
     <div className="min-h-screen">
       <header className="fixed top-0 left-0 w-full border-b z-50 bg-gradient-to-r from-emerald-900/10 via-blue-900/10 to-blue-900/10 backdrop-blur-xl">
         <div className="w-full">
           <div className="max-w-7xl mx-auto px-2 py-2">
-            {/* Main header row */}
             <div className="flex items-center justify-between">
-              {/* Left side - essential controls */}
               <div className="flex items-center gap-2">
                 <Button
                   variant="ghost"
@@ -1313,28 +540,25 @@ Date: ${new Date(allocation.allocatedAt).toLocaleString()}`;
                   <ArrowLeft className="h-4 w-4" />
                 </Button>
                 <div className="flex items-center gap-2">
-                  <h1 
-                    onClick={handleTitleClick}
+                  <h1
                     className="text-sm font-semibold bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent truncate max-w-[150px] sm:max-w-none sm:text-base cursor-pointer"
                   >
                     Permit Allocations
                   </h1>
                   <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                    <Circle 
-                      className={`h-2 w-2 ${isRefreshing ? 'text-green-500 animate-pulse' : 'text-muted-foreground'}`} 
-                      fill="currentColor" 
+                    <Circle
+                      className={`h-2 w-2 ${isRefreshing ? 'text-yellow-500 animate-pulse' : 'text-green-500'}`}
+                      fill="currentColor"
                     />
                     <span className="hidden sm:inline">
-                      {isRefreshing 
-                        ? 'Refreshing...' 
+                      {isRefreshing
+                        ? 'Refreshing...'
                         : `Last: ${lastRefresh.toLocaleTimeString()}`
                       }
                     </span>
                   </div>
                 </div>
               </div>
-
-              {/* Right side - actions */}
               <div className="flex items-center gap-2">
                 <Button
                   variant="ghost"
@@ -1348,27 +572,25 @@ Date: ${new Date(allocation.allocatedAt).toLocaleString()}`;
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={handleCleanupClick} // Changed to new handler
+                  onClick={handleCleanup}
                   disabled={isRefreshing}
                   className="hidden sm:flex items-center"
                 >
                   {isRefreshing ? (
-                    <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                   ) : (
                     <RefreshCw className="h-4 w-4 mr-2" />
                   )}
                   Clean Up
                 </Button>
-
                 <ThemeToggle />
-                
                 <div className="relative group">
-                  <Avatar 
+                  <Avatar
                     className="h-8 w-8 ring-1 ring-pink-500/50"
                     onClick={() => router.push('/dashboard')}
                   >
-                    <AvatarImage 
-                      src={session?.user?.image || profilePicUrl || ''} 
+                    <AvatarImage
+                      src={session?.user?.image || profilePicUrl || ''}
                       alt={session?.user?.name || 'User Profile'}
                       className="h-8 w-8"
                     />
@@ -1379,8 +601,6 @@ Date: ${new Date(allocation.allocatedAt).toLocaleString()}`;
                 </div>
               </div>
             </div>
-
-            {/* Mobile row */}
             <div className="flex mt-2 sm:hidden">
               <Button
                 variant="outline"
@@ -1390,7 +610,7 @@ Date: ${new Date(allocation.allocatedAt).toLocaleString()}`;
                 className="w-full"
               >
                 {isRefreshing ? (
-                  <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                 ) : (
                   <RefreshCw className="h-4 w-4 mr-2" />
                 )}
@@ -1400,30 +620,26 @@ Date: ${new Date(allocation.allocatedAt).toLocaleString()}`;
           </div>
         </div>
       </header>
-
-      <main className="max-w-7xl mx-auto px-2 sm:px-4 pt-28 sm:pt-24 pb-6 sm:pb-8">
-        {/* Loaded Trucks Section - Add this before the Pending Permits section */}
+      <main className="max-w-7xl mx-auto px-2 sm:px-4 pt-36 sm:pt-24 pb-6 sm:pb-8">
         {renderLoadedTrucksSection()}
-        
-        {/* Pending Permits Section */}
         <Card className="mb-6 border-emerald-500/20">
           <CardHeader>
-            <div className="flex justify-between items-center">
+            <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-2">
               <CardTitle className="text-xl font-semibold bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">
-                Pending Permit Allocations
+                Pending Permit Allocations ({pendingPermits.length})
               </CardTitle>
               {pendingPermits.length > 0 && (
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={handleAutoAllocate}
-                  disabled={isAutoAllocating}
-                  className="relative"
+                  disabled={isAutoAllocating || isRefreshing}
+                  className="relative w-full sm:w-auto"
                 >
                   {isAutoAllocating ? (
-                    <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                   ) : null}
-                  Auto-Allocate {pendingPermits.length > 1 ? `(${pendingPermits.length})` : ''}
+                  Auto-Allocate All
                   {isAutoAllocating && (
                     <span className="absolute -top-1 -right-1 h-2 w-2 bg-green-500 rounded-full animate-ping" />
                   )}
@@ -1434,64 +650,56 @@ Date: ${new Date(allocation.allocatedAt).toLocaleString()}`;
           <CardContent>
             <div className="space-y-4">
               {pendingPermits.map((detail) => (
-                <div key={detail.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between p-4 border rounded-lg space-y-4 sm:space-y-0">
-                  <div>
+                <div key={detail.id} className="flex flex-col sm:flex-row sm:items-start sm:justify-between p-4 border rounded-lg space-y-4 sm:space-y-0 sm:space-x-4 bg-card">
+                  <div className="flex-shrink-0">
                     <div className="font-medium">{detail.truck_number}</div>
                     <div className="text-sm text-muted-foreground">
-                      {detail.owner} - {detail.product} - {detail.quantity}L
+                      {detail.owner} - {detail.product}
+                    </div>
+                    <div className="text-sm text-muted-foreground">
+                      {detail.destination?.toUpperCase()} - {parseFloat(detail.quantity).toLocaleString()} L
                     </div>
                   </div>
-                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-4">
+                  <div className="flex-grow">
                     {renderPermitEntrySelect(detail)}
-                    <Button
-                      onClick={() => handlePermitAllocation(detail)}
-                      disabled={allocatingPermit || !selectedPermitEntries[detail.id]}
-                      className="w-full sm:w-auto"
-                    >
-                      {allocatingPermit ? (
-                        <RefreshCw className="h-4 w-4 animate-spin mr-2" />
-                      ) : null}
-                      Allocate Permit
-                    </Button>
                   </div>
                 </div>
               ))}
               {pendingPermits.length === 0 && (
                 <div className="text-center text-muted-foreground py-8">
-                  No pending permits to allocate
+                  No pending permits to allocate.
                 </div>
               )}
             </div>
           </CardContent>
         </Card>
-
-        {/* Updated Pre-Allocations Card with improved mobile layout */}
         <Card className="border-emerald-500/20">
           <CardHeader className="sm:pb-3">
-            <CardTitle 
-              className="text-xl font-semibold bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent flex items-center justify-between"
+            <CardTitle
+              className="text-xl font-semibold bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2"
               onDoubleClick={handlePreAllocatedTitleDoubleClick}
             >
-              <span>Pre-Allocated Permits</span>
-              <div className="flex items-center gap-2">
+              <span>Active Pre-Allocated Permits</span>
+              <div className="flex items-center gap-2 w-full sm:w-auto">
                 {manualCleanupMode && (
                   <Button
                     variant="destructive"
                     size="sm"
-                    onClick={handleManualCleanup}
-                    disabled={!selectedForCleanup.length}
+                    onClick={handleCleanup}
+                    disabled={!selectedForCleanup.length || isRefreshing}
+                    className="flex-grow sm:flex-grow-0"
                   >
                     Clean Selected ({selectedForCleanup.length})
                   </Button>
                 )}
-                <span className="text-sm font-normal text-muted-foreground">
-                  {getFilteredPreAllocations().length} Active
-                </span>
+                <Badge variant="outline" className="ml-auto">
+                  {preAllocations.length} Active
+                </Badge>
               </div>
             </CardTitle>
             <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
               <Input
-                placeholder="Search pre-allocations..."
+                placeholder="Search truck, permit, owner..."
                 value={preAllocationSearch}
                 onChange={(e) => setPreAllocationSearch(e.target.value)}
               />
@@ -1511,17 +719,108 @@ Date: ${new Date(allocation.allocatedAt).toLocaleString()}`;
               </Select>
             </div>
           </CardHeader>
-          <CardContent className="px-2 sm:px-6 pb-6">
-            {getFilteredPreAllocations().length > 0 ? (
-              renderPreAllocations()
+          <CardContent className="px-0 sm:px-6 pb-6">
+            {preAllocations.length > 0 ? (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      {manualCleanupMode && <TableHead className="w-12"></TableHead>}
+                      <TableHead>Truck</TableHead>
+                      <TableHead>Product</TableHead>
+                      <TableHead>Permit</TableHead>
+                      <TableHead>Destination</TableHead>
+                      <TableHead>Allocated</TableHead>
+                      <TableHead></TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {preAllocations
+                      .filter(alloc => {
+                        if (destinationFilter !== 'ALL' && alloc.destination.toLowerCase() !== destinationFilter.toLowerCase()) {
+                          return false;
+                        }
+                        if (preAllocationSearch) {
+                          const search = preAllocationSearch.toLowerCase();
+                          return (
+                            alloc.truckNumber.toLowerCase().includes(search) ||
+                            alloc.permitNumber.toLowerCase().includes(search) ||
+                            alloc.owner.toLowerCase().includes(search) ||
+                            alloc.product.toLowerCase().includes(search)
+                          );
+                        }
+                        return true;
+                      })
+                      .map((allocation) => (
+                        <TableRow key={allocation.id} className={isPreAllocationExpired(allocation) ? 'bg-yellow-500/10' : ''}>
+                          {manualCleanupMode && (
+                            <TableCell>
+                              <Checkbox
+                                checked={selectedForCleanup.includes(allocation.id)}
+                                onCheckedChange={(checked) => {
+                                  if (checked) {
+                                    setSelectedForCleanup(prev => [...prev, allocation.id]);
+                                  } else {
+                                    setSelectedForCleanup(prev => prev.filter(id => id !== allocation.id));
+                                  }
+                                }}
+                              />
+                            </TableCell>
+                          )}
+                          <TableCell className="font-medium">{allocation.truckNumber}</TableCell>
+                          <TableCell>{allocation.product}</TableCell>
+                          <TableCell className="font-mono text-xs">{allocation.permitNumber}</TableCell>
+                          <TableCell>{allocation.destination}</TableCell>
+                          <TableCell className="text-xs text-muted-foreground">
+                            {new Date(allocation.allocatedAt).toLocaleString()}
+                          </TableCell>
+                          <TableCell>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={async () => {
+                                setIsReleasing(allocation.id);
+                                try {
+                                  const db = getDatabase();
+                                  await releasePreAllocation(db, allocation.id);
+                                  toast({ title: "Released", description: `Allocation ${allocation.permitNumber} for ${allocation.truckNumber} released.` });
+                                  refreshData();
+                                } catch (error) {
+                                  console.error(`Error releasing allocation ${allocation.id}:`, error);
+                                  toast({ title: "Error", description: "Failed to release allocation.", variant: "destructive" });
+                                } finally {
+                                  setIsReleasing(null);
+                                }
+                              }}
+                              disabled={isReleasing === allocation.id || isRefreshing}
+                              className="h-7 px-2"
+                            >
+                              {isReleasing === allocation.id ? (
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                              ) : (
+                                'Release'
+                              )}
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                  </TableBody>
+                </Table>
+              </div>
             ) : (
               <div className="text-center p-4 text-muted-foreground">
-                No active pre-allocations found.
+                No active pre-allocations found matching filters.
               </div>
             )}
           </CardContent>
         </Card>
       </main>
     </div>
-  );
+  )
 }
+
+function isPreAllocationExpired(allocation: PreAllocation): boolean {
+  const age = Date.now() - new Date(allocation.allocatedAt).getTime()
+  return age > 48 * 60 * 60 * 1000 || allocation.used
+}
+

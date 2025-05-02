@@ -1,4 +1,5 @@
 export interface PermitEntry {
+  used: any;
   id: string;
   number: string;
   product: string;
@@ -8,12 +9,13 @@ export interface PermitEntry {
   initialQuantity: number;
   timestamp: number;
   createdBy: string;
-  preAllocatedQuantity?: number;
-  allocatedTo?: PermitAllocation[];
-  availableQuantity?: number;
 }
 
 export interface PermitAllocation {
+  destination: any;
+  actualTruckNumber: any;
+  id: any;
+  previousTruckNumber: any;
   permitEntryId: any;
   used: any;
   allocatedAt: string | number | Date;

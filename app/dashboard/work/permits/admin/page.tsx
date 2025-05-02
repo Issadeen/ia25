@@ -17,33 +17,8 @@ import { useProfileImage } from '@/hooks/useProfileImage'
 import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
-
-interface Entry {
-  id: string;
-  number: string;
-  product: string;
-  destination: string; // Ensure this property is defined
-  remainingQuantity: number;
-  initialQuantity: number;
-  allocated: boolean;
-  timestamp: number;
-}
-
-interface PermitAllocation {
-  id: string;
-  truckNumber: string;
-  product: string;
-  owner: string;
-  permitEntryId: string;
-  permitNumber: string;
-  quantity: number;
-  allocatedAt: string;
-  used: boolean;
-  usedAt?: string;
-  actualTruckNumber?: string;
-  previousTruckNumber?: string;
-  destination: string;
-}
+import { PermitEntry as Entry, PermitAllocation } from '@/types/permits'
+import { updateEntryVolume } from '@/utils/permit-helpers'
 
 export default function AdminPage() {
   const router = useRouter();
@@ -88,38 +63,30 @@ export default function AdminPage() {
       setIsSyncing(true);
       const db = getDatabase();
 
-      // First, let's get all existing allocations for all destinations
       const allocationsRef = ref(db, 'allocations');
       const allocationsSnapshot = await get(allocationsRef);
       const allocations = allocationsSnapshot.exists() ? allocationsSnapshot.val() : {};
 
-      // Ensure we are synchronizing allocations for SSD entries
-      // This is for backward compatibility
       const tr800Ref = ref(db, 'tr800');
       const tr800Snapshot = await get(tr800Ref);
       const tr800Entries = tr800Snapshot.exists() ? tr800Snapshot.val() : {};
 
-      // Find mismatches and sync for all destinations
       const updates: { [key: string]: any } = {};
       let fixCount = 0;
       
       Object.entries(allocations).forEach(([key, alloc]: [string, any]) => {
         const tr800Entry = tr800Entries[key];
         if (!tr800Entry) {
-          // Allocation exists but no TR800 entry - remove it or set to 0
           updates[`allocations/${key}`] = null;
           fixCount++;
         } else if (tr800Entry.remainingQuantity !== alloc.remainingQuantity) {
-          // Quantities don't match - sync from TR800
           updates[`allocations/${key}/remainingQuantity`] = tr800Entry.remainingQuantity;
           fixCount++;
         }
       });
 
-      // Also check for entries in TR800 that are missing in allocations
       Object.entries(tr800Entries).forEach(([key, entry]: [string, any]) => {
         if (!allocations[key]) {
-          // Found a TR800 entry that's missing in allocations, add it
           updates[`allocations/${key}`] = entry;
           fixCount++;
         }
@@ -206,22 +173,18 @@ export default function AdminPage() {
     }
 
     try {
-      const db = getDatabase();
-      const entryRef = ref(db, `allocations/${entry.id}`);
-      
-      await update(entryRef, {
-        remainingQuantity: newVolume
-      });
+      await updateEntryVolume(getDatabase(), entry.id, newVolume); 
 
       toast({
         title: "Success",
-        description: `Volume updated to ${newVolume.toLocaleString()}L`
+        description: `Volume updated for ${entry.number} to ${newVolume.toLocaleString()}L`
       });
       setEditingEntry(null);
     } catch (error) {
+       console.error("Volume update failed:", error);
       toast({
         title: "Error",
-        description: "Failed to update volume",
+        description: `Failed to update volume: ${error instanceof Error ? error.message : 'Unknown error'}`,
         variant: "destructive"
       });
     }
@@ -234,23 +197,18 @@ export default function AdminPage() {
 
   const getFilteredEntries = () => {
     return entries.filter(entry => {
-      // Handle undefined destination gracefully
       const entryDestination = entry.destination || '';
       
-      // Check if the entry should be filtered by destination
       const matchesDestination = destinationFilter === 'ALL' || 
         entryDestination.toLowerCase() === destinationFilter.toLowerCase();
       
-      // Check if the entry matches the search term
       const matchesSearch = !searchTerm || 
         entry.number.toLowerCase().includes(searchTerm.toLowerCase()) || 
         entry.product.toLowerCase().includes(searchTerm.toLowerCase());
       
-      // Filter by products if applicable
       const matchesProduct = productFilter === 'ALL' || 
         entry.product.toUpperCase() === productFilter.toUpperCase();
       
-      // Filter by balance if applicable
       const matchesBalance = !showWithBalanceOnly || entry.remainingQuantity > 0;
       
       return matchesDestination && matchesSearch && matchesProduct && matchesBalance;
@@ -425,34 +383,59 @@ export default function AdminPage() {
   };
 
   const renderPermitEntry = (entry: Entry) => {
+    const isEditing = editingEntry === entry.id;
     return (
-      <div className="border rounded-md p-4 mb-4">
-        <div className="flex justify-between mb-2">
-          <span className="text-lg font-semibold">{entry.number}</span>
-          <Badge variant="outline">{(entry.destination || 'UNKNOWN').toUpperCase()}</Badge>
+      <Card className="h-full flex flex-col">
+        <CardHeader>
+          <div className="flex justify-between items-start">
+            <CardTitle className="text-lg font-semibold">{entry.number}</CardTitle>
+            <Badge variant="outline">{(entry.destination || 'N/A').toUpperCase()}</Badge>
+          </div>
+          <p className="text-sm text-muted-foreground">{entry.product}</p>
+        </CardHeader>
+        <CardContent className="flex-grow space-y-2">
+           <div>
+            <span className="text-xs text-muted-foreground block">Initial Qty</span>
+            <span className="font-medium">{entry.initialQuantity?.toLocaleString() || 0} L</span>
+          </div>
+           <div>
+            <span className="text-xs text-muted-foreground block">Current Qty</span>
+             {isEditing ? (
+                <Input
+                  type="number"
+                  value={editValue}
+                  onChange={(e) => setEditValue(parseFloat(e.target.value) || 0)}
+                  className="h-8 text-base"
+                  autoFocus
+                  onKeyDown={(e) => e.key === 'Enter' && handleSave(entry)}
+                />
+              ) : (
+                <span className="font-medium">{entry.remainingQuantity?.toLocaleString() || 0} L</span>
+              )}
+          </div>
+           <div>
+            <span className="text-xs text-muted-foreground block">Date Added</span>
+            <span className="font-medium">{new Date(entry.timestamp || 0).toLocaleDateString()}</span>
+          </div>
+        </CardContent>
+        <div className="p-4 pt-0 flex justify-end space-x-2">
+           {isEditing ? (
+            <>
+              <Button variant="ghost" size="sm" onClick={() => setEditingEntry(null)}>Cancel</Button>
+              <Button size="sm" onClick={() => handleSave(entry)}>
+                <Save className="h-4 w-4 mr-1" /> Save
+              </Button>
+            </>
+          ) : (
+            <Button variant="outline" size="sm" onClick={() => {
+              setEditingEntry(entry.id);
+              setEditValue(entry.remainingQuantity || 0);
+            }}>
+              Edit Volume
+            </Button>
+          )}
         </div>
-        <div className="grid grid-cols-2 gap-2 mb-4">
-          <div>
-            <span className="text-sm text-gray-500">Product:</span>
-            <div>{entry.product}</div>
-          </div>
-          <div>
-            <span className="text-sm text-gray-500">Initial Quantity:</span>
-            <div>{entry.initialQuantity?.toLocaleString() || 0} litres</div>
-          </div>
-          <div>
-            <span className="text-sm text-gray-500">Remaining Quantity:</span>
-            <div>{entry.remainingQuantity?.toLocaleString() || 0} litres</div>
-          </div>
-          <div>
-            <span className="text-sm text-gray-500">Date:</span>
-            <div>{new Date(entry.timestamp || 0).toLocaleDateString()}</div>
-          </div>
-        </div>
-        <div className="flex justify-end space-x-2">
-          {/* ... existing buttons ... */}
-        </div>
-      </div>
+      </Card>
     );
   };
 

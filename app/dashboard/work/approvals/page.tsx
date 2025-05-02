@@ -274,23 +274,25 @@ export default function ApprovalsPage() {
   const handleVerify = async () => {
     setIsVerifying(true);
     try {
-      // !!! IMPORTANT: Accessing session.user.email client-side is not possible here.
-      // The verification logic needs to be moved server-side (e.g., Server Action or API route)
-      // where you can securely get the user's ID/email from the token.
+      const response = await fetch('/api/auth/verify-approver', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ workId }),
+      });
 
-      // Example of how it might look if moved to a Server Action:
-      // const result = await verifyApproverServerAction(workId);
-      // if (result.success) { ... } else { ... }
+      const result = await response.json();
 
-      // TEMPORARY FIX for TS error - REMOVING INVALID ACCESS:
-      // This line is invalid client-side:
-      // if (!session?.user?.email) {
-      //   throw new Error("No user email found");
-      // }
-      // This comparison logic needs to happen server-side.
-      // For now, we'll throw an error indicating this needs rework.
-      throw new Error("Verification logic needs to be implemented server-side.");
-
+      if (response.ok && result.success) {
+        setIsVerified(true);
+        toast({
+          title: "Verified",
+          description: "Identity verified successfully",
+        });
+      } else {
+        throw new Error(result.error || 'Verification failed');
+      }
     } catch (error) {
       toast({
         title: "Verification Failed",
