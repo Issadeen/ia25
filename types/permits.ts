@@ -1,4 +1,5 @@
 export interface PermitEntry {
+  preAllocatedQuantity: number;
   used: any;
   id: string;
   number: string;
