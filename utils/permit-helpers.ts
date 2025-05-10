@@ -175,3 +175,32 @@ export const updateEntryVolume = async (
     throw error;
   }
 };
+
+export const validatePermitAllocation = (
+  entry: PermitEntry,
+  requestedQuantity: number,
+  destination: string
+): { isValid: boolean; error?: string } => {
+  if (!entry) {
+    return { isValid: false, error: 'Invalid permit entry' };
+  }
+
+  // Prevent local destination allocations
+  if (destination.toLowerCase() === 'local') {
+    return { isValid: false, error: 'Local trucks do not require permit allocation' };
+  }
+
+  if (entry.destination?.toLowerCase() !== destination.toLowerCase()) {
+    return { isValid: false, error: `Permit destination mismatch: ${entry.destination} vs ${destination}` };
+  }
+
+  if (!entry.remainingQuantity || entry.remainingQuantity <= 0) {
+    return { isValid: false, error: 'Permit has no remaining quantity' };
+  }
+
+  if (entry.remainingQuantity < requestedQuantity) {
+    return { isValid: false, error: `Insufficient quantity. Available: ${entry.remainingQuantity}, Requested: ${requestedQuantity}` };
+  }
+
+  return { isValid: true };
+};

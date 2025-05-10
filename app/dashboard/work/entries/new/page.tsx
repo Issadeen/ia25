@@ -31,6 +31,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
 import { cn } from '@/lib/utils'
+import { WorkPermitService } from '@/services/work-permit-service'
 
 const AddEntriesPage: React.FC = () => {
   // 1. Declare hooks first
@@ -181,6 +182,15 @@ const AddEntriesPage: React.FC = () => {
       if (destination.trim().toLowerCase() === 'ssd') {
         const allocationsRef = ref(db, `allocations/${tr800Number.trim()}`)
         await set(allocationsRef, entryData)
+      }
+
+      // Attempt to allocate permit immediately
+      const permitService = new WorkPermitService(db)
+      const result = await permitService.allocatePermitForWorkOrder(tr800Number.trim())
+      
+      if (!result.success) {
+        console.warn('Permit allocation warning:', result.error)
+        // Don't block order creation if permit allocation fails
       }
 
       toast({

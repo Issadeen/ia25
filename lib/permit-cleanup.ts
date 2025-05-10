@@ -8,6 +8,11 @@ interface CleanupResult {
   errors: string[];
 }
 
+interface WorkDetailWithKey extends WorkDetail {
+  key: string;
+  loaded?: boolean;
+}
+
 export const cleanupDuplicateAllocations = async (
   db: Database
 ): Promise<CleanupResult> => {
@@ -18,30 +23,27 @@ export const cleanupDuplicateAllocations = async (
   };
 
   try {
-    const [preAllocationsSnapshot, workDetailsSnapshot] = await Promise.all([
-      get(ref(db, 'permitPreAllocations')),
-      get(ref(db, 'work_details'))
-    ]);
+    const snapshot = await get(ref(db, 'permitPreAllocations'));
+    if (!snapshot.exists()) return result;
 
-    if (!preAllocationsSnapshot.exists()) return result;
-
+    const allocations = Object.entries(snapshot.val() as Record<string, PreAllocation>);
     const updates: Record<string, any> = {};
     const processed = new Set<string>();
 
-    for (const [key, allocation] of Object.entries(preAllocationsSnapshot.val())) {
-      const { truckNumber, quantity } = allocation as PreAllocation;
-      
+    for (const [key, allocation] of allocations) {
+      const { truckNumber, quantity } = allocation;
+
       // Handle zero or invalid quantities
       if (!quantity || quantity <= 0) {
         if (process.env.NODE_ENV === 'development') {
           console.info(`[Cleanup] Removing invalid allocation for ${truckNumber}`);
         }
         const workDetailQuery = query(
-          ref(db, 'work_details'), 
-          orderByChild('truck_number'), 
+          ref(db, 'work_details'),
+          orderByChild('truck_number'),
           equalTo(truckNumber)
         );
-        
+
         const workDetailSnapshot = await get(workDetailQuery);
         if (workDetailSnapshot.exists()) {
           const [workId] = Object.keys(workDetailSnapshot.val());
@@ -50,7 +52,7 @@ export const cleanupDuplicateAllocations = async (
           updates[`work_details/${workId}/permitNumber`] = null;
           updates[`work_details/${workId}/permitEntryId`] = null;
         }
-        
+
         // Remove the invalid allocation
         updates[`permitPreAllocations/${key}`] = null;
         result.duplicatesRemoved++;
@@ -99,9 +101,9 @@ export const cleanupLoadedTrucks = async (db: Database) => {
 
     // First, remove pre-allocations for loaded trucks
     for (const [allocationId, allocation] of Object.entries(preAllocations)) {
-      const truckNumber = (allocation as any).truckNumber;
+      const truckNumber = (allocation as PreAllocation).truckNumber;
       // Find matching work detail
-      const workDetail = Object.values(workDetails).find((work: any) => 
+      const workDetail = (Object.values(workDetails) as WorkDetailWithKey[]).find((work) =>
         work.truck_number === truckNumber && work.loaded
       );
 
@@ -130,7 +132,7 @@ export const cleanupLoadedTrucks = async (db: Database) => {
 
 export const validateAllocations = async (db: Database): Promise<string[]> => {
   const errors: string[] = [];
-  
+
   try {
     // Get all allocations and entries in one batch
     const [allocationsSnapshot, entriesSnapshot] = await Promise.all([
@@ -141,14 +143,14 @@ export const validateAllocations = async (db: Database): Promise<string[]> => {
     if (!allocationsSnapshot.exists()) return errors;
 
     const allocations = Object.values(allocationsSnapshot.val() as Record<string, PreAllocation>);
-    const entries = entriesSnapshot.exists() 
+    const entries = entriesSnapshot.exists()
       ? Object.values(entriesSnapshot.val() as Record<string, PermitEntry>)
       : [];
 
     // Check each allocation
     for (const allocation of allocations) {
       const entry = entries.find(e => e.number === allocation.permitNumber);
-      
+
       if (!entry) {
         errors.push(`Invalid permit number ${allocation.permitNumber} for truck ${allocation.truckNumber}`);
         continue;
@@ -172,7 +174,7 @@ export const validateAllocations = async (db: Database): Promise<string[]> => {
 
 export const validateLoadedTrucks = async (db: Database) => {
   const errors: string[] = [];
-  
+
   try {
     const [workSnapshot, preAllocationsSnapshot] = await Promise.all([
       get(ref(db, 'work_details')),
@@ -187,12 +189,12 @@ export const validateLoadedTrucks = async (db: Database) => {
     const workDetails = workSnapshot.exists() ? workSnapshot.val() : {};
 
     for (const [allocationId, allocation] of Object.entries(preAllocations)) {
-      const { truckNumber, permitNumber } = allocation as any;
-      
+      const { truckNumber, permitNumber } = allocation as PreAllocation;
+
       // Find corresponding work detail
-      const workDetail = Object.values(workDetails).find((work: any) => 
+      const workDetail = (Object.values(workDetails) as WorkDetailWithKey[]).find((work) =>
         work.truck_number === truckNumber
-      ) as WorkDetail | undefined;
+      );
 
       if (!workDetail) {
         errors.push(`Pre-allocation ${allocationId} references non-existent truck ${truckNumber}`);
@@ -215,27 +217,27 @@ export const cleanupZeroQuantityAllocations = async (db: Database) => {
   try {
     const allocRef = ref(db, 'permitPreAllocations');
     const snapshot = await get(allocRef);
-    
+
     if (!snapshot.exists()) {
       return 0;
     }
-    
+
     const updates: { [key: string]: null } = {};
     let cleanupCount = 0;
-    
+
     snapshot.forEach((child) => {
-      const allocation = child.val();
+      const allocation = child.val() as PreAllocation;
       if (!allocation.quantity || allocation.quantity <= 0) {
         updates[`permitPreAllocations/${child.key}`] = null;
         cleanupCount++;
       }
     });
-    
+
     if (cleanupCount > 0) {
       await update(ref(db), updates);
       console.log(`[Permit Cleanup] Removed ${cleanupCount} zero-quantity allocations`);
     }
-    
+
     return cleanupCount;
   } catch (error) {
     console.error('[Permit Cleanup] Error cleaning up zero-quantity allocations:', error);

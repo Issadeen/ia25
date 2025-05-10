@@ -439,51 +439,6 @@ export default function AdminPage() {
     );
   };
 
-  const renderPermitAllocation = (allocation: PermitAllocation) => {
-    return (
-      <div className="border rounded-md p-4 mb-4">
-        <div className="flex justify-between mb-2">
-          <span className="text-lg font-semibold">{allocation.truckNumber}</span>
-          <div className="flex items-center gap-2">
-            <Badge>{allocation.product}</Badge>
-            {allocation.destination && (
-              <Badge 
-                variant={
-                  allocation.destination?.toLowerCase() === 'ssd' ? 'default' : 
-                  allocation.destination?.toLowerCase() === 'drc' ? 'secondary' : 
-                  'outline'
-                }
-              >
-                {allocation.destination.toUpperCase()}
-              </Badge>
-            )}
-          </div>
-        </div>
-        <div className="grid grid-cols-2 gap-2 mb-4">
-          <div>
-            <span className="text-sm text-gray-500">Owner:</span>
-            <div>{allocation.owner}</div>
-          </div>
-          <div>
-            <span className="text-sm text-gray-500">Quantity:</span>
-            <div>{allocation.quantity.toLocaleString()} litres</div>
-          </div>
-          <div>
-            <span className="text-sm text-gray-500">Date:</span>
-            <div>{new Date(allocation.allocatedAt).toLocaleDateString()}</div>
-          </div>
-          <div>
-            <span className="text-sm text-gray-500">Status:</span>
-            <div>{allocation.used ? 'Used' : 'Not Used'}</div>
-          </div>
-        </div>
-        <div className="flex justify-end space-x-2">
-          {/* ... existing buttons ... */}
-        </div>
-      </div>
-    );
-  };
-
   return (
     <>
       <div className="min-h-screen">

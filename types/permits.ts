@@ -1,13 +1,13 @@
 export interface PermitEntry {
-  preAllocatedQuantity: number;
+  preAllocatedQuantity: number;  // Total volume pre-allocated
   used: any;
   id: string;
   number: string;
   product: string;
   destination: string;
   product_destination: string;
-  remainingQuantity: number;
-  initialQuantity: number;
+  remainingQuantity: number;     // Current available volume
+  initialQuantity: number;       // Original permit volume
   timestamp: number;
   createdBy: string;
 }
@@ -30,16 +30,19 @@ export interface PermitAllocation {
 }
 
 export interface PreAllocation {
-  timestamp: any;
   id: string;
-  truckNumber: string;
-  product: string;
-  owner: string;
   permitEntryId: string;
   permitNumber: string;
+  truckNumber: string;
+  product: string;
+  destination: string;
   quantity: number;
+  owner: string;
   allocatedAt: string;
+  used: boolean;
   usedAt?: string;
-  used?: boolean;
-  destination: string; // Add destination field
+  timestamp?: number;  // Add optional timestamp
+  previousTruckNumber?: string;  // Add optional truck change tracking
+  actualTruckNumber?: string;    // Add optional truck change tracking
+  workDetailId?: string;         // Add optional reference to work detail
 }

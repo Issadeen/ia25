@@ -18,6 +18,11 @@ export interface WorkDetail {
   paymentPending?: boolean;
   gatePassGenerated?: boolean;
   gatePassGeneratedAt?: string;
+  permitAllocated?: boolean;      // Track if permit is allocated
+  permitNumber?: string;          // Store permit number
+  permitEntryId?: string;         // Store permit entry ID
+  permitDestination?: string;     // Store permit destination
+  permitQuantity?: number;        // Store allocated quantity
 }
 
 export interface WorkFormData {
