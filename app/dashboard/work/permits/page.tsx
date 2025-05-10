@@ -347,15 +347,19 @@ Entry: ${allocation.permitNumber}`;
                         </span>
                       </div>
                       
-                      {/* Show quantity and destination on small screens */}
                       <div className="md:hidden text-xs">
                         <div><span className="text-muted-foreground">Qty:</span> {Number(order.quantity).toLocaleString()}L</div>
                         <div><span className="text-muted-foreground">Dest:</span> {order.destination}</div>
+                        <div><span className="text-muted-foreground">Date:</span> {new Date(order.createdAt || '').toLocaleDateString()}</div>
                       </div>
                     </div>
-                    <div className="flex-shrink-0">
+                    <div className="flex-shrink-0 flex items-center gap-2">
+                      <Badge variant="outline" className="hidden sm:flex text-xs">
+                        {new Date(order.createdAt || '').toLocaleDateString()}
+                      </Badge>
                       <Button 
                         size="sm"
+                        variant="default"
                         className="whitespace-nowrap"
                         onClick={() => handleAllocatePermit(order)}
                         disabled={allocating === order.id}
