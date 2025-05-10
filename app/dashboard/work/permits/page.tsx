@@ -326,51 +326,52 @@ Entry: ${allocation.permitNumber}`;
                 No orders waiting for permit allocation
               </div>
             ) : (
-              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+              <div className="space-y-2">
                 {unallocatedOrders.map((order) => (
-                  <Card key={order.id} className="overflow-hidden bg-background hover:bg-muted/50 transition-colors">
-                    <CardHeader className="pb-2">
-                      <div className="flex justify-between items-start">
-                        <div>
-                          <CardTitle className="text-lg">{order.truck_number}</CardTitle>
-                          <p className="text-sm text-muted-foreground">{order.owner}</p>
-                        </div>
-                        <Badge className="bg-primary/90 hover:bg-primary transition-colors">{order.product}</Badge>
+                  <div 
+                    key={order.id} 
+                    className="flex items-center justify-between p-3 border rounded-lg bg-background hover:bg-muted/50 transition-colors"
+                  >
+                    <div className="flex items-center space-x-4">
+                      <div>
+                        <div className="font-medium">{order.truck_number}</div>
+                        <div className="text-xs text-muted-foreground">{order.owner}</div>
                       </div>
-                    </CardHeader>
-                    <CardContent className="pb-3">
-                      <div className="space-y-2">
-                        <div className="flex justify-between">
-                          <span className="text-sm text-muted-foreground">Quantity:</span>
-                          <span className="font-medium">{Number(order.quantity).toLocaleString()}L</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-sm text-muted-foreground">Destination:</span>
-                          <span className="font-medium">{order.destination}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-sm text-muted-foreground">Created:</span>
-                          <span className="text-xs text-muted-foreground">{new Date(order.createdAt || '').toLocaleDateString()}</span>
-                        </div>
+                      <Badge className="ml-2">{order.product}</Badge>
+                      <div className="hidden md:flex space-x-4">
+                        <span className="text-sm">
+                          <span className="text-muted-foreground">Qty:</span> {Number(order.quantity).toLocaleString()}L
+                        </span>
+                        <span className="text-sm">
+                          <span className="text-muted-foreground">Dest:</span> {order.destination}
+                        </span>
                       </div>
-                    </CardContent>
-                    <CardFooter className="pt-0">
+                      
+                      {/* Show quantity and destination on small screens */}
+                      <div className="md:hidden text-xs">
+                        <div><span className="text-muted-foreground">Qty:</span> {Number(order.quantity).toLocaleString()}L</div>
+                        <div><span className="text-muted-foreground">Dest:</span> {order.destination}</div>
+                      </div>
+                    </div>
+                    <div className="flex-shrink-0">
                       <Button 
-                        className="w-full"
+                        size="sm"
+                        className="whitespace-nowrap"
                         onClick={() => handleAllocatePermit(order)}
                         disabled={allocating === order.id}
                       >
                         {allocating === order.id ? (
                           <>
-                            <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
-                            Allocating...
+                            <RefreshCw className="mr-2 h-3 w-3 animate-spin" />
+                            <span className="hidden sm:inline">Allocating...</span>
+                            <span className="sm:hidden">...</span>
                           </>
                         ) : (
-                          'Allocate Permit'
+                          'Allocate'
                         )}
                       </Button>
-                    </CardFooter>
-                  </Card>
+                    </div>
+                  </div>
                 ))}
               </div>
             )}
