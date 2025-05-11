@@ -8,12 +8,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useTheme } from "next-themes";
 import { toast } from "@/components/ui/use-toast";
 import { motion, AnimatePresence } from "framer-motion";
-import { updateProfile, User as FirebaseUser } from "firebase/auth";
-import {
-  GoogleAuthProvider,
-  signInWithCredential,
-  signInWithCustomToken,
-} from "firebase/auth";
+import { updateProfile, signInWithCustomToken } from "firebase/auth";
 import { DashboardHeader } from "@/components/dashboard/DashboardHeader";
 import { DashboardContent } from "@/components/dashboard/DashboardContent";
 import { ProfilePicModal } from "@/components/dashboard/ProfilePicModal";
@@ -21,8 +16,6 @@ import { useInactivityTimer } from "@/hooks/useInactivityTimer";
 import { ParticlesBackground } from "@/components/Particles";
 import { AUTH_CONSTANTS } from "@/lib/constants";
 import { useProfileImage } from "@/hooks/useProfileImage";
-import { authOptions } from "@/lib/auth";
-import { getServerSession } from "next-auth/next";
 
 declare module "next-auth" {
   interface Session {
@@ -31,7 +24,7 @@ declare module "next-auth" {
 }
 
 export default function DashboardPage() {
-  const { data: session, status, update } = useSession();
+  const { data: session, status, update: updateSession } = useSession();
   const router = useRouter();
   const { theme } = useTheme();
   const [isEditingProfilePic, setIsEditingProfilePic] = useState(false);
@@ -125,48 +118,35 @@ export default function DashboardPage() {
         return;
       }
 
-      let userEmailForFilename: string | null = null;
+      const userId = auth.currentUser.uid;
+      const fileName = `profile_pictures/${userId}/profile_pic`;
+      const imageRef = ref(storage, fileName);
+
       try {
-        const userInfoRes = await fetch("/api/user-info");
-        if (!userInfoRes.ok) {
-          throw new Error("Failed to fetch user info");
-        }
-        const userInfo = await userInfoRes.json();
-        if (!userInfo.email) {
-          throw new Error("User email not found in fetched info");
-        }
-        userEmailForFilename = userInfo.email;
-
-        if (!userEmailForFilename) {
-          throw new Error("User email is null or undefined");
-        }
-        
-        const fileName = `profile-pics/${userEmailForFilename.replace(
-          /[.@]/g,
-          "_"
-        )}.jpg`;
-        if (!storage) {
-          throw new Error("Firebase storage is not initialized");
-        }
-        const imageRef = ref(storage, fileName);
-
         const metadata = {
           contentType: "image/jpeg",
-          customMetadata: {
-            userEmail: userEmailForFilename,
-          },
         };
 
         await uploadBytes(imageRef, imageBlob, metadata);
         const downloadURL = await getDownloadURL(imageRef);
 
-        if (auth.currentUser) {
-          await updateProfile(auth.currentUser, {
-            photoURL: downloadURL,
-          });
+        await updateProfile(auth.currentUser, {
+          photoURL: downloadURL,
+        });
+
+        const newSessionData = await updateSession();
+
+        if (!newSessionData) {
+          console.error("NextAuth session update returned no data.");
+          throw new Error("Failed to refresh user session data after image upload.");
         }
 
-        await update();
+        if (newSessionData.user?.image !== downloadURL) {
+          console.warn(
+            `Session image URL (${newSessionData.user?.image}) does not match new photoURL (${downloadURL}). There might be a delay or issue in the session callback.`
+          );
+        }
+
         setProfileUpdated(true);
 
         toast({
@@ -180,12 +160,12 @@ export default function DashboardPage() {
           description:
             error instanceof Error
               ? `Error: ${error.message}`
-              : "Failed to upload image or fetch user info",
+              : "Failed to upload image or update profile",
           variant: "destructive",
         });
       }
     },
-    [toast, update]
+    [updateSession, toast]
   );
 
   if (status === "loading") return null;
