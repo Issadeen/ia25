@@ -19,6 +19,7 @@ import {
   Moon,
   Sun,
   BarChart3,
+  CheckCircle2
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
@@ -55,6 +56,7 @@ export default function WorkPage() {
       icon: FileText,
       actions: [
         { label: "Allocate Permits", href: "/dashboard/work/permits", icon: Plus },
+        { label: "Active Allocations", href: "/dashboard/work/permits/active", icon: CheckCircle2 },
         { label: "Admin", href: "/dashboard/work/permits/admin", icon: FileText }
       ]
     },
