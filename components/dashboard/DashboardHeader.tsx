@@ -1,10 +1,11 @@
 import { useTheme } from "next-themes"
-import { LogOut, Moon, Sun } from 'lucide-react'
+import { LogOut, Moon, Sun } from 'lucide-react' // Removed Pencil import
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar"
 import { motion } from 'framer-motion'
 import { signOut } from "next-auth/react"
 import { useState } from "react"
+import { ViewProfileModal } from "./ViewProfileModal"
 
 interface DashboardHeaderProps {
   avatarSrc: string
@@ -15,6 +16,7 @@ interface DashboardHeaderProps {
 export function DashboardHeader({ avatarSrc, isLoadingProfile, onEditProfilePic }: DashboardHeaderProps) {
   const { theme, setTheme } = useTheme()
   const [isLoggingOut, setIsLoggingOut] = useState(false)
+  const [isViewingProfile, setIsViewingProfile] = useState(false)
 
   const handleSignOut = async () => {
     setIsLoggingOut(true)
@@ -62,18 +64,8 @@ export function DashboardHeader({ avatarSrc, isLoadingProfile, onEditProfilePic 
           <motion.div 
             whileHover={{ scale: 1.1 }}
             whileTap={{ scale: 0.9 }}
-            onClick={onEditProfilePic}
-            className="cursor-pointer"
-            animate={{
-              scale: [1, 1.01, 1],
-            }}
-            transition={{
-              duration: 6,
-              ease: [0.4, 0, 0.4, 1], // Custom easing for more natural movement
-              repeat: Infinity,
-              repeatType: "reverse",
-              repeatDelay: 0.5 // Add a small pause between cycles
-            }}
+            className="cursor-pointer relative group"
+            onClick={() => setIsViewingProfile(true)} // Moved onClick to the motion.div
           >
             <Avatar>
               <AvatarImage 
@@ -87,7 +79,18 @@ export function DashboardHeader({ avatarSrc, isLoadingProfile, onEditProfilePic 
                 ) : 'U'}
               </AvatarFallback>
             </Avatar>
+            
+            <div className="hidden group-hover:block absolute bottom-full mb-2 left-1/2 -translate-x-1/2 whitespace-nowrap bg-popover text-popover-foreground text-xs px-2 py-1 rounded shadow">
+              Click to view
+            </div>
           </motion.div>
+
+          <ViewProfileModal
+            isOpen={isViewingProfile}
+            onClose={() => setIsViewingProfile(false)}
+            imageUrl={avatarSrc}
+            onEdit={onEditProfilePic}
+          />
         </div>
       </div>
     </header>
