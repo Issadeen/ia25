@@ -1,10 +1,13 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { getDatabase } from 'firebase/database'
+import { getDatabase, ref, get } from 'firebase/database'
 import { useRouter } from 'next/navigation'
 import { useSession } from 'next-auth/react'
-import { ArrowLeft, RefreshCw, TruckIcon, Calendar, CheckCircle, XCircle, Sun, Moon, Copy, Check } from 'lucide-react'
+import { 
+  ArrowLeft, RefreshCw, TruckIcon, CheckCircle2, XCircle, 
+  Calendar, Sun, Moon, FileText, CreditCard, Copy, Check 
+} from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardFooter, CardDescription } from '@/components/ui/card'
 import { useToast } from '@/components/ui/use-toast'
@@ -13,31 +16,23 @@ import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar'
 import { useProfileImage } from '@/hooks/useProfileImage'
 import { useTheme } from 'next-themes'
 import { Separator } from '@/components/ui/separator'
-import { getMultiPermitWorkOrder } from '@/lib/active-permit-service'
 import type { WorkDetail } from '@/types/work'
+import type { PreAllocation } from '@/types/permits'
+import { Skeleton } from '@/components/ui/skeleton'
 import React from 'react'
 
-interface PermitEntry {
-  id: string;
-  number: string;
-  quantity: number;
-  remainingQuantity?: number;
-}
-
-// Update the type of the params prop to be a Promise
-export default function PermitDetailsPage({ params: paramsPromise }: { params: Promise<{ id: string }> }) {
-  // Use React.use() to unwrap the params Promise
+export default function WorkOrderDetailsPage({ params: paramsPromise }: { params: Promise<{ id: string }> }) {
   const params = React.use(paramsPromise);
   const id = params.id;
-
+  
   const { theme, setTheme } = useTheme()
   const router = useRouter()
   const { toast } = useToast()
   const { data: session } = useSession()
   const profilePicUrl = useProfileImage()
-
+  
   const [workOrder, setWorkOrder] = useState<WorkDetail | null>(null)
-  const [permitEntries, setPermitEntries] = useState<PermitEntry[]>([])
+  const [permitAllocations, setPermitAllocations] = useState<PreAllocation[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [copying, setCopying] = useState<string | null>(null)
@@ -52,10 +47,48 @@ export default function PermitDetailsPage({ params: paramsPromise }: { params: P
     try {
       setLoading(true)
       const db = getDatabase()
-      const result = await getMultiPermitWorkOrder(db, orderId)
-
-      setWorkOrder(result.workOrder)
-      setPermitEntries(result.permitEntries)
+      
+      // Get work order details
+      const workOrderRef = ref(db, `work_details/${orderId}`)
+      const workOrderSnapshot = await get(workOrderRef)
+      
+      if (!workOrderSnapshot.exists()) {
+        toast({
+          title: "Not Found",
+          description: "Work order not found",
+          variant: "destructive"
+        })
+        return
+      }
+      
+      const workOrderData = {
+        ...workOrderSnapshot.val(),
+        id: orderId
+      } as WorkDetail
+      
+      setWorkOrder(workOrderData)
+      
+      // If work order has permit, get permit allocation details
+      if (workOrderData.permitAllocated && workOrderData.permitNumber) {
+        // Fetch permit pre-allocations for this truck
+        const preAllocationsRef = ref(db, 'permitPreAllocations')
+        const preAllocationsSnapshot = await get(preAllocationsRef)
+        
+        if (preAllocationsSnapshot.exists()) {
+          const allPreAllocations = Object.entries(preAllocationsSnapshot.val())
+            .map(([id, data]: [string, any]) => ({ 
+              id, 
+              ...data 
+            }))
+            .filter((preAlloc: PreAllocation) => 
+              preAlloc.truckNumber === workOrderData.truck_number && 
+              !preAlloc.used &&
+              preAlloc.product?.toLowerCase() === workOrderData.product?.toLowerCase()
+            )
+          
+          setPermitAllocations(allPreAllocations)
+        }
+      }
     } catch (error) {
       console.error('Error fetching work order details:', error)
       toast({
@@ -77,7 +110,7 @@ export default function PermitDetailsPage({ params: paramsPromise }: { params: P
 
   const formatDate = (dateString?: string) => {
     if (!dateString) return 'N/A'
-
+    
     try {
       return new Date(dateString).toLocaleString()
     } catch (e) {
@@ -85,39 +118,41 @@ export default function PermitDetailsPage({ params: paramsPromise }: { params: P
     }
   }
 
-  const copyPermitDetails = () => {
+  const copyOrderDetails = () => {
     if (!workOrder) return;
-
+    
     setCopying('details');
-
+    
     const quantityDisplay = Number(workOrder.quantity) < 100
       ? `${workOrder.quantity}m³`
       : `${Math.round(Number(workOrder.quantity) / 1000)}K`;
-
+      
     let permitNumbersDisplay = '';
     if (workOrder.permitNumber) {
       const permitNumbers = workOrder.permitNumber.split(',').map(num => num.trim());
-      permitNumbersDisplay = permitNumbers.length > 1
-        ? `Entries: ${permitNumbers.join(' & ')}`
-        : `Entry: ${workOrder.permitNumber}`;
+      permitNumbersDisplay = permitNumbers.length > 1 
+        ? `Entries: ${permitNumbers.join(' & ')}` 
+        : `Permit: ${workOrder.permitNumber}`;
     }
-
-    const formattedData =
-`Truck: ${workOrder.truck_number}
+    
+    const formattedData = 
+`Order: ${workOrder.orderno}
+Truck: ${workOrder.truck_number}
 Product: ${workOrder.product}
 Quantity: ${quantityDisplay}
-${permitNumbersDisplay}
-Destination: ${workOrder.destination}
-Owner: ${workOrder.owner}`;
-
+${permitNumbersDisplay ? permitNumbersDisplay + '\n' : ''}Destination: ${workOrder.destination}
+Owner: ${workOrder.owner}
+Status: ${workOrder.status}
+Price: KES ${workOrder.price}`;
+    
     navigator.clipboard.writeText(formattedData)
       .then(() => {
         toast({
           title: "Copied to clipboard",
-          description: "Permit details copied",
+          description: "Order details copied",
           duration: 2000
         });
-
+        
         setTimeout(() => {
           setCopying(null);
         }, 1000);
@@ -135,8 +170,37 @@ Owner: ${workOrder.owner}`;
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <RefreshCw className="h-8 w-8 animate-spin text-muted-foreground" />
+      <div className="min-h-screen bg-background">
+        <header className="fixed top-0 left-0 w-full border-b z-50 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+          <div className="container flex h-14 max-w-screen-2xl items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Button variant="ghost" size="icon" onClick={() => router.back()}>
+                <ArrowLeft className="h-4 w-4" />
+              </Button>
+              <h1 className="font-semibold bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">
+                Work Order Details
+              </h1>
+            </div>
+          </div>
+        </header>
+        
+        <main className="container max-w-screen-2xl pt-20 pb-8">
+          <div className="space-y-6">
+            <Card>
+              <CardHeader>
+                <Skeleton className="h-8 w-[200px]" />
+                <Skeleton className="h-4 w-[150px]" />
+              </CardHeader>
+              <CardContent className="space-y-8">
+                <div className="space-y-4">
+                  <Skeleton className="h-4 w-full" />
+                  <Skeleton className="h-4 w-full" />
+                  <Skeleton className="h-4 w-full" />
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </main>
       </div>
     )
   }
@@ -159,7 +223,7 @@ Owner: ${workOrder.owner}`;
               <ArrowLeft className="h-4 w-4" />
             </Button>
             <h1 className="font-semibold bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">
-              Permit Details
+              Work Order Details
             </h1>
           </div>
 
@@ -167,12 +231,12 @@ Owner: ${workOrder.owner}`;
             <Button
               variant="outline"
               size="sm"
-              onClick={copyPermitDetails}
+              onClick={copyOrderDetails}
               disabled={copying === 'details'}
               className="flex items-center gap-2"
             >
               {copying === 'details' ? (
-                <Check className="h-3.5 w-3.5 text-green-500" />
+                <div className="h-4 w-4 rounded-full border-2 border-solid border-current border-t-transparent animate-spin" />
               ) : (
                 <Copy className="h-3.5 w-3.5" />
               )}
@@ -238,11 +302,9 @@ Owner: ${workOrder.owner}`;
                   <Badge variant="outline" className="bg-primary/10 hover:bg-primary/20">
                     {workOrder.product?.toUpperCase()} • {workOrder.destination?.toUpperCase()}
                   </Badge>
-                  {workOrder.permitAllocated && (
-                    <Badge variant="secondary" className="bg-green-500/10 text-green-700 dark:text-green-400">
-                      Permit Allocated
-                    </Badge>
-                  )}
+                  <Badge variant={workOrder.status === 'cancelled' ? 'destructive' : 'secondary'}>
+                    {workOrder.status?.toUpperCase() || 'PENDING'}
+                  </Badge>
                 </div>
               </div>
             </CardHeader>
@@ -257,103 +319,62 @@ Owner: ${workOrder.owner}`;
                   <div className="text-sm">{Number(workOrder.quantity).toLocaleString()}L</div>
                 </div>
                 <div className="space-y-1">
-                  <div className="text-sm font-medium">Status</div>
-                  <div className="text-sm capitalize">{workOrder.status}</div>
+                  <div className="text-sm font-medium">Price</div>
+                  <div className="text-sm">KES {workOrder.price}</div>
                 </div>
                 <div className="space-y-1">
                   <div className="text-sm font-medium">Created</div>
                   <div className="text-sm">{formatDate(workOrder.createdAt)}</div>
                 </div>
               </div>
-
+              
               <Separator />
-
-              <div>
-                <h3 className="font-medium mb-2">Permit Information</h3>
-                {permitEntries.length === 0 ? (
-                  <div className="text-sm text-muted-foreground">
-                    No permit entries assigned to this work order
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    {permitEntries.map((entry) => (
-                      <div key={entry.id} className="p-3 border rounded-md bg-muted/10">
-                        <div className="flex justify-between mb-2">
-                          <div className="text-sm font-medium">Permit #{entry.number}</div>
-                          <Badge variant="outline">
-                            {entry.quantity.toLocaleString()}L
-                          </Badge>
-                        </div>
-                        <div className="grid grid-cols-2 gap-4 text-sm">
-                          <div className="flex flex-col">
-                            <span className="text-xs text-muted-foreground">ID</span>
-                            <span className="font-mono">{entry.id}</span>
-                          </div>
-                          {entry.remainingQuantity !== undefined && (
-                            <div className="flex flex-col">
-                              <span className="text-xs text-muted-foreground">Remaining</span>
-                              <span className="font-mono">{entry.remainingQuantity.toLocaleString()}L</span>
-                            </div>
-                          )}
-                        </div>
-                        <div className="mt-2 flex justify-end">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-7 w-7"
-                            onClick={() => {
-                              setCopying(entry.id);
-
-                              const entryData =
-`Permit: ${entry.number}
-Quantity: ${entry.quantity.toLocaleString()}L
-Remaining: ${entry.remainingQuantity ? entry.remainingQuantity.toLocaleString() + 'L' : 'N/A'}
-ID: ${entry.id}`;
-
-                              navigator.clipboard.writeText(entryData)
-                                .then(() => {
-                                  toast({
-                                    title: "Copied",
-                                    description: `Permit ${entry.number} details copied`,
-                                    duration: 2000
-                                  });
-
-                                  setTimeout(() => {
-                                    setCopying(null);
-                                  }, 1000);
-                                })
-                                .catch(() => {
-                                  toast({
-                                    title: "Copy failed",
-                                    description: "Couldn't copy to clipboard",
-                                    variant: "destructive"
-                                  });
-                                  setCopying(null);
-                                });
-                            }}
-                          >
-                            {copying === entry.id ? (
-                              <Check className="h-4 w-4 text-green-500" />
-                            ) : (
-                              <Copy className="h-4 w-4" />
-                            )}
-                          </Button>
-                        </div>
+              
+              {workOrder.permitAllocated && workOrder.permitNumber && (
+                <div>
+                  <h3 className="font-medium mb-2">Permit Information</h3>
+                  <div className="p-3 border rounded-md bg-muted/10">
+                    <div className="flex justify-between mb-2">
+                      <div className="text-sm font-medium">
+                        {workOrder.permitNumber.includes(',') ? 'Permit Entries' : 'Permit'}
                       </div>
-                    ))}
+                      <Badge variant="outline" className="bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400">
+                        Allocated
+                      </Badge>
+                    </div>
+                    
+                    {workOrder.permitNumber.includes(',') ? (
+                      <div className="flex flex-wrap gap-1 mb-2">
+                        {workOrder.permitNumber.split(',').map((num, idx) => (
+                          <Badge key={idx} variant="outline" className="font-mono">
+                            {num.trim()}
+                          </Badge>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="mb-2 font-mono text-sm">
+                        {workOrder.permitNumber}
+                      </div>
+                    )}
+                    
+                    {permitAllocations.length > 0 && (
+                      <div className="text-xs text-muted-foreground">
+                        Allocated on {formatDate(permitAllocations[0].allocatedAt)}
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
-
+                </div>
+              )}
+              
               <Separator />
-
+              
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <h3 className="font-medium mb-2">Loading Status</h3>
                   <div className="flex items-center gap-2 text-sm">
                     {workOrder.loaded ? (
                       <>
-                        <CheckCircle className="h-4 w-4 text-green-500" />
+                        <CheckCircle2 className="h-4 w-4 text-green-500" />
                         <span>Truck loaded</span>
                       </>
                     ) : (
@@ -364,13 +385,13 @@ ID: ${entry.id}`;
                     )}
                   </div>
                 </div>
-
+                
                 <div>
                   <h3 className="font-medium mb-2">Payment Status</h3>
                   <div className="flex items-center gap-2 text-sm">
                     {workOrder.paid ? (
                       <>
-                        <CheckCircle className="h-4 w-4 text-green-500" />
+                        <CheckCircle2 className="h-4 w-4 text-green-500" />
                         <span>Payment completed</span>
                       </>
                     ) : (
@@ -383,16 +404,43 @@ ID: ${entry.id}`;
                 </div>
               </div>
             </CardContent>
-            <CardFooter>
-              <Button
-                variant="outline"
-                onClick={() => router.push(`/dashboard/work/orders/${workOrder.id}`)}
+            <CardFooter className="flex flex-wrap gap-2">
+              {workOrder.permitAllocated && workOrder.permitNumber && (
+                <Button 
+                  variant="outline"
+                  className="flex items-center gap-2"
+                  onClick={() => {
+                    if (workOrder.permitEntryId) {
+                      router.push(`/dashboard/work/permits/details/${workOrder.id}`);
+                    }
+                  }}
+                >
+                  <FileText className="h-4 w-4" />
+                  View Permit Details
+                </Button>
+              )}
+              
+              {!workOrder.paid && (
+                <Button 
+                  variant="outline" 
+                  className="flex items-center gap-2"
+                  onClick={() => router.push(`/dashboard/payments/process/${workOrder.id}`)}
+                >
+                  <CreditCard className="h-4 w-4" />
+                  Process Payment
+                </Button>
+              )}
+              
+              <Button 
+                variant="secondary"
+                className="flex items-center gap-2 ml-auto"
+                onClick={() => router.push('/dashboard/work/orders')}
               >
-                View Full Order Details
+                View All Orders
               </Button>
             </CardFooter>
           </Card>
-
+          
           <Card>
             <CardHeader>
               <CardTitle>Additional Information</CardTitle>
@@ -402,26 +450,26 @@ ID: ${entry.id}`;
                 <div className="text-sm font-medium">Depot</div>
                 <div className="text-sm">{workOrder.depot || 'Not specified'}</div>
               </div>
-
+              
               {workOrder.previous_trucks && workOrder.previous_trucks.length > 0 && (
                 <div className="space-y-1">
                   <div className="text-sm font-medium">Previous Trucks</div>
-                  <div className="text-sm space-y-1">
+                  <div className="text-sm">
                     {workOrder.previous_trucks.map((truck, index) => (
-                      <Badge key={index} variant="outline" className="mr-1">
+                      <Badge key={index} variant="outline" className="mr-1 mb-1">
                         {truck}
                       </Badge>
                     ))}
                   </div>
                 </div>
               )}
-
+              
               <div className="space-y-1">
                 <div className="text-sm font-medium">Gate Pass</div>
                 <div className="text-sm">
                   {workOrder.gatePassGenerated ? (
                     <div className="flex items-center gap-2">
-                      <CheckCircle className="h-4 w-4 text-green-500" />
+                      <CheckCircle2 className="h-4 w-4 text-green-500" />
                       <span>Generated {workOrder.gatePassGeneratedAt && formatDate(workOrder.gatePassGeneratedAt)}</span>
                     </div>
                   ) : (
@@ -432,31 +480,18 @@ ID: ${entry.id}`;
                   )}
                 </div>
               </div>
-
-              <div className="space-y-1">
-                <div className="text-sm font-medium">Price</div>
-                <div className="text-sm">KES {workOrder.price}</div>
-              </div>
-
-              <div className="space-y-1">
-                <div className="text-sm font-medium">Actions</div>
-                <div className="space-y-2">
-                  <Button
-                    variant="secondary"
-                    className="w-full"
-                    onClick={() => router.push(`/dashboard/work/permits/active`)}
-                  >
-                    View All Active Allocations
-                  </Button>
-                  <Button
-                    variant="outline"
+              
+              {!workOrder.permitAllocated && workOrder.destination?.toLowerCase() !== 'local' && (
+                <div className="border-t pt-4">
+                  <Button 
+                    variant="default" 
                     className="w-full"
                     onClick={() => router.push(`/dashboard/work/permits`)}
                   >
-                    Back to Permit Allocation
+                    Allocate Permit
                   </Button>
                 </div>
-              </div>
+              )}
             </CardContent>
           </Card>
         </div>
