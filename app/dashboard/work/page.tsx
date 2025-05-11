@@ -38,7 +38,7 @@ export default function WorkPage() {
   const router = useRouter();
   const profilePicUrl = useProfileImage()  // Add this line
 
-  // Updated work cards organization
+  // Updated work cards organization with new Permits card
   const workCards = [
     {
       title: "Entry Details",
@@ -47,6 +47,15 @@ export default function WorkPage() {
       actions: [
         { label: "Add Entries", href: "/dashboard/work/entries/new", icon: Plus },
         { label: "View Entries", href: "/dashboard/work/entries", icon: ClipboardList }
+      ]
+    },
+    {
+      title: "Permits & Allocations",
+      description: "Manage permit allocations",
+      icon: FileText,
+      actions: [
+        { label: "Allocate Permits", href: "/dashboard/work/permits", icon: Plus },
+        { label: "Admin", href: "/dashboard/work/permits/admin", icon: FileText }
       ]
     },
     {
