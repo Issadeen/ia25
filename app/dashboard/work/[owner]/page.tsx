@@ -57,7 +57,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog" // Add AlertDialog imports
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu" // Add DropdownMenu imports
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuCheckboxItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu" // Add DropdownMenu imports
 import { AlertCircle, Receipt, Shield } from "lucide-react" // Add new imports
 import { useProfileImage } from "@/hooks/useProfileImage"
 import React from "react"
@@ -247,7 +247,9 @@ export default function OwnerDetailsPage() {
 
   // Add new state for monthly data
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear())
-  const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1)
+  const [selectedMonths, setSelectedMonths] = useState<Set<number>>(
+    new Set([new Date().getMonth() + 1]) // Default to current month selected
+  )
 
   // Add new state for selected trucks total
   const [selectedTrucksTotal, setSelectedTrucksTotal] = useState(0)
@@ -256,8 +258,6 @@ export default function OwnerDetailsPage() {
   useEffect(() => {
     const fetchOwnerData = async () => {
       try {
-        const yearMonth = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}`
-
         // Fetch work details
         const workDetailsRef = ref(database, `work_details`)
         onValue(workDetailsRef, (snapshot) => {
@@ -329,23 +329,23 @@ export default function OwnerDetailsPage() {
     }
 
     fetchOwnerData()
-  }, [owner, selectedYear, selectedMonth])
+  }, [owner, selectedYear, selectedMonths])
 
   // Add these helper functions to filter data by date
-  const filterByMonth = (date: string, year: number, month: number) => {
+  const filterByMonth = (date: string, year: number, months: Set<number>) => {
     const itemDate = new Date(date);
-    return itemDate.getFullYear() === year && itemDate.getMonth() + 1 === month;
+    return itemDate.getFullYear() === year && months.has(itemDate.getMonth() + 1);
   };
 
   const getFilteredOwnerPayments = () => {
     return ownerPayments.filter(payment => 
-      filterByMonth(payment.timestamp, selectedYear, selectedMonth)
+      filterByMonth(payment.timestamp, selectedYear, selectedMonths)
     );
   };
 
   const getFilteredBalanceHistory = () => {
     return balanceUsageHistory.filter(entry => 
-      filterByMonth(entry.timestamp, selectedYear, selectedMonth)
+      filterByMonth(entry.timestamp, selectedYear, selectedMonths)
     );
   };
 
@@ -364,13 +364,13 @@ export default function OwnerDetailsPage() {
         
         // For fully paid trucks, only include if they match the month filter
         if (balance <= 0 && truck.createdAt) {
-          return filterByMonth(truck.createdAt, selectedYear, selectedMonth);
+          return filterByMonth(truck.createdAt, selectedYear, selectedMonths);
         }
       }
       
       // Include pending orders (not loaded) if they match the month filter
       if (!truck.loaded && truck.createdAt) {
-        return filterByMonth(truck.createdAt, selectedYear, selectedMonth);
+        return filterByMonth(truck.createdAt, selectedYear, selectedMonths);
       }
       
       // Default: exclude
@@ -1511,6 +1511,43 @@ export default function OwnerDetailsPage() {
     .filter(rec => rec.status === 'accepted')
     .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
 
+  // Helper for month names
+  const monthNames = Array.from({ length: 12 }, (_, i) => 
+    new Date(2000, i, 1).toLocaleString('default', { month: 'long' })
+  );
+
+  const handleMonthToggle = (month: number) => {
+    setSelectedMonths(prevMonths => {
+      const newMonths = new Set(prevMonths);
+      if (newMonths.has(month)) {
+        newMonths.delete(month);
+      } else {
+        newMonths.add(month);
+      }
+      return newMonths;
+    });
+  };
+
+  const handleAllMonthsToggle = (checked: boolean) => {
+    if (checked) {
+      setSelectedMonths(new Set(Array.from({ length: 12 }, (_, i) => i + 1)));
+    } else {
+      setSelectedMonths(new Set());
+    }
+  };
+
+  const getSelectedMonthsText = () => {
+    if (selectedMonths.size === 12) return "All Months";
+    if (selectedMonths.size === 0) return "No Months Selected";
+    if (selectedMonths.size <= 3) {
+      return Array.from(selectedMonths)
+        .sort((a, b) => a - b)
+        .map(m => monthNames[m - 1].substring(0, 3))
+        .join(', ');
+    }
+    return `${selectedMonths.size} Months Selected`;
+  };
+
   return (
     <div className="min-h-screen">
       {/* Animate header */}
@@ -1680,21 +1717,33 @@ export default function OwnerDetailsPage() {
                   ))}
                 </SelectContent>
               </Select>
-              <Select
-                value={String(selectedMonth)}
-                onValueChange={(value) => setSelectedMonth(Number(value))}
-              >
-                <SelectTrigger className="w-[120px] h-8 text-xs">
-                  <SelectValue placeholder="Select Month" />
-                </SelectTrigger>
-                <SelectContent>
-                  {Array.from({ length: 12 }, (_, i) => i + 1).map((month) => (
-                    <SelectItem key={month} value={String(month)}>
-                      {new Date(2000, month - 1, 1).toLocaleString('default', { month: 'long' })}
-                    </SelectItem>
+              {/* Replace Select with DropdownMenu for multi-month selection */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" className="w-[180px] h-8 text-xs justify-between">
+                    <span>{getSelectedMonthsText()}</span>
+                    <ChevronDown className="h-4 w-4 opacity-50" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent className="w-[180px]">
+                  <DropdownMenuCheckboxItem
+                    checked={selectedMonths.size === 12}
+                    onCheckedChange={handleAllMonthsToggle}
+                  >
+                    All Months
+                  </DropdownMenuCheckboxItem>
+                  <DropdownMenuSeparator />
+                  {monthNames.map((name, index) => (
+                    <DropdownMenuCheckboxItem
+                      key={name}
+                      checked={selectedMonths.has(index + 1)}
+                      onCheckedChange={() => handleMonthToggle(index + 1)}
+                    >
+                      {name}
+                    </DropdownMenuCheckboxItem>
                   ))}
-                </SelectContent>
-              </Select>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
 
             {/* Export button */}
@@ -1955,50 +2004,58 @@ export default function OwnerDetailsPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {getFilteredWorkDetails().filter(truck => truck.loaded).map(truck => {
-                          const { totalDue, totalAllocated, balance, pendingAmount } = getTruckAllocations(truck, truckPayments);
-                          const isUnpaid = balance > 0;
-                          return (
-                            <tr key={truck.id} className={cn("border-t", selectedTrucks.has(truck.id) && "bg-emerald-50 dark:bg-emerald-900/30")}>
-                              <td className="p-2">
-                                {isUnpaid && (
-                                  <Checkbox
-                                    checked={selectedTrucks.has(truck.id)}
-                                    onCheckedChange={() => handleTruckSelect(truck.id)}
-                                    aria-label={`Select truck ${truck.truck_number}`}
-                                  />
-                                )}
-                              </td>
-                              <td className="p-2">{truck.truck_number}</td>
-                              <td className="p-2">{truck.product}</td>
-                              <td className="p-2">{truck.at20 || '-'}</td>
-                              <td className="p-2">${formatNumber(Number.parseFloat(truck.price))}</td>
-                              <td className="p-2">${formatNumber(totalDue)}</td>
-                              <td className="p-2">${formatNumber(totalAllocated)}</td>
-                              <td className="p-2">${formatNumber(Math.abs(balance))}</td>
-                              <td className="p-2">
-                                <div className="flex items-center gap-2">
-                                  <span className={
-                                    balance <= 0 ? "text-green-600" : 
-                                    truck.paymentPending ? "text-orange-500" : 
-                                    "text-red-600"
-                                  }>
-                                    {balance <= 0 ? "Paid" : truck.paymentPending ? "Pending" : "Due"}
-                                  </span>
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => handleFixTruckStatus(truck.id)}
-                                    className="h-6 w-6 p-0"
-                                    title="Fix payment status"
-                                  >
-                                    <RefreshCw className="h-3 w-3" />
-                                  </Button>
-                                </div>
-                              </td>
-                            </tr>
-                          );
-                        })}
+                        {getFilteredWorkDetails().filter(truck => truck.loaded).length === 0 ? (
+                          <tr>
+                            <td colSpan={9} className="p-4 text-center text-muted-foreground">
+                              No loaded trucks for the selected period.
+                            </td>
+                          </tr>
+                        ) : (
+                          getFilteredWorkDetails().filter(truck => truck.loaded).map(truck => {
+                            const { totalDue, totalAllocated, balance, pendingAmount } = getTruckAllocations(truck, truckPayments);
+                            const isUnpaid = balance > 0;
+                            return (
+                              <tr key={truck.id} className={cn("border-t", selectedTrucks.has(truck.id) && "bg-emerald-50 dark:bg-emerald-900/30")}>
+                                <td className="p-2">
+                                  {isUnpaid && (
+                                    <Checkbox
+                                      checked={selectedTrucks.has(truck.id)}
+                                      onCheckedChange={() => handleTruckSelect(truck.id)}
+                                      aria-label={`Select truck ${truck.truck_number}`}
+                                    />
+                                  )}
+                                </td>
+                                <td className="p-2">{truck.truck_number}</td>
+                                <td className="p-2">{truck.product}</td>
+                                <td className="p-2">{truck.at20 || '-'}</td>
+                                <td className="p-2">${formatNumber(Number.parseFloat(truck.price))}</td>
+                                <td className="p-2">${formatNumber(totalDue)}</td>
+                                <td className="p-2">${formatNumber(totalAllocated)}</td>
+                                <td className="p-2">${formatNumber(Math.abs(balance))}</td>
+                                <td className="p-2">
+                                  <div className="flex items-center gap-2">
+                                    <span className={
+                                      balance <= 0 ? "text-green-600" : 
+                                      truck.paymentPending ? "text-orange-500" : 
+                                      "text-red-600"
+                                    }>
+                                      {balance <= 0 ? "Paid" : truck.paymentPending ? "Pending" : "Due"}
+                                    </span>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => handleFixTruckStatus(truck.id)}
+                                      className="h-6 w-6 p-0"
+                                      title="Fix payment status"
+                                    >
+                                      <RefreshCw className="h-3 w-3" />
+                                    </Button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })
+                        )}
                       </tbody>
                     </table>
                   </div>
@@ -2011,90 +2068,102 @@ export default function OwnerDetailsPage() {
               <Card className="p-3 sm:p-6">
                 <h2 className="text-lg sm:text-xl font-semibold mb-3 sm:mb-4">Payment History</h2>
                 <div className="space-y-2 sm:space-y-0">
-                  {getFilteredOwnerPayments().map((payment) => (
-                    <div key={payment.id} className="block sm:hidden border-b pb-2">
-                      <div className="flex justify-between">
-                        <div className="font-medium">${formatNumber(payment.amount)}</div>
-                        <div className="text-sm text-muted-foreground">
-                          {new Date(payment.timestamp).toLocaleDateString()}
-                        </div>
-                      </div>
-                      {payment.allocatedTrucks?.map((allocation: any) => {
-                        const truck = workDetails.find(t => t.id === allocation.truckId);
-                        return truck ? (
-                          <div key={allocation.truckId} className="text-xs text-muted-foreground">
-                            {truck.truck_number} (${formatNumber(allocation.amount)})
-                          </div>
-                        ) : null;
-                      })}
-                      {payment.note && (
-                        <div className="text-xs italic mt-1">{payment.note}</div>
-                      )}
+                  {getFilteredOwnerPayments().length === 0 && !isLoading ? (
+                    <div className="block sm:hidden p-4 text-center text-muted-foreground">
+                      No payment history for the selected period.
                     </div>
-                  ))}
+                  ) : (
+                    getFilteredOwnerPayments().map((payment) => (
+                      <div key={payment.id} className="block sm:hidden border-b pb-2">
+                        <div className="flex justify-between">
+                          <div className="font-medium">${formatNumber(payment.amount)}</div>
+                          <div className="text-sm text-muted-foreground">
+                            {new Date(payment.timestamp).toLocaleDateString()}
+                          </div>
+                        </div>
+                        {payment.allocatedTrucks?.map((allocation: any) => {
+                          const truck = workDetails.find(t => t.id === allocation.truckId);
+                          return truck ? (
+                            <div key={allocation.truckId} className="text-xs text-muted-foreground">
+                              {truck.truck_number} (${formatNumber(allocation.amount)})
+                            </div>
+                          ) : null;
+                        })}
+                        {payment.note && (
+                          <div className="text-xs italic mt-1">{payment.note}</div>
+                        )}
+                      </div>
+                    ))
+                  )}
                   <div className="hidden sm:block overflow-x-auto">
-                    <table className="min-w-full text-sm">
-                      <thead>
-                        <tr>
-                          <th className="p-2 text-left">ID</th>
-                          <th className="p-2 text-left">Actions</th>
-                          <th className="p-2 text-left">Amount</th>
-                          <th className="p-2 text-left">Date</th>
-                          <th className="p-2 text-left">Allocated Trucks</th>
-                          <th className="p-2 text-left">Note</th></tr></thead>
-                      <tbody>
-                        {getFilteredOwnerPayments()
-                          .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()) // Sort oldest first
-                          .map((payment) => {
-                            // Find corresponding balance usage entry
-                            const balanceUsageEntry = balanceUsageHistory.find(
-                              (entry) => entry.type === 'usage' && entry.paymentId === payment.id
-                            );
-                            const balanceUsedAmount = balanceUsageEntry?.amount || 0;
-                            const totalPaymentValue = toFixed2(payment.amount + balanceUsedAmount);
+                    {getFilteredOwnerPayments().length === 0 && !isLoading ? (
+                      <div className="p-4 text-center text-muted-foreground">
+                        No payment history for the selected period.
+                      </div>
+                    ) : (
+                      <table className="min-w-full text-sm">
+                        <thead>
+                          <tr>
+                            <th className="p-2 text-left">ID</th>
+                            <th className="p-2 text-left">Actions</th>
+                            <th className="p-2 text-left">Amount</th>
+                            <th className="p-2 text-left">Date</th>
+                            <th className="p-2 text-left">Allocated Trucks</th>
+                            <th className="p-2 text-left">Note</th></tr></thead>
+                        <tbody>
+                          {getFilteredOwnerPayments()
+                            .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()) // Sort oldest first
+                            .map((payment) => {
+                              // Find corresponding balance usage entry
+                              const balanceUsageEntry = balanceUsageHistory.find(
+                                (entry) => entry.type === 'usage' && entry.paymentId === payment.id
+                              );
+                              const balanceUsedAmount = balanceUsageEntry?.amount || 0;
+                              const totalPaymentValue = toFixed2(payment.amount + balanceUsedAmount);
 
-                            return (
-                              <tr key={payment.id} className={cn("border-t", payment.corrected && "bg-muted/50")}>
-                                <td className="p-2">{payment.id}</td>
-                                <td className="p-2">{payment.allocatedTrucks?.map((allocation: any) => {
-                                  const truck = workDetails.find(t => t.id === allocation.truckId);
-                                  return truck ? (
-                                    <div key={allocation.truckId}>
-                                      <PaymentActions 
-                                        payment={payment}
-                                        truck={truck}
-                                        allocation={allocation}/>
-                                    </div>
-                                  ) : null;
-                                })}</td>
-                                <td className="p-2">
-                                  ${formatNumber(totalPaymentValue)}
-                                  {balanceUsedAmount > 0 && (
-                                    <span className="ml-1 text-emerald-600" title={`Includes $${formatNumber(balanceUsedAmount)} from balance`}>
-                                      <Wallet2 className="h-3 w-3 inline-block" />
-                                    </span>
-                                  )}
-                                </td>
-                                <td className="p-2">{new Date(payment.timestamp).toLocaleString()}</td>
-                                <td className="p-2">{payment.allocatedTrucks?.map((allocation: any) => {
-                                  const truck = workDetails.find(t => t.id === allocation.truckId);
-                                  return truck ? (
-                                    <div key={allocation.truckId} className="flex items-center">
-                                      <span className="text-xs">
-                                        {truck.truck_number} (${formatNumber(allocation.amount)})
-                                        {payment.corrected && (
-                                          <span className="ml-1 text-muted-foreground">(Corrected)</span>
-                                        )}
+                              return (
+                                <tr key={payment.id} className={cn("border-t", payment.corrected && "bg-muted/50")}>
+                                  <td className="p-2">{payment.id}</td>
+                                  <td className="p-2">{payment.allocatedTrucks?.map((allocation: any) => {
+                                    const truck = workDetails.find(t => t.id === allocation.truckId);
+                                    return truck ? (
+                                      <div key={allocation.truckId}>
+                                        <PaymentActions 
+                                          payment={payment}
+                                          truck={truck}
+                                          allocation={allocation}/>
+                                      </div>
+                                    ) : null;
+                                  })}</td>
+                                  <td className="p-2">
+                                    ${formatNumber(totalPaymentValue)}
+                                    {balanceUsedAmount > 0 && (
+                                      <span className="ml-1 text-emerald-600" title={`Includes $${formatNumber(balanceUsedAmount)} from balance`}>
+                                        <Wallet2 className="h-3 w-3 inline-block" />
                                       </span>
-                                    </div>
-                                  ) : null;
-                                })}</td>
-                                <td className="p-2 whitespace-nowrap">{payment.note || '—'}</td>
-                              </tr>
-                            );
-                          })}
-                      </tbody>
-                    </table>
+                                    )}
+                                  </td>
+                                  <td className="p-2">{new Date(payment.timestamp).toLocaleString()}</td>
+                                  <td className="p-2">{payment.allocatedTrucks?.map((allocation: any) => {
+                                    const truck = workDetails.find(t => t.id === allocation.truckId);
+                                    return truck ? (
+                                      <div key={allocation.truckId} className="flex items-center">
+                                        <span className="text-xs">
+                                          {truck.truck_number} (${formatNumber(allocation.amount)})
+                                          {payment.corrected && (
+                                            <span className="ml-1 text-muted-foreground">(Corrected)</span>
+                                          )}
+                                        </span>
+                                      </div>
+                                    ) : null;
+                                  })}</td>
+                                  <td className="p-2 whitespace-nowrap">{payment.note || '—'}</td>
+                                </tr>
+                              );
+                            })}
+                        </tbody>
+                      </table>
+                    )}
                   </div>
                 </div>
               </Card>
