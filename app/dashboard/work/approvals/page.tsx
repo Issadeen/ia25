@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react"
 import { useSession } from "next-auth/react"
 import { useRouter } from "next/navigation"
+import { useTheme } from 'next-themes'
 import { database } from "@/lib/firebase"
 import { ref, onValue, update, get } from "firebase/database"
 import { Button } from "@/components/ui/button"
@@ -11,9 +12,8 @@ import { Card } from "@/components/ui/card"
 import { toast } from "@/components/ui/use-toast"
 import { motion } from "framer-motion"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { ThemeToggle } from "@/components/ui/molecules/theme-toggle"
 import { useProfileImage } from '@/hooks/useProfileImage'
-import { ArrowLeft, Loader2, Check, X, FileText, AlertTriangle, Search, Clock, CheckSquare, Volume2, VolumeX } from "lucide-react"
+import { ArrowLeft, Loader2, Check, X, FileText, AlertTriangle, Search, Clock, CheckSquare, Volume2, VolumeX, Sun, Moon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import {
   DropdownMenu,
@@ -73,6 +73,7 @@ interface ApprovalStats {
 export default function ApprovalsPage() {
   const { data: session, status } = useSession()
   const router = useRouter()
+  const { theme, setTheme } = useTheme()
   const [workId, setWorkId] = useState("")
   const [isVerifying, setIsVerifying] = useState(false)
   const [isVerified, setIsVerified] = useState(false)
@@ -469,29 +470,58 @@ export default function ApprovalsPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-background to-muted/50">
-      {/* Update header to be more compact on mobile */}
-      <header className="fixed top-0 left-0 w-full border-b z-50 bg-gradient-to-r from-emerald-900/10 via-blue-900/10 to-blue-900/10 backdrop-blur-xl">
-        <div className="max-w-7xl mx-auto px-2 sm:px-4 py-2 sm:py-3">
-          <div className="flex items-center justify-between">
-            {/* ... left side ... */}
-            <div className="flex items-center gap-1 sm:gap-2">
-              {/* ... other buttons ... */}
-              <ThemeToggle />
-              <Avatar className="h-7 w-7 sm:h-8 sm:w-8 ring-2 ring-pink-500/50">
-                <AvatarImage
-                  src={profilePicUrl || ''}
-                  alt="Profile"
-                />
-                <AvatarFallback className="bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300">
-                  {session?.user?.name?.[0]?.toUpperCase() || 'U'}
-                </AvatarFallback>
-              </Avatar>
-            </div>
+      <header className="sticky top-0 z-50 w-full border-b bg-background/80 backdrop-blur-sm supports-[backdrop-filter]:bg-background/60">
+        <div className="container flex h-14 items-center justify-between">
+          <div className="flex items-center gap-4">
+            <Button variant="ghost" size="icon" onClick={() => router.back()}>
+              <ArrowLeft className="h-5 w-5" />
+            </Button>
+            <h1 className="text-xl font-semibold bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">
+              Approvals
+            </h1>
+          </div>
+
+          <div className="flex items-center gap-4">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={toggleMute}
+              aria-label={isMuted ? "Unmute sounds" : "Mute sounds"}
+            >
+              {isMuted ? (
+                <VolumeX className="h-5 w-5" />
+              ) : (
+                <Volume2 className="h-5 w-5" />
+              )}
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+              aria-label="Toggle theme"
+            >
+              {theme === "dark" ? (
+                <Sun className="h-5 w-5" />
+              ) : (
+                <Moon className="h-5 w-5" />
+              )}
+            </Button>
+            <Avatar 
+              className="h-8 w-8 ring-2 ring-emerald-500/50 ring-offset-2 ring-offset-background transition-shadow hover:ring-emerald-500/75 cursor-pointer"
+              onClick={() => router.push('/dashboard')}
+            >
+              <AvatarImage 
+                src={session?.user?.image || profilePicUrl || ''} 
+                alt={session?.user?.name || 'User Profile'}
+              />
+              <AvatarFallback className="bg-emerald-100 text-emerald-700">
+                {session?.user?.email?.[0]?.toUpperCase() || 'U'}
+              </AvatarFallback>
+            </Avatar>
           </div>
         </div>
       </header>
 
-      {/* Update main content area spacing */}
       <div className="container mx-auto py-4 pt-16 sm:py-8 sm:pt-24 space-y-4 sm:space-y-6 px-2 sm:px-6">
         {/* Make the controls more compact on mobile */}
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">

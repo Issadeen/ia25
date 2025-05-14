@@ -33,6 +33,7 @@ import {
   ChevronUp,
   ChevronDown,
   Scale,
+  Trash2, // Add Trash2 icon
 } from "lucide-react" // Add X and FileSpreadsheet icon to imports
 import { ThemeToggle } from "@/components/ui/molecules/theme-toggle" // Add ThemeToggle import
 import { Skeleton } from "@/components/ui/skeleton"
@@ -171,6 +172,9 @@ export default function OwnerDetailsPage() {
   }>({ key: "truck_number", direction: "asc" })
   const [isBalanceDialogOpen, setIsBalanceDialogOpen] = useState(false) // Add state for balance dialog
 
+  // Add new state for selected trucks
+  const [selectedTrucks, setSelectedTrucks] = useState<Set<string>>(new Set())
+
   // Add new state for the feature
   const [ownerNameClickCount, setOwnerNameClickCount] = useState(0)
   const [isBalanceEditMode, setIsBalanceEditMode] = useState(false)
@@ -244,6 +248,9 @@ export default function OwnerDetailsPage() {
   // Add new state for monthly data
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear())
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1)
+
+  // Add new state for selected trucks total
+  const [selectedTrucksTotal, setSelectedTrucksTotal] = useState(0)
 
   // Fetch data when component mounts
   useEffect(() => {
@@ -350,7 +357,8 @@ export default function OwnerDetailsPage() {
         const { balance } = getTruckAllocations(truck, truckPayments);
         
         // If the truck has a positive balance (due or pending), include it regardless of date
-        if (balance > 0) {
+        // Or if it's selected, include it
+        if (balance > 0 || selectedTrucks.has(truck.id)) {
           return true;
         }
         
@@ -957,6 +965,45 @@ export default function OwnerDetailsPage() {
   useEffect(() => {
     fetchOwnerBalances()
   }, [owner, workDetails, truckPayments]) // Added dependencies
+
+  // Add functions for truck selection
+  const handleTruckSelect = (truckId: string) => {
+    setSelectedTrucks(prevSelected => {
+      const newSelected = new Set(prevSelected)
+      if (newSelected.has(truckId)) {
+        newSelected.delete(truckId)
+      } else {
+        newSelected.add(truckId)
+      }
+      return newSelected
+    })
+  }
+
+  const handleSelectAllTrucks = (checked: boolean) => {
+    if (checked) {
+      const allUnpaidTruckIds = getFilteredWorkDetails()
+        .filter(truck => truck.loaded && getTruckAllocations(truck, truckPayments).balance > 0)
+        .map(truck => truck.id)
+      setSelectedTrucks(new Set(allUnpaidTruckIds))
+    } else {
+      setSelectedTrucks(new Set())
+    }
+  }
+
+  // Calculate total for selected trucks
+  useEffect(() => {
+    let total = 0
+    selectedTrucks.forEach(truckId => {
+      const truck = workDetails.find(t => t.id === truckId)
+      if (truck) {
+        const { balance } = getTruckAllocations(truck, truckPayments)
+        if (balance > 0) { // Only sum up if there's a balance due
+          total += balance
+        }
+      }
+    })
+    setSelectedTrucksTotal(total)
+  }, [selectedTrucks, workDetails, truckPayments])
 
   // Add new handler function after existing state declarations
   const handleOwnerNameClick = () => {
@@ -1860,20 +1907,43 @@ export default function OwnerDetailsPage() {
               <Card className="p-3 sm:p-6">
                 <div className="flex justify-between items-center mb-3 sm:mb-4">
                   <h2 className="text-lg sm:text-xl font-semibold">Loaded Trucks</h2>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleFixAllStatuses}
-                    className="text-xs"
-                  >
-                    Fix All Statuses
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    {selectedTrucks.size > 0 && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setSelectedTrucks(new Set())}
+                        className="text-xs"
+                      >
+                        <Trash2 className="mr-1 h-3 w-3" />
+                        Clear Selection ({selectedTrucks.size})
+                      </Button>
+                    )}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleFixAllStatuses}
+                      className="text-xs"
+                    >
+                      Fix All Statuses
+                    </Button>
+                  </div>
                 </div>
                 <div className="overflow-x-auto -mx-3 sm:mx-0">
                   <div className="min-w-[800px] sm:min-w-0"> {/* Force minimum width on mobile */}
                     <table className="w-full">
                       <thead>
                         <tr>
+                          <th className="p-2 text-left w-10">
+                            <Checkbox
+                              checked={
+                                getFilteredWorkDetails().filter(truck => truck.loaded && getTruckAllocations(truck, truckPayments).balance > 0).length > 0 &&
+                                selectedTrucks.size === getFilteredWorkDetails().filter(truck => truck.loaded && getTruckAllocations(truck, truckPayments).balance > 0).length
+                              }
+                              onCheckedChange={(checked) => handleSelectAllTrucks(!!checked)}
+                              aria-label="Select all unpaid trucks"
+                            />
+                          </th>
                           <th className="text-left p-2">Truck</th>
                           <th className="text-left p-2">Product</th>
                           <th className="text-left p-2">At20</th>
@@ -1886,9 +1956,19 @@ export default function OwnerDetailsPage() {
                       </thead>
                       <tbody>
                         {getFilteredWorkDetails().filter(truck => truck.loaded).map(truck => {
-                                                  const { totalDue, totalAllocated, balance, pendingAmount } = getTruckAllocations(truck, truckPayments);
+                          const { totalDue, totalAllocated, balance, pendingAmount } = getTruckAllocations(truck, truckPayments);
+                          const isUnpaid = balance > 0;
                           return (
-                            <tr key={truck.id} className="border-t">
+                            <tr key={truck.id} className={cn("border-t", selectedTrucks.has(truck.id) && "bg-emerald-50 dark:bg-emerald-900/30")}>
+                              <td className="p-2">
+                                {isUnpaid && (
+                                  <Checkbox
+                                    checked={selectedTrucks.has(truck.id)}
+                                    onCheckedChange={() => handleTruckSelect(truck.id)}
+                                    aria-label={`Select truck ${truck.truck_number}`}
+                                  />
+                                )}
+                              </td>
                               <td className="p-2">{truck.truck_number}</td>
                               <td className="p-2">{truck.product}</td>
                               <td className="p-2">{truck.at20 || '-'}</td>
@@ -2862,6 +2942,40 @@ export default function OwnerDetailsPage() {
           </DialogContent>
         </Dialog>
       </main>
+      {/* Floating Total Selected Balance */}
+      <AnimatePresence>
+        {selectedTrucks.size > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 50 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 50 }}
+            transition={{ duration: 0.3 }}
+            className="fixed bottom-4 left-1/2 -translate-x-1/2 w-auto max-w-md z-50"
+          >
+            <div
+              className="p-3 sm:p-4 bg-gradient-to-r from-emerald-500 via-teal-500 to-blue-500 rounded-lg shadow-xl border border-emerald-300 dark:border-emerald-700"
+            >
+              <div className="flex flex-col sm:flex-row justify-between items-center gap-2 sm:gap-4">
+                <span className="text-sm font-medium text-white dark:text-gray-100">
+                  {selectedTrucks.size} truck{selectedTrucks.size === 1 ? '' : 's'} selected
+                </span>
+                <span className="text-base sm:text-lg font-semibold text-white dark:text-gray-50">
+                  Total: ${formatNumber(selectedTrucksTotal)}
+                </span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setSelectedTrucks(new Set())}
+                  className="text-emerald-100 dark:text-blue-200 hover:bg-white/20 dark:hover:bg-white/10 h-7 px-2"
+                >
+                  <Trash2 className="mr-1 h-3.5 w-3.5" />
+                  Clear
+                </Button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

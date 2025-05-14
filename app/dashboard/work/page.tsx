@@ -1,14 +1,13 @@
 "use client";
 
-// Update imports to include useProfileImage
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { useTheme } from "next-themes";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import { getFirebaseAuth, getFirebaseStorage } from "@/lib/firebase"; // Add this import
+import { getFirebaseAuth, getFirebaseStorage } from "@/lib/firebase";
 import { ref as storageRef, getDownloadURL } from "firebase/storage";
-import { updateProfile, User as FirebaseUser } from "firebase/auth"; // Add this import
+import { updateProfile, User as FirebaseUser } from "firebase/auth";
 import { 
   FileText, 
   ClipboardList, 
@@ -23,7 +22,6 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
-import Link from "next/link";
 import { WorkCard } from "@/components/dashboard/WorkCard";
 import { 
   getTruckAllocations, 
@@ -31,15 +29,14 @@ import {
   validatePaymentForm,
   updatePaymentStatuses 
 } from "@/lib/payment-utils";
-import { useProfileImage } from '@/hooks/useProfileImage'
+import { useProfileImage } from "@/hooks/useProfileImage";
 
 export default function WorkPage() {
   const { theme, setTheme } = useTheme();
   const { data: session } = useSession();
   const router = useRouter();
-  const profilePicUrl = useProfileImage()  // Add this line
+  const profilePicUrl = useProfileImage();
 
-  // Updated work cards organization with new Permits card
   const workCards = [
     {
       title: "Entry Details",
@@ -86,11 +83,9 @@ export default function WorkPage() {
       <header className="sticky top-0 z-50 w-full border-b bg-background/80 backdrop-blur-sm supports-[backdrop-filter]:bg-background/60">
         <div className="container flex h-14 items-center justify-between">
           <div className="flex items-center gap-4">
-            <Link href="/dashboard">
-              <Button variant="ghost" size="icon">
-                <ArrowLeft className="h-5 w-5" />
-              </Button>
-            </Link>
+            <Button variant="ghost" size="icon" onClick={() => router.back()}>
+              <ArrowLeft className="h-5 w-5" />
+            </Button>
             <h1 className="text-xl font-semibold bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">
               Work Details
             </h1>
