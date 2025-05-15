@@ -697,24 +697,46 @@ export default function WorkManagementPage() {
 
   const handleAddNew = async (formData: MultiProductWorkFormData): Promise<{ success: boolean; id: string }> => {
     try {
-      // Check for duplicate order number
-      const orderRef = ref(database, 'work_details')
-      const orderSnapshot = await get(query(
+      // Standardize order number format by adding prefix if it doesn't already have it
+      let standardizedOrderNo = formData.orderno;
+      if (!standardizedOrderNo.startsWith("MOK-LO-")) {
+        standardizedOrderNo = `MOK-LO-${standardizedOrderNo}`;
+      }
+      
+      // Update the formData with standardized order number
+      const updatedFormData = {
+        ...formData,
+        orderno: standardizedOrderNo
+      };
+
+      // Enhanced check for duplicate order numbers - check both orderno and originalOrderNo fields
+      const orderRef = ref(database, 'work_details');
+      
+      // First check for exact order number matches
+      const exactMatchSnapshot = await get(query(
         orderRef, 
         orderByChild('orderno'), 
-        equalTo(formData.orderno)
-      ))
-
-      if (orderSnapshot.exists()) {
+        equalTo(standardizedOrderNo)
+      ));
+      
+      // Then check for originalOrderNo matches (for multi-product orders)
+      const originalOrderNoSnapshot = await get(query(
+        orderRef, 
+        orderByChild('originalOrderNo'), 
+        equalTo(standardizedOrderNo)
+      ));
+      
+      if (exactMatchSnapshot.exists() || originalOrderNoSnapshot.exists()) {
         toast({
           title: "Duplicate Order Number",
-          description: `Order number ${formData.orderno} is already used`,
-        })
-        return { success: false, id: '' }
+          description: `Order number ${standardizedOrderNo} is already used`,
+          variant: "destructive"
+        });
+        return { success: false, id: '' };
       }
 
       // Create separate entries for each product
-      const results = await Promise.all(formData.products.map(async (productEntry) => {
+      const results = await Promise.all(updatedFormData.products.map(async (productEntry) => {
         // Check stock availability
         const stockRef = ref(database, `stocks/${productEntry.product.toLowerCase()}`)
         const stockSnapshot = await get(stockRef)
@@ -729,14 +751,14 @@ export default function WorkManagementPage() {
         const newWorkDetailRef = push(ref(database, 'work_details'))
         
         const workDetailData = {
-          owner: formData.owner,
+          owner: updatedFormData.owner,
           product: productEntry.product,
-          truck_number: formData.truck_number,
+          truck_number: updatedFormData.truck_number,
           quantity: parseFloat(productEntry.quantity),
-          status: formData.status,
-          orderno: `${formData.orderno}-${productEntry.product}`, // Add product suffix to order number
-          depot: formData.depot,
-          destination: formData.destination,
+          status: updatedFormData.status,
+          orderno: `${standardizedOrderNo}-${productEntry.product}`, // Add product suffix to order number
+          depot: updatedFormData.depot,
+          destination: updatedFormData.destination,
           price: parseFloat(productEntry.price),
           loaded: false,
           paid: false,
@@ -744,7 +766,7 @@ export default function WorkManagementPage() {
           createdAt: new Date().toISOString(),
           id: newWorkDetailRef.key,
           isMultiProduct: true, // Add flag for multi-product orders
-          originalOrderNo: formData.orderno // Keep original order number for reference
+          originalOrderNo: standardizedOrderNo // Keep original order number for reference
         }
 
         // Save work detail
