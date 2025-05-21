@@ -4,7 +4,7 @@ import { getFirebaseAuth, getFirebaseStorage } from "@/lib/firebase";
 import { ref, getDownloadURL, uploadBytes } from "firebase/storage";
 import { useSession, signOut } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useTheme } from "next-themes";
 import { toast } from "@/components/ui/use-toast";
 import { motion, AnimatePresence } from "framer-motion";
@@ -32,6 +32,10 @@ export default function DashboardPage() {
   const [lastLogin, setLastLogin] = useState<string | null>(null);
   const [profileUpdated, setProfileUpdated] = useState(false);
   const profilePicUrl = useProfileImage();
+
+  const firebaseInitialized = useRef(false);
+  const retryAttempts = useRef(0);
+  const maxRetries = 3;
 
   const { sessionExpiryWarning, resetInactivityTimer } = useInactivityTimer({
     timeout: AUTH_CONSTANTS.INACTIVITY_TIMEOUT,
@@ -75,29 +79,47 @@ export default function DashboardPage() {
 
   useEffect(() => {
     const initFirebase = async () => {
-      if (status !== "authenticated" || getFirebaseAuth()?.currentUser) {
+      if (status !== "authenticated" || firebaseInitialized.current) {
+        return;
+      }
+
+      const auth = getFirebaseAuth();
+      if (auth?.currentUser) {
+        firebaseInitialized.current = true;
+        setIsLoadingProfile(false);
         return;
       }
 
       try {
         const response = await fetch("/api/auth/firebase-token");
         if (!response.ok) {
-          throw new Error("Failed to fetch Firebase token");
+          throw new Error(`Failed to fetch Firebase token: ${response.status}`);
         }
 
         const { customToken } = await response.json();
-        const auth = getFirebaseAuth();
+
         if (!auth) {
           throw new Error("Firebase auth is not initialized");
         }
+
         await signInWithCustomToken(auth, customToken);
+        console.log("Firebase auth initialized successfully");
+        firebaseInitialized.current = true;
+        setIsLoadingProfile(false);
       } catch (error) {
         console.error("Firebase Auth Error:", error);
-        toast({
-          title: "Authentication Error",
-          description: "Please try logging in again",
-          variant: "destructive",
-        });
+
+        if (retryAttempts.current >= maxRetries) {
+          toast({
+            title: "Authentication Notice",
+            description: "Session is active, but some features may be limited. Try refreshing the page if needed.",
+            variant: "default",
+          });
+        } else {
+          retryAttempts.current += 1;
+          const delay = Math.min(1000 * Math.pow(2, retryAttempts.current), 8000);
+          setTimeout(initFirebase, delay);
+        }
       }
     };
 

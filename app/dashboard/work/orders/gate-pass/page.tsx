@@ -19,6 +19,7 @@ import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { AlertTriangle } from "lucide-react"
+import { ensureFirebaseAuth } from '@/lib/firebase-auth-helper';
 
 export default function GatePassPage() {
   const { data: session, status } = useSession()
@@ -45,6 +46,9 @@ export default function GatePassPage() {
   // Add new state
   const [isUnpaidGatePass, setIsUnpaidGatePass] = useState(false)
   const [isUnloadedGatePass, setIsUnloadedGatePass] = useState(false)
+
+  // Add authentication state
+  const [authInitialized, setAuthInitialized] = useState(false)
 
   // Update countdown effect with fixed redirect handling
   useEffect(() => {
@@ -214,6 +218,21 @@ export default function GatePassPage() {
       router.push("/login")
     }
   }, [status, router])
+
+  // Add effect to initialize Firebase auth
+  useEffect(() => {
+    if (status === 'authenticated' && !authInitialized) {
+      ensureFirebaseAuth()
+        .then(() => {
+          setAuthInitialized(true);
+        })
+        .catch(error => {
+          console.error('Firebase auth initialization failed:', error);
+          // Don't log out user or show destructive toast - just log the error
+          // The user's session is still valid, even if Firebase auth fails
+        });
+    }
+  }, [status, authInitialized]);
 
   // Add approval check
   useEffect(() => {

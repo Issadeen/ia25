@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
-import { getToken } from 'next-auth/jwt'; // Import getToken
+import { getToken } from 'next-auth/jwt';
 import { getFirebaseAdminAuth } from '@/lib/firebase-admin';
-import { NextRequest } from 'next/server'; // Import NextRequest
+import { NextRequest } from 'next/server';
 
 // Define the expected shape of the token (matching the jwt callback)
 interface AppToken {
@@ -17,28 +17,43 @@ interface AppToken {
 }
 
 export async function GET(req: NextRequest) {
-  // Use getToken to get the full JWT token content server-side
-  const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET }) as AppToken | null;
-
-  // Check for token and necessary properties (id for Firebase custom token)
-  if (!token || !token.id) {
-    console.error("[Firebase Token API] Unauthorized: Token missing or missing ID property.");
-    return NextResponse.json({ error: 'Unauthorized or missing user ID in token' }, { status: 401 });
-  }
-
-  // Use token.id (which corresponds to user.workId) for the custom token
-  const uid = token.id;
-  // You can also access token.email if needed for logging or other purposes server-side
-  // const email = token.email;
-
   try {
-    console.log(`[Firebase Token API] Creating custom token for UID: ${uid}`);
+    // Use getToken to get the full JWT token content server-side
+    const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET }) as AppToken | null;
+
+    // Check for token and necessary properties (id for Firebase custom token)
+    if (!token) {
+      console.error("[Firebase Token API] No token found in request");
+      return NextResponse.json({ error: 'No authentication token found' }, { status: 401 });
+    }
+
+    if (!token.id) {
+      console.error("[Firebase Token API] Token missing ID property:", JSON.stringify(token, null, 2));
+      return NextResponse.json({ error: 'Missing user ID in token' }, { status: 400 });
+    }
+
+    // Use token.id (which corresponds to user.workId) for the custom token
+    const uid = token.id;
+
+    console.log(`[Firebase Token API] Creating custom token for UID: ${uid}, email: ${token.email}`);
     const adminAuth = getFirebaseAdminAuth();
-    const customToken = await adminAuth.createCustomToken(uid);
-    console.log(`[Firebase Token API] Custom token created successfully for UID: ${uid}`);
-    return NextResponse.json({ firebaseToken: customToken });
+    
+    try {
+      const customToken = await adminAuth.createCustomToken(uid);
+      console.log(`[Firebase Token API] Custom token created successfully for UID: ${uid}`);
+      return NextResponse.json({ customToken });
+    } catch (firebaseError) {
+      console.error(`[Firebase Token API] Firebase error creating token for UID ${uid}:`, firebaseError);
+      return NextResponse.json({ 
+        error: 'Failed to create Firebase token',
+        details: firebaseError instanceof Error ? firebaseError.message : 'Unknown Firebase error' 
+      }, { status: 500 });
+    }
   } catch (error) {
-    console.error(`[Firebase Token API] Error creating custom token for UID ${uid}:`, error);
-    return NextResponse.json({ error: 'Failed to create Firebase token' }, { status: 500 });
+    console.error(`[Firebase Token API] Unexpected error:`, error);
+    return NextResponse.json({ 
+      error: 'Internal server error', 
+      details: error instanceof Error ? error.message : 'Unknown error'
+    }, { status: 500 });
   }
 }
