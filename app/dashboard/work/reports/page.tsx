@@ -23,6 +23,7 @@ import { Switch } from "@/components/ui/switch"
 import { ToastAction } from "@/components/ui/toast"
 import { useProfileImage } from '@/hooks/useProfileImage'
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction } from "@/components/ui/alert-dialog"
+import type { AT20Correction } from "@/types/work"
 
 // Update the interface to handle multiple entries
 interface AllocationReport {
