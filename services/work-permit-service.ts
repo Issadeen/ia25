@@ -1,12 +1,78 @@
-import { Database, ref, get, update, query, orderByChild, equalTo } from 'firebase/database';
+import { Database, get, ref, set, push, update } from 'firebase/database';
+import { WorkOrder, WorkOrderAllocation } from '@/types/work-orders';
 import type { WorkDetail } from '@/types/work';
 import type { PreAllocation, PermitEntry } from '@/types/permits';
 import { checkEntryVolumes, findAvailablePermitEntry } from '@/utils/permit-helpers';
 
 export class WorkPermitService {
-  constructor(private db: Database) {}
+  private db: Database;
 
-  async allocatePermitForWorkOrder(workDetailId: string): Promise<{ success: boolean; error?: string }> {
+  constructor(db: Database) {
+    this.db = db;
+  }
+
+  async allocatePermitForWorkOrder(orderNumber: string): Promise<{success: boolean, error?: string}> {
+    try {
+      // Get the work order
+      const orderRef = ref(this.db, `tr800/${orderNumber}`);
+      const orderSnapshot = await get(orderRef);
+
+      if (!orderSnapshot.exists()) {
+        return { success: false, error: `Work order ${orderNumber} not found` };
+      }
+
+      const order = orderSnapshot.val() as WorkOrder;
+
+      // Check if this order is eligible for a permit
+      if (order.destination.toLowerCase() !== 'ssd') {
+        return { success: true }; // Not an error, just not eligible
+      }
+
+      // Find an available permit
+      const permitsRef = ref(this.db, 'permits');
+      const permitsSnapshot = await get(permitsRef);
+
+      if (!permitsSnapshot.exists()) {
+        return { success: false, error: 'No permits available in the system' };
+      }
+
+      let availablePermit: any = null;
+      let permitId: string = '';
+
+      permitsSnapshot.forEach((childSnapshot) => {
+        const permit = childSnapshot.val();
+        if (permit.status === 'available' && !availablePermit) {
+          availablePermit = permit;
+          permitId = childSnapshot.key!;
+        }
+      });
+
+      if (!availablePermit) {
+        return { success: false, error: 'No available permits found' };
+      }
+
+      // Allocate the permit
+      const updates: any = {};
+      updates[`permits/${permitId}/status`] = 'allocated';
+      updates[`permits/${permitId}/allocatedTo`] = orderNumber;
+      updates[`permits/${permitId}/allocatedAt`] = Date.now();
+      updates[`permits/${permitId}/truck`] = order.truck || null;
+      updates[`permits/${permitId}/depot`] = order.depot || null;
+      updates[`tr800/${orderNumber}/permitId`] = permitId;
+
+      await update(ref(this.db), updates);
+      
+      return { success: true };
+    } catch (error) {
+      console.error('Error allocating permit:', error);
+      return { 
+        success: false, 
+        error: error instanceof Error ? error.message : 'Unknown error allocating permit' 
+      };
+    }
+  }
+
+  async allocatePermitForWorkDetail(workDetailId: string): Promise<{ success: boolean; error?: string }> {
     try {
       // 1. Get work detail
       const workSnap = await get(ref(this.db, `work_details/${workDetailId}`));

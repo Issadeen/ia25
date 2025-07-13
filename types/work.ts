@@ -93,3 +93,18 @@ export interface OwnerSummary {
     pendingTrucks: WorkDetail[];
   }
 }
+
+export interface AT20Correction {
+  id: string;
+  reportId: string;
+  truckNumber: string;
+  oldValue: string;
+  newValue: string;
+  correctedBy: string;
+  correctedAt: string;
+  reason: string;
+  affectedEntries: string[];
+  status: 'pending' | 'approved' | 'rejected';
+  approvedBy?: string;
+  approvedAt?: string;
+}

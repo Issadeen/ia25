@@ -21,26 +21,44 @@ export async function GET(req: NextRequest) {
     // Use getToken to get the full JWT token content server-side
     const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET }) as AppToken | null;
 
-    // Check for token and necessary properties (id for Firebase custom token)
+    // Improve token validation logic for better error reporting
     if (!token) {
       console.error("[Firebase Token API] No token found in request");
       return NextResponse.json({ error: 'No authentication token found' }, { status: 401 });
     }
 
-    if (!token.id) {
-      console.error("[Firebase Token API] Token missing ID property:", JSON.stringify(token, null, 2));
+    // Check token properties and provide more specific error messages
+    if (!token.id && !token.sub) {
+      console.error("[Firebase Token API] Token missing both ID and SUB properties:", 
+        JSON.stringify({...token, email: token.email ? `${token.email.substring(0,3)}...` : null}, null, 2));
       return NextResponse.json({ error: 'Missing user ID in token' }, { status: 400 });
     }
 
-    // Use token.id (which corresponds to user.workId) for the custom token
-    const uid = token.id;
+    // Prioritize token.id but fall back to sub if needed
+    const uid = token.id || token.sub;
+    
+    // This check is redundant with the one above but keeps TypeScript happy
+    if (!uid) {
+      console.error("[Firebase Token API] UID is undefined even after validation check");
+      return NextResponse.json({ error: 'Invalid user ID' }, { status: 400 });
+    }
 
-    console.log(`[Firebase Token API] Creating custom token for UID: ${uid}, email: ${token.email}`);
+    // Add request tracing ID to help with debugging
+    const requestId = Math.random().toString(36).substring(2, 10);
+    console.log(`[Firebase Token API] [${requestId}] Creating custom token for UID: ${uid}`);
+    
     const adminAuth = getFirebaseAdminAuth();
     
     try {
-      const customToken = await adminAuth.createCustomToken(uid);
-      console.log(`[Firebase Token API] Custom token created successfully for UID: ${uid}`);
+      // Add timeout handling for Firebase admin operations
+      const tokenPromise = adminAuth.createCustomToken(uid);
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error("Firebase token creation timed out")), 5000));
+      
+      // Race the token creation against a timeout
+      const customToken = await Promise.race([tokenPromise, timeoutPromise]) as string;
+      
+      console.log(`[Firebase Token API] [${requestId}] Custom token created successfully`);
       return NextResponse.json({ customToken });
     } catch (firebaseError) {
       console.error(`[Firebase Token API] Firebase error creating token for UID ${uid}:`, firebaseError);

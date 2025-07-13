@@ -227,7 +227,7 @@ interface GatePassApproval {
   };
 }
 
-export default function WorkManagementPage() {
+export default function OrdersPage() {
   // 1. Form initialization
   const form = useForm<z.infer<typeof driverInfoSchema>>({
     resolver: zodResolver(driverInfoSchema),
@@ -2270,9 +2270,7 @@ const getActiveOwnerSummary = () => {
     }
   };
 
-
-
-// Add this function to handle bulk queue status change
+  // Add this function to handle bulk queue status change
 const handleBulkStatusChange = async () => {
   if (selectedRows.length === 0) {
     toast({
@@ -2547,7 +2545,7 @@ const showTruckQuickView = (detail: WorkDetail) => {
               initial={{ opacity: 0, y: -10 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
-              className="flex items-center justify-between p-2 bg-yellow-50 dark:bg-yellow-900/20 rounded-md border border-yellow-200 dark:border-yellow-800"
+              className="flex items-center justify-between p-2 bg-yellow-50 dark:bg-yellow-900/20 rounded-md border border-yellow-200 dark:border-yellow-800 shadow-lg"
             >
               <div className="flex items-center gap-2">
                 <span className="text-sm font-medium">

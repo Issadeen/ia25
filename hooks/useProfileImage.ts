@@ -1,57 +1,73 @@
 import { useState, useEffect } from 'react';
+import { getFirebaseAuth, getFirebaseStorage } from '@/lib/firebase';
+import { getDownloadURL, ref as storageRef } from 'firebase/storage';
 import { useSession } from 'next-auth/react';
-import { getFirebaseAuth } from '@/lib/firebase';
-import { onAuthStateChanged, User } from 'firebase/auth';
+import { ensureFirebaseAuth } from '@/lib/firebase-auth-helper';
 
-export const useProfileImage = () => {
-  const { data: session, status } = useSession();
-  const [imageUrl, setImageUrl] = useState<string | null>(null);
-
+export function useProfileImage() {
+  const [profilePicUrl, setProfilePicUrl] = useState<string | null>(null);
+  const { data: session } = useSession();
+  
   useEffect(() => {
-    const auth = getFirebaseAuth();
-    let unsubscribe: (() => void) | null = null;
+    let isMounted = true;
+    
+    const fetchProfilePic = async () => {
+      try {
+        // Try to use the session image first if available
+        if (session?.user?.image) {
+          setProfilePicUrl(session.user.image);
+          return;
+        }
 
-    const updateUserImage = (currentUser: User | null) => {
-      let finalUrl: string | null = null;
-
-      if (currentUser?.photoURL) {
-        finalUrl = currentUser.photoURL;
-      } else if (session?.user?.image) {
-        finalUrl = session.user.image;
-      }
-
-      if (finalUrl) {
-        // Add a cache-busting query parameter
-        const url = new URL(finalUrl);
-        url.searchParams.set('v', Date.now().toString());
-        setImageUrl(url.toString());
-      } else {
-        setImageUrl(null);
+        // Wait for Firebase auth to be initialized
+        try {
+          await ensureFirebaseAuth();
+        } catch (error) {
+          console.error("Firebase auth initialization failed:", error);
+          // Continue anyway - we might have session image
+        }
+        
+        const auth = getFirebaseAuth();
+        const currentUser = auth?.currentUser;
+        
+        if (!currentUser) {
+          console.warn("No authenticated user found for profile image");
+          return;
+        }
+        
+        // If user has a photoURL in their profile, use that
+        if (currentUser.photoURL) {
+          if (isMounted) setProfilePicUrl(currentUser.photoURL);
+          return;
+        }
+        
+        // Otherwise try to fetch from storage
+        const storage = getFirebaseStorage();
+        if (!storage) return;
+        
+        const userId = currentUser.uid;
+        const imageRef = storageRef(storage, `profile_pictures/${userId}/profile_pic`);
+        
+        try {
+          const url = await getDownloadURL(imageRef);
+          if (isMounted) setProfilePicUrl(url);
+        } catch (error) {
+          console.log("No custom profile image found in storage");
+          // No profile pic found, that's okay
+        }
+      } catch (error) {
+        console.error("Error fetching profile picture:", error);
       }
     };
 
-    if (auth) {
-      // Initial check with currentUser if already available
-      if (auth.currentUser) {
-        updateUserImage(auth.currentUser);
-      }
-
-      // Listen for auth state changes
-      unsubscribe = onAuthStateChanged(auth, (user) => {
-        updateUserImage(user);
-      });
-    } else if (session?.user?.image) {
-      // Fallback if Firebase auth is not immediately available but session is
-      updateUserImage(null); // Pass null to rely on session within updateUserImage
+    if (session) {
+      fetchProfilePic();
     }
 
-    // Cleanup listener on component unmount
     return () => {
-      if (unsubscribe) {
-        unsubscribe();
-      }
+      isMounted = false;
     };
-  }, [session, status]); // Re-run when session or auth status changes
+  }, [session]);
 
-  return imageUrl;
-};
+  return profilePicUrl;
+}

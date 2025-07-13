@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { getDatabase, ref, onValue, push, update, get } from "firebase/database"
+import { getDatabase, ref, onValue, push, update, get, set } from "firebase/database"
 import { format } from "date-fns"
 import * as XLSX from 'xlsx'
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -22,6 +22,7 @@ import { ThemeToggle } from "@/components/ui/molecules/theme-toggle"
 import { Switch } from "@/components/ui/switch"
 import { ToastAction } from "@/components/ui/toast"
 import { useProfileImage } from '@/hooks/useProfileImage'
+import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction } from "@/components/ui/alert-dialog"
 
 // Update the interface to handle multiple entries
 interface AllocationReport {
@@ -69,7 +70,7 @@ const initialFormData: ReportFormData = {
   entries: [{ volume: '', entryUsed: '' }]
 }
 
-export default function ReportsPage() {
+const WorkReportsPage: React.FC = () => {
   const { data: session, status } = useSession()
   const router = useRouter()
   const [reports, setReports] = useState<AllocationReport[]>([])
@@ -95,6 +96,11 @@ export default function ReportsPage() {
   const [bulkDepot, setBulkDepot] = useState("")
   const [selectedReports, setSelectedReports] = useState<string[]>([])
   const [showStats, setShowStats] = useState(false);
+  const [showCorrectionDialog, setShowCorrectionDialog] = useState(false)
+  const [selectedReport, setSelectedReport] = useState<AllocationReport | null>(null)
+  const [correctionReason, setCorrectionReason] = useState('')
+  const [newAt20Value, setNewAt20Value] = useState('')
+  const [isPendingApproval, setIsPendingApproval] = useState(false)
   const profilePicUrl = useProfileImage()
 
   useEffect(() => {
@@ -641,6 +647,165 @@ const handleRemoveEditEntry = (reportId: string, entryIndex: number) => {
     }
   };
 
+  const generateReport = async () => {
+    const db = getDatabase();
+    const reportsRef = ref(db, 'allocation_reports');
+
+    // Fetch data from Firebase
+    get(reportsRef).then((snapshot) => {
+      if (snapshot.exists()) {
+        const reportsData = Object.entries(snapshot.val()).map(([key, value]) => ({
+          id: key,
+          ...(value as any)
+        }));
+
+        // Filter and map data for the report
+        const reportData = reportsData
+          .filter(report => report.loadedDate) // Ensure loadedDate exists
+          .map(report => ({
+            number: report.truckNumber,
+            timestamp: report.loadedDate,
+            product: report.product,
+            destination: report.entryDestination,
+            initialQuantity: report.entries?.[0]?.volume || 0,
+            remainingQuantity: report.totalVolume,
+            truck: report.truckNumber,
+            depot: report.depot,
+            createdBy: report.owner,
+          }));
+
+        // Define columns for the report
+        const columns = [
+          { header: 'TR830 Number', key: 'number' },
+          { header: 'Date', key: 'timestamp' },
+          { header: 'Product', key: 'product' },
+          { header: 'Destination', key: 'destination' },
+          { header: 'Initial Qty', key: 'initialQuantity' },
+          { header: 'Remaining Qty', key: 'remainingQuantity' },
+          { header: 'Truck', key: 'truck' },
+          { header: 'Depot', key: 'depot' },
+          { header: 'Created By', key: 'createdBy' },
+        ];
+        
+        // Generate and download the report
+        const ws = XLSX.utils.json_to_sheet(reportData, { header: columns.map(col => col.key) });
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Reports");
+
+        // Save to file
+        XLSX.writeFile(wb, `Work_Reports_${format(new Date(), 'yyyyMMdd_HHmmss')}.xlsx`);
+
+        toast({
+          title: "Report Generated",
+          description: "Your report has been generated and downloaded.",
+          duration: 5000,
+        });
+      } else {
+        toast({
+          title: "No Data",
+          description: "No reports found for the selected criteria.",
+          variant: "destructive",
+        });
+      }
+    }).catch((error) => {
+      console.error("Error fetching reports:", error);
+      toast({
+        title: "Error",
+        description: "There was an error generating the report.",
+        variant: "destructive",
+      });
+    });
+  };
+
+  // Add new function to handle AT20 correction
+  const handleAt20Correction = async (report: AllocationReport) => {
+    setSelectedReport(report)
+    setNewAt20Value(report.at20 || '')
+    setShowCorrectionDialog(true)
+  }
+
+  // Add function to submit correction
+  const submitCorrection = async () => {
+    if (!selectedReport || !correctionReason || !newAt20Value) return
+
+    try {
+      const db = getDatabase()
+      const correctionRef = push(ref(db, 'at20_corrections'))
+      
+      const correction: AT20Correction = {
+        id: correctionRef.key!,
+        reportId: selectedReport.id!,
+        truckNumber: selectedReport.truckNumber,
+        oldValue: selectedReport.at20!,
+        newValue: newAt20Value,
+        correctedBy: session?.user?.email || 'unknown',
+        correctedAt: new Date().toISOString(),
+        reason: correctionReason,
+        affectedEntries: selectedReport.entries.map(e => e.entryUsed),
+        status: 'pending'
+      }
+
+      await set(correctionRef, correction)
+
+      toast({
+        title: "Correction Submitted",
+        description: "AT20 correction is pending approval",
+      })
+
+      setShowCorrectionDialog(false)
+      setCorrectionReason('')
+      setNewAt20Value('')
+      setSelectedReport(null)
+      setIsPendingApproval(true)
+
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to submit correction",
+        variant: "destructive"
+      })
+    }
+  }
+
+  // Update the existing edit cell rendering
+  const renderAt20Cell = (report: AllocationReport) => {
+    if (editingReport === report.truckNumber) {
+      return (
+        <div className="flex gap-2 items-center">
+          <Input
+            type="text"
+            value={editFormData.at20 || report.at20}
+            onChange={(e) => setEditFormData(prev => ({ ...prev, at20: e.target.value }))}
+          />
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => handleAt20Correction(report)}
+            className="px-2"
+          >
+            <AlertCircle className="h-4 w-4" />
+          </Button>
+        </div>
+      )
+    }
+    
+    return (
+      <div className="flex items-center gap-2">
+        <span>{report?.at20 || '-'}</span>
+        {showEditControls && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => handleAt20Correction(report)}
+            className="px-2"
+          >
+            <AlertCircle className="h-4 w-4" />
+          </Button>
+        )}
+      </div>
+    )
+  }
+
   if (!mounted) return null
 
   return (
@@ -976,24 +1141,10 @@ const handleRemoveEditEntry = (reportId: string, entryIndex: number) => {
                       report?.at20 || '-'
                     )}</TableCell>
                     <TableCell>{editingReport === report.truckNumber ? (
-                      <Select
+                      <Input
                         value={editFormData.entryDestination || report.entryDestination}
-                        onValueChange={(value) => setEditFormData(prev => ({ ...prev, entryDestination: value }))}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select destination" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="local">Local</SelectItem>
-                          <SelectItem value="ssd">SSD</SelectItem>
-                          <SelectItem value="northern">Northern</SelectItem>
-                          <SelectItem value="western">Western</SelectItem>
-                          <SelectItem value="eastern">Eastern</SelectItem>
-                          <SelectItem value="nakuru">Nakuru</SelectItem>
-                          <SelectItem value="eldoret">Eldoret</SelectItem>
-                          <SelectItem value="kisumu">Kisumu</SelectItem>
-                        </SelectContent>
-                      </Select>
+                        onChange={(e) => setEditFormData(prev => ({ ...prev, entryDestination: e.target.value }))}
+                      />
                     ) : (
                       report?.entryDestination?.toUpperCase() || '-'
                     )}</TableCell>
@@ -1003,20 +1154,38 @@ const handleRemoveEditEntry = (reportId: string, entryIndex: number) => {
                         onChange={(e) => setEditFormData(prev => ({ ...prev, depot: e.target.value }))}
                       />
                     ) : (
-                      report?.depot || '-'
+                      report?.depot?.toUpperCase() || '-'
                     )}</TableCell>
                     {showEditControls && (
                       <TableCell>
                         {editingReport === report.truckNumber ? (
-                          <div className="flex gap-2">
-                            <Button variant="ghost" size="sm" onClick={() => handleSaveEdit(report.truckNumber)} className="h-8 w-8 p-0"><Check className="h-4 w-4" /></Button>
-                            <Button variant="ghost" size="sm" onClick={() => {
-                              setEditingReport(null)
-                              setEditFormData({})
-                            }} className="h-8 w-8 p-0"><X className="h-4 w-4" /></Button>
+                          <div className="flex items-center gap-2">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => setEditingReport(null)}
+                              className="h-8 w-8 p-0"
+                            >
+                              <X className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleSaveEdit(report.truckNumber)}
+                              className="h-8 w-8 p-0 text-emerald-500 hover:text-emerald-600 hover:bg-emerald-50"
+                            >
+                              <Check className="h-4 w-4" />
+                            </Button>
                           </div>
                         ) : (
-                          <Button variant="ghost" size="sm" onClick={() => handleEdit(report)} className="h-8 w-8 p-0"><Edit className="h-4 w-4" /></Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleEdit(report)}
+                            className="h-8 w-8 p-0"
+                          >
+                            <Edit className="h-4 w-4" />
+                          </Button>
                         )}
                       </TableCell>
                     )}
@@ -1025,76 +1194,119 @@ const handleRemoveEditEntry = (reportId: string, entryIndex: number) => {
               </TableBody>
             </Table>
 
-            {/* Add Bulk Update button after the table */}
-            {showEditControls && selectedReports.length > 0 && (
-              <div className="mt-4">
+            {filteredReports.length === 0 && (
+              <div className="py-24 text-center">
+                <p className="text-muted-foreground">No reports found for this month.</p>
                 <Button
-                  onClick={() => setShowBulkUpdate(true)}
                   variant="outline"
-                  className="gap-2"
+                  onClick={() => setIsAddModalOpen(true)}
+                  className="mt-4"
                 >
-                  <Edit className="h-4 w-4" />
-                  Bulk Update Selected ({selectedReports.length})
+                  <Plus className="h-4 w-4 mr-2" /> Add Report
                 </Button>
               </div>
             )}
           </CardContent>
         </Card>
+
+        {/* Add bulk update dialog */}
+        {showEditControls && selectedReports.length > 0 && (
+          <div className="fixed bottom-4 right-4 p-4 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-emerald-200 dark:border-emerald-900 flex items-center gap-4">
+            <p className="text-sm font-medium">{selectedReports.length} reports selected</p>
+            <Button 
+              variant="outline"
+              onClick={() => setShowBulkUpdate(true)}
+              className="text-emerald-600"
+            >
+              Bulk Update
+            </Button>
+          </div>
+        )}
       </main>
 
-      {/* Add Report Dialog */}
+      {/* Add Report Modal */}
       <Dialog open={isAddModalOpen} onOpenChange={setIsAddModalOpen}>
-        <DialogContent className="sm:max-w-[600px]">
+        <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle className="text-xl font-semibold">Add New Report</DialogTitle>
+            <DialogTitle>Add Allocation Report</DialogTitle>
+            <DialogDescription>
+              Enter the details of the truck and allocation.
+            </DialogDescription>
           </DialogHeader>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div>
+          
+          <form onSubmit={handleSubmit} className="space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="space-y-2">
+                <Label htmlFor="loadedDate">Loaded Date</Label>
+                <Input
+                  id="loadedDate"
+                  type="date"
+                  value={formData.loadedDate}
+                  onChange={(e) => setFormData(prev => ({ ...prev, loadedDate: e.target.value }))}
+                  required
+                />
+              </div>
+              <div className="space-y-2">
                 <Label htmlFor="truckNumber">Truck Number</Label>
                 <Input
                   id="truckNumber"
                   value={formData.truckNumber}
                   onChange={(e) => setFormData(prev => ({ ...prev, truckNumber: e.target.value }))}
+                  placeholder="KAA 000A"
                   required
                 />
               </div>
-              <div>
+              <div className="space-y-2">
                 <Label htmlFor="owner">Owner</Label>
                 <Input
                   id="owner"
                   value={formData.owner}
                   onChange={(e) => setFormData(prev => ({ ...prev, owner: e.target.value }))}
+                  placeholder="Enter owner"
                   required
                 />
               </div>
-              <div>
+              <div className="space-y-2">
+                <Label htmlFor="at20">AT20</Label>
+                <Input
+                  id="at20"
+                  value={formData.at20}
+                  onChange={(e) => setFormData(prev => ({ ...prev, at20: e.target.value }))}
+                  placeholder="AT20 number"
+                  required
+                />
+              </div>
+              <div className="space-y-2">
                 <Label htmlFor="product">Product</Label>
                 <Select
-                  value={formData.product || ''} // Add default empty string
+                  value={formData.product}
                   onValueChange={(value) => setFormData(prev => ({ ...prev, product: value }))}
+                  required
                 >
-                  <SelectTrigger>
+                  <SelectTrigger id="product">
                     <SelectValue placeholder="Select product" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="ago">AGO</SelectItem>
+                    <SelectItem value="agol">AGO</SelectItem>
                     <SelectItem value="pms">PMS</SelectItem>
+                    <SelectItem value="ik">IK</SelectItem>
+                    <SelectItem value="v-power">V-Power</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
-              <div>
+              <div className="space-y-2">
                 <Label htmlFor="entryDestination">Destination</Label>
                 <Select
                   value={formData.entryDestination}
                   onValueChange={(value) => setFormData(prev => ({ ...prev, entryDestination: value }))}
+                  required
                 >
-                  <SelectTrigger>
+                  <SelectTrigger id="entryDestination">
                     <SelectValue placeholder="Select destination" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="local">Local</SelectItem>
                     <SelectItem value="ssd">SSD</SelectItem>
+                    <SelectItem value="local">Local</SelectItem>
                     <SelectItem value="northern">Northern</SelectItem>
                     <SelectItem value="western">Western</SelectItem>
                     <SelectItem value="eastern">Eastern</SelectItem>
@@ -1104,105 +1316,97 @@ const handleRemoveEditEntry = (reportId: string, entryIndex: number) => {
                   </SelectContent>
                 </Select>
               </div>
-              <div>
-                <Label htmlFor="at20">AT20</Label>
-                <Input
-                  id="at20"
-                  type="number"
-                  value={formData.at20}
-                  onChange={(e) => setFormData(prev => ({ ...prev, at20: e.target.value }))}
-                  required
-                />
-              </div>
-              <div>
-                <Label htmlFor="loadedDate">Loaded Date</Label>
-                <Input
-                  id="loadedDate"
-                  type="date"
-                  value={formData.loadedDate || new Date().toISOString().split('T')[0]}
-                  onChange={(e) => setFormData(prev => ({ ...prev, loadedDate: e.target.value }))}
-                  required
-                />
-              </div>
-              <div>
+              <div className="space-y-2">
                 <Label htmlFor="depot">Depot</Label>
                 <Select
                   value={formData.depot}
                   onValueChange={(value) => setFormData(prev => ({ ...prev, depot: value }))}
                 >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select depot" />
+                  <SelectTrigger id="depot">
+                    <SelectValue placeholder="Select depot (optional)" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="Eldoret">Eldoret</SelectItem>
+                    <SelectItem value="SSD">SSD</SelectItem>
+                    <SelectItem value="Local">Local</SelectItem>
+                    <SelectItem value="Northern">Northern</SelectItem>
+                    <SelectItem value="Western">Western</SelectItem>
+                    <SelectItem value="Eastern">Eastern</SelectItem>
                     <SelectItem value="Nakuru">Nakuru</SelectItem>
+                    <SelectItem value="Eldoret">Eldoret</SelectItem>
                     <SelectItem value="Kisumu">Kisumu</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
             </div>
-
-            {/* Entries Section */}
+            
             <div className="space-y-4">
               <div className="flex items-center justify-between">
-                <Label>Entries Used</Label>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={addEntry}
-                  disabled={formData.entries.length >= 3}
-                >
-                  Add Entry
-                </Button>
+                <h3 className="text-sm font-medium">Entries</h3>
+                {formData.entries.length < 3 && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={addEntry}
+                  >
+                    <Plus className="h-4 w-4 mr-2" /> Add Entry
+                  </Button>
+                )}
               </div>
+              
               {formData.entries.map((entry, index) => (
-                <div key={index} className="grid grid-cols-2 gap-4 p-4 border rounded-md">
-                  <div>
-                    <Label>Entry Number</Label>
+                <div key={index} className="flex items-end gap-4">
+                  <div className="space-y-2 flex-1">
+                    <Label htmlFor={`entry-${index}`}>Entry Number</Label>
                     <Input
-                      value={entry.entryUsed || ''} // Add default empty string
+                      id={`entry-${index}`}
+                      value={entry.entryUsed}
                       onChange={(e) => handleEntryChange(index, 'entryUsed', e.target.value)}
+                      placeholder="TR830 number"
                       required
                     />
                   </div>
-                  <div>
-                    <Label>Volume</Label>
-                    <div className="flex gap-2">
-                      <Input
-                        type="number"
-                        value={entry.volume || ''} // Add default empty string
-                        onChange={(e) => handleEntryChange(index, 'volume', e.target.value)}
-                        required
-                      />
-                      {formData.entries.length > 1 && (
-                        <Button
-                          type="button"
-                          variant="destructive"
-                          onClick={() => removeEntry(index)}
-                          className="px-3"
-                        >
-                          ×
-                        </Button>
-                      )}
-                    </div>
+                  <div className="space-y-2 flex-1">
+                    <Label htmlFor={`volume-${index}`}>Volume (L)</Label>
+                    <Input
+                      id={`volume-${index}`}
+                      type="number"
+                      value={entry.volume}
+                      onChange={(e) => handleEntryChange(index, 'volume', e.target.value)}
+                      placeholder="Volume in liters"
+                      required
+                    />
                   </div>
+                  {formData.entries.length > 1 && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => removeEntry(index)}
+                      className="text-red-500 hover:text-red-600 hover:bg-red-50 mb-0.5"
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  )}
                 </div>
               ))}
             </div>
-
-            <div className="flex justify-end gap-4 mt-6">
-              <Button type="button" variant="outline" onClick={() => setIsAddModalOpen(false)}>
+            
+            <div className="flex justify-end gap-3">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setIsAddModalOpen(false)}
+              >
                 Cancel
               </Button>
-              <Button type="submit" disabled={isSubmitting}>
-                {isSubmitting ? (
-                  <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Saving...
-                  </>
-                ) : (
-                  'Save Report'
-                )}
+              <Button
+                type="submit"
+                className="bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 text-white"
+                disabled={isSubmitting}
+              >
+                {isSubmitting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
+                Save Report
               </Button>
             </div>
           </form>
@@ -1211,51 +1415,105 @@ const handleRemoveEditEntry = (reportId: string, entryIndex: number) => {
 
       {/* Bulk Update Dialog */}
       <Dialog open={showBulkUpdate} onOpenChange={setShowBulkUpdate}>
-        <DialogContent>
+        <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>Bulk Update Depots</DialogTitle>
             <DialogDescription>
-              Update depot for {selectedReports.length} selected reports. 
-              {selectedReports.length === filteredReports.length && (
-                <span className="font-medium text-emerald-600"> All reports in current view are selected.</span>
-              )}
+              Update depot for {selectedReports.length} selected reports
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 py-4">
+          
+          <div className="space-y-4">
             <div className="space-y-2">
-              <Label>New Depot</Label>
+              <Label htmlFor="bulkDepot">Depot</Label>
               <Select
                 value={bulkDepot}
                 onValueChange={setBulkDepot}
+                required
               >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Select new depot value" />
+                <SelectTrigger id="bulkDepot">
+                  <SelectValue placeholder="Select depot" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="Eldoret">Eldoret</SelectItem>
+                  <SelectItem value="SSD">SSD</SelectItem>
+                  <SelectItem value="Local">Local</SelectItem>
+                  <SelectItem value="Northern">Northern</SelectItem>
+                  <SelectItem value="Western">Western</SelectItem>
+                  <SelectItem value="Eastern">Eastern</SelectItem>
                   <SelectItem value="Nakuru">Nakuru</SelectItem>
+                  <SelectItem value="Eldoret">Eldoret</SelectItem>
                   <SelectItem value="Kisumu">Kisumu</SelectItem>
                 </SelectContent>
               </Select>
             </div>
-            <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={() => {
-                setShowBulkUpdate(false);
-                setBulkDepot("");
-              }}>
+            
+            <div className="flex justify-end gap-3">
+              <Button
+                variant="outline"
+                onClick={() => setShowBulkUpdate(false)}
+              >
                 Cancel
               </Button>
-              <Button 
-                onClick={handleBulkUpdate} 
+              <Button
+                onClick={handleBulkUpdate}
                 disabled={!bulkDepot}
-                className="bg-emerald-600 hover:bg-emerald-700"
               >
-                Update {selectedReports.length} {selectedReports.length === 1 ? 'Report' : 'Reports'}
+                Update {selectedReports.length} Reports
               </Button>
             </div>
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Add AT20 Correction Dialog */}
+      <AlertDialog open={showCorrectionDialog} onOpenChange={setShowCorrectionDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>AT20 Correction</AlertDialogTitle>
+            <AlertDialogDescription>
+              Correcting AT20 for truck {selectedReport?.truckNumber}. This will need approval.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+
+          <div className="grid gap-4 py-4">
+            <div className="space-y-2">
+              <Label>Current AT20</Label>
+              <Input
+                disabled
+                value={selectedReport?.at20 || ''}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>New AT20</Label>
+              <Input
+                value={newAt20Value}
+                onChange={(e) => setNewAt20Value(e.target.value)}
+                placeholder="Enter correct AT20 value"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Reason for Correction</Label>
+              <Input
+                value={correctionReason}
+                onChange={(e) => setCorrectionReason(e.target.value)}
+                placeholder="Explain why this correction is needed"
+              />
+            </div>
+          </div>
+
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={submitCorrection}
+              disabled={!newAt20Value || !correctionReason}
+            >
+              Submit for Approval
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
-  )
+  );
 }
+
+export default WorkReportsPage;

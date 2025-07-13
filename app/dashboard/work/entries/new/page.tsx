@@ -3,7 +3,7 @@
 import React from 'react'
 import { useState, useEffect } from 'react'
 import { useSession } from "next-auth/react"
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { useTheme } from "next-themes"
 import { getDatabase, ref, push, query, orderByChild, equalTo, get, set } from 'firebase/database'
 import { 
@@ -40,14 +40,18 @@ const AddEntriesPage: React.FC = () => {
   const { theme, setTheme } = useTheme()
   const { toast } = useToast()
   const profilePicUrl = useProfileImage()
+  const searchParams = useSearchParams()
 
   // 2. Declare all state
   const [tr800Number, setTr800Number] = useState('')
   const [tr800Quantity, setTr800Quantity] = useState('')
   const [product, setProduct] = useState('')
   const [destination, setDestination] = useState('')
+  const [truck, setTruck] = useState('')
+  const [depot, setDepot] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [mounted, setMounted] = useState(false)
+  const [profileImageLoaded, setProfileImageLoaded] = useState(false)
   const [lastUploadedImage, setLastUploadedImage] = useState<string | null>(null)
   const [isSaving, setIsSaving] = useState(false)
   const [showEntries, setShowEntries] = useState(false)
@@ -125,7 +129,7 @@ const AddEntriesPage: React.FC = () => {
       if (!tr800Number.trim() || !tr800Quantity || !product.trim() || !destination.trim()) {
         toast({
           title: "Validation Error",
-          description: "All fields are required",
+          description: "All required fields must be filled",
           variant: "destructive"
         })
         setIsSaving(false)
@@ -172,7 +176,9 @@ const AddEntriesPage: React.FC = () => {
         destination: destination.trim().toLowerCase(),
         product_destination: `${product.trim().toLowerCase()}_${destination.trim().toLowerCase()}`,
         timestamp: Date.now(),
-        createdBy: session?.user?.name || 'unknown'
+        createdBy: session?.user?.name || 'unknown',
+        truck: truck.trim() || null,
+        depot: depot.trim() || null
       }
 
       // Save to tr800
@@ -203,6 +209,8 @@ const AddEntriesPage: React.FC = () => {
       setTr800Quantity('')
       setProduct('')
       setDestination('')
+      setTruck('')
+      setDepot('')
 
     } catch (error: any) {
       console.error('Save error:', error)
@@ -223,6 +231,13 @@ const AddEntriesPage: React.FC = () => {
       router.push("/login")
     }
   }, [status, router])
+
+  // Add effect to track when profile image has loaded
+  useEffect(() => {
+    if (profilePicUrl) {
+      setProfileImageLoaded(true)
+    }
+  }, [profilePicUrl])
 
   useEffect(() => {
     const handleKeyPress = (e: KeyboardEvent) => {
@@ -267,6 +282,16 @@ const AddEntriesPage: React.FC = () => {
     }
   }, [showAllEntries, showEntries])
 
+  // Parse query params on mount
+  useEffect(() => {
+    if (searchParams) {
+      const truckParam = searchParams.get('truck')
+      const depotParam = searchParams.get('depot')
+      if (truckParam) setTruck(truckParam)
+      if (depotParam) setDepot(depotParam)
+    }
+  }, [searchParams])
+
   // 5. Handle early return
   if (!mounted || status === "loading") return null
 
@@ -309,6 +334,8 @@ const AddEntriesPage: React.FC = () => {
               <AvatarImage 
                 src={avatarSrc} 
                 alt={session?.user?.name || 'User Profile'}
+                onLoad={() => console.log("Avatar image loaded:", avatarSrc)}
+                onError={() => console.warn("Failed to load avatar image:", avatarSrc)}
               />
               <AvatarFallback className="bg-emerald-100 text-emerald-700">
                 {session?.user?.name?.[0] || "U"}
@@ -329,7 +356,7 @@ const AddEntriesPage: React.FC = () => {
               <form onSubmit={handleSubmit} className="space-y-6">
                 <div className="grid gap-6 md:grid-cols-2">
                   <div className="space-y-2">
-                    <label className="text-sm font-medium">TR830 Number</label>
+                    <label className="text-sm font-medium">TR830 Number <span className="text-red-500">*</span></label>
                     <Input
                       required
                       value={tr800Number}
@@ -339,7 +366,7 @@ const AddEntriesPage: React.FC = () => {
                     />
                   </div>
                   <div className="space-y-2">
-                    <label className="text-sm font-medium">Quantity</label>
+                    <label className="text-sm font-medium">Quantity <span className="text-red-500">*</span></label>
                     <Input
                       required
                       type="number"
@@ -351,7 +378,7 @@ const AddEntriesPage: React.FC = () => {
                     />
                   </div>
                   <div className="space-y-2">
-                    <label className="text-sm font-medium">Product</label>
+                    <label className="text-sm font-medium">Product <span className="text-red-500">*</span></label>
                     <Input
                       required
                       value={product}
@@ -361,12 +388,30 @@ const AddEntriesPage: React.FC = () => {
                     />
                   </div>
                   <div className="space-y-2">
-                    <label className="text-sm font-medium">Destination</label>
+                    <label className="text-sm font-medium">Destination <span className="text-red-500">*</span></label>
                     <Input
                       required
                       value={destination}
                       onChange={(e) => setDestination(e.target.value.toLowerCase())}
                       placeholder="Enter destination"
+                      className="bg-white/50 dark:bg-gray-800/50 border-gray-200/50 dark:border-gray-700/50"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Truck</label>
+                    <Input
+                      value={truck}
+                      onChange={(e) => setTruck(e.target.value)}
+                      placeholder="Enter truck number"
+                      className="bg-white/50 dark:bg-gray-800/50 border-gray-200/50 dark:border-gray-700/50"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Depot</label>
+                    <Input
+                      value={depot}
+                      onChange={(e) => setDepot(e.target.value)}
+                      placeholder="Enter depot name"
                       className="bg-white/50 dark:bg-gray-800/50 border-gray-200/50 dark:border-gray-700/50"
                     />
                   </div>
