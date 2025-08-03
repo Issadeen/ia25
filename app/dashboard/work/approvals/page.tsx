@@ -39,6 +39,9 @@ interface GatePassApproval {
   truckNumber: string;
   owner: string; // Add owner field
   rejectionReason?: string; // Add rejection reason field
+  respondedAt?: string; // When the approval was responded to
+  approvedBy?: string; // Who approved the request
+  expiryTime?: number; // Timestamp when the approval expires
   driverDetails?: {
     name: string;
     phone: string;
@@ -341,12 +344,17 @@ export default function ApprovalsPage() {
           return;
         }
       }
+      
+      // Set expiry time - gate pass will be valid for 5 minutes (300,000 ms)
+      const GATE_PASS_VALIDITY = 5 * 60 * 1000; // 5 minutes in milliseconds
+      const expiryTime = Date.now() + GATE_PASS_VALIDITY;
   
       // Update approval status
       const updates: { [key: string]: any } = {
         [`gatepass_approvals/${approval.id}/status`]: 'approved',
         [`gatepass_approvals/${approval.id}/respondedAt`]: new Date().toISOString(),
         [`gatepass_approvals/${approval.id}/approvedBy`]: session?.user?.name,
+        [`gatepass_approvals/${approval.id}/expiryTime`]: expiryTime,
       };
   
       // Also update the work detail to mark gate pass as generated

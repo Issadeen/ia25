@@ -50,14 +50,39 @@ export default function GatePassPage() {
   // Add authentication state
   const [authInitialized, setAuthInitialized] = useState(false)
 
-  // Update countdown effect with fixed redirect handling
+  // Update countdown effect with persistent expiry time
   useEffect(() => {
-    if (!isApproved) return;
+    if (!isApproved || !approvalId) return;
 
     let timer: NodeJS.Timeout;
     let hardTimeout: NodeJS.Timeout;
 
     const startCountdown = () => {
+      // Get expiry time from localStorage to ensure consistency across refreshes
+      const expiryTime = parseInt(localStorage.getItem(`gatepass_expiry_${approvalId}`) || '0');
+      
+      // If no expiry time or it's invalid, redirect immediately
+      if (!expiryTime || isNaN(expiryTime)) {
+        redirectingRef.current = true;
+        router.push('/dashboard/work');
+        return;
+      }
+
+      // Calculate remaining time in seconds
+      const remainingMs = expiryTime - Date.now();
+      const remainingSec = Math.max(0, Math.floor(remainingMs / 1000));
+      
+      // If already expired, redirect immediately
+      if (remainingSec <= 0) {
+        redirectingRef.current = true;
+        router.push('/dashboard/work');
+        return;
+      }
+      
+      // Update timeLeft with the calculated remaining time
+      setTimeLeft(remainingSec);
+
+      // Start the countdown timer
       timer = setInterval(() => {
         setTimeLeft(prev => {
           const newTime = prev - 1;
@@ -65,6 +90,10 @@ export default function GatePassPage() {
             redirectingRef.current = true;
             clearInterval(timer);
             clearTimeout(hardTimeout);
+            
+            // Clear localStorage data to prevent reuse
+            localStorage.removeItem(`gatepass_start_${approvalId}`);
+            localStorage.removeItem(`gatepass_expiry_${approvalId}`);
             
             // Handle timeout in a separate effect
             setTimeout(() => {
@@ -82,14 +111,19 @@ export default function GatePassPage() {
         });
       }, 1000);
 
-      // Set a hard timeout as backup
+      // Set a hard timeout as backup based on the remaining time
       hardTimeout = setTimeout(() => {
         if (!redirectingRef.current) {
           redirectingRef.current = true;
           clearInterval(timer);
+          
+          // Clear localStorage data
+          localStorage.removeItem(`gatepass_start_${approvalId}`);
+          localStorage.removeItem(`gatepass_expiry_${approvalId}`);
+          
           router.push('/dashboard/work');
         }
-      }, IDLE_TIMEOUT);
+      }, remainingMs);
     };
 
     startCountdown();
@@ -98,14 +132,20 @@ export default function GatePassPage() {
       clearInterval(timer);
       clearTimeout(hardTimeout);
     };
-  }, [isApproved, router, IDLE_TIMEOUT]);
+  }, [isApproved, router, approvalId]);
 
-  // Update idle timer with fixed redirect handling
+  // Update idle timer with localStorage updates
   useIdleTimer({
     timeout: IDLE_TIMEOUT,
     onIdle: () => {
-      if (!redirectingRef.current) {
+      if (!redirectingRef.current && approvalId) {
         redirectingRef.current = true;
+        
+        // Mark as redirected in localStorage to prevent going back
+        localStorage.setItem(`gatepass_redirected_${approvalId}`, 'true');
+        localStorage.removeItem(`gatepass_start_${approvalId}`);
+        localStorage.removeItem(`gatepass_expiry_${approvalId}`);
+        
         // Handle idle timeout in a separate effect
         setTimeout(() => {
           toast({
@@ -113,7 +153,7 @@ export default function GatePassPage() {
             description: "Redirecting to dashboard due to inactivity",
             variant: "destructive"
           });
-          router.push('/dashboard/work');
+          router.replace('/dashboard/work');
         }, 0);
       }
     },
@@ -165,12 +205,19 @@ export default function GatePassPage() {
     audio.play().catch(() => {});
   };
 
-  // Add function to extend session
+  // Add function to extend session with localStorage updates
   const extendSession = () => {
-    if (redirectingRef.current) return;
+    if (redirectingRef.current || !approvalId) return;
+    
+    // Update the expiry time in localStorage
+    const newExpiry = Date.now() + IDLE_TIMEOUT;
+    localStorage.setItem(`gatepass_expiry_${approvalId}`, newExpiry.toString());
+    
+    // Update the timer state
     setTimeLeft(IDLE_TIMEOUT / 1000);
     setSessionWarningShown(false);
     setShowSecurityDialog(false);
+    
     toast({
       title: "Session Extended",
       description: "Your session has been extended by 1 minute 20 seconds",
@@ -209,6 +256,45 @@ export default function GatePassPage() {
     return () => document.removeEventListener('copy', handleCopy);
   }, []);
 
+  // Add effect to check localStorage and prevent back-button navigation
+  useEffect(() => {
+    if (!mounted || !approvalId) return;
+    
+    // Check if there's an expiry time and if it has passed
+    const expiryTime = parseInt(localStorage.getItem(`gatepass_expiry_${approvalId}`) || '0');
+    const hasExpired = expiryTime && Date.now() > expiryTime;
+    
+    // If the approval was previously marked as expired or redirected
+    if (hasExpired || localStorage.getItem(`gatepass_redirected_${approvalId}`)) {
+      // Clear any approval data
+      localStorage.removeItem(`gatepass_start_${approvalId}`);
+      localStorage.removeItem(`gatepass_expiry_${approvalId}`);
+      localStorage.removeItem(`gatepass_redirected_${approvalId}`);
+      
+      // Redirect back to work orders
+      router.replace('/dashboard/work/orders');
+      toast({
+        title: "Session Expired",
+        description: "This gate pass has expired and is no longer valid",
+        variant: "destructive"
+      });
+    }
+    
+    // Modify browser history to prevent going back to this page after expiry
+    window.history.pushState(null, '', window.location.href);
+    
+    const handlePopState = () => {
+      // Push state again to prevent going back
+      window.history.pushState(null, '', window.location.href);
+    };
+    
+    window.addEventListener('popstate', handlePopState);
+    
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+    };
+  }, [mounted, approvalId, router]);
+
   useEffect(() => {
     setMounted(true)
   }, [])
@@ -234,7 +320,7 @@ export default function GatePassPage() {
     }
   }, [status, authInitialized]);
 
-  // Add approval check
+  // Add approval check with expiry time tracking
   useEffect(() => {
     if (!approvalId) {
       router.push('/dashboard/work/orders')
@@ -250,7 +336,22 @@ export default function GatePassPage() {
       }
 
       const approval = snapshot.val()
+      
+      // Check if the approval has an expiry time and if it has expired
+      if (approval.expiryTime && Date.now() > approval.expiryTime) {
+        // Approval has expired, redirect to orders page
+        router.push('/dashboard/work/orders')
+        return
+      }
+      
       if (approval.status === 'approved') {
+        // Set expiry time in localStorage to prevent access after page refresh
+        if (!localStorage.getItem(`gatepass_start_${approvalId}`)) {
+          // Only set if not already set (prevents reset on refresh)
+          localStorage.setItem(`gatepass_start_${approvalId}`, Date.now().toString())
+          localStorage.setItem(`gatepass_expiry_${approvalId}`, (Date.now() + IDLE_TIMEOUT).toString())
+        }
+        
         setIsApproved(true)
         // Check if this is an unloaded or unpaid gate pass
         setIsUnloadedGatePass(searchParams.get('isUnloadedGatePass') === 'true')
@@ -261,7 +362,7 @@ export default function GatePassPage() {
     })
 
     return () => unsubscribe()
-  }, [approvalId, router, searchParams])
+  }, [approvalId, router, searchParams, IDLE_TIMEOUT])
 
   if (!mounted || isLoading) {
     return (

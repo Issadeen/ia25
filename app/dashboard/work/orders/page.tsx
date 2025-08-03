@@ -221,6 +221,9 @@ interface GatePassApproval {
   status: 'pending' | 'approved' | 'rejected';
   orderNo: string;
   truckNumber: string;
+  respondedAt?: string; // When the approval was responded to
+  approvedBy?: string; // Who approved the request
+  expiryTime?: number; // Timestamp when the approval expires
   driverDetails?: {
     name: string;
     phone: string;
