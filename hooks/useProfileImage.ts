@@ -45,6 +45,19 @@ export function useProfileImage() {
         const storage = getFirebaseStorage();
         if (!storage) return;
         
+        // Try using the user's email first (which matches your storage structure)
+        if (currentUser.email) {
+          try {
+            const emailRef = storageRef(storage, `profile_pictures/${currentUser.email}/profile_pic`);
+            const url = await getDownloadURL(emailRef);
+            if (isMounted) setProfilePicUrl(url);
+            return;
+          } catch (emailError) {
+            console.log("No profile image found with email path, trying UID");
+          }
+        }
+        
+        // Fall back to using UID if email approach fails
         const userId = currentUser.uid;
         const imageRef = storageRef(storage, `profile_pictures/${userId}/profile_pic`);
         
@@ -52,7 +65,17 @@ export function useProfileImage() {
           const url = await getDownloadURL(imageRef);
           if (isMounted) setProfilePicUrl(url);
         } catch (error) {
-          console.log("No custom profile image found in storage");
+          // Try one more approach - using the session email if available
+          if (session?.user?.email) {
+            try {
+              const sessionEmailRef = storageRef(storage, `profile_pictures/${session.user.email}/profile_pic`);
+              const sessionUrl = await getDownloadURL(sessionEmailRef);
+              if (isMounted) setProfilePicUrl(sessionUrl);
+              return;
+            } catch (sessionError) {
+              console.log("No profile image found with any method");
+            }
+          }
           // No profile pic found, that's okay
         }
       } catch (error) {
