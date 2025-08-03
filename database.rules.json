@@ -2,7 +2,7 @@
   "rules": {
     ".read": "auth != null",
     ".write": "auth != null",
-    
+
     "trucks": {
       ".read": "auth != null",
       ".write": "auth != null",
@@ -11,18 +11,18 @@
         ".validate": "newData.hasChildren(['truck_no', 'driver', 'transporter'])"
       }
     },
-    
+
     "users": {
-      ".read": true, 
+      ".read": true,
       ".write": "auth != null || !data.exists()",
       ".indexOn": ["email", "workId"],
       "$user_id": {
-        ".read": true,  
+        ".read": true,
         ".write": "auth != null && (!data.exists() || data.child('email').val() === auth.token.email)",
         ".validate": "newData.hasChildren(['email', 'workId'])"
       }
     },
-    
+
     "tr800": {
       ".read": "auth != null",
       ".write": "auth != null",
@@ -31,7 +31,7 @@
         ".validate": "newData.hasChildren(['number', 'initialQuantity', 'remainingQuantity', 'product', 'destination', 'timestamp'])"
       }
     },
-    
+
     "truckEntries": {
       ".read": "auth != null",
       ".write": "auth != null",
@@ -40,112 +40,85 @@
         ".validate": "newData.exists()"
       }
     },
-    
+
     "work_details": {
       ".read": "auth != null",
       ".write": "auth != null",
-      ".indexOn": ["truck_number", "owner", "orderno", "loaded"],
+      ".indexOn": ["truck_number", "owner", "orderno", "loaded", "timestamp", "permitAllocated", "at20", "price"], 
       "$work_id": {
-        ".validate": "newData.exists()"
+        ".validate": "newData.exists()",
+        "at20": {
+          ".validate": "newData.isNumber() || newData.val() == null"
+        },
+        "price": {
+          ".validate": "newData.isNumber() || newData.val() == null"
+        },
+        "lastUpdated": {
+          ".validate": "newData.isString() || newData.val() == null"
+        },
+        "updatedBy": {
+          ".validate": "newData.isString() || newData.val() == null"
+        }
       }
     },
-    
+
     "allocations": {
       ".read": "auth != null",
       ".write": "auth != null",
       ".indexOn": ["number", "timestamp"],
       "$allocation_id": {
-        ".validate": "newData.hasChildren(['number', 'initialQuantity', 'remainingQuantity', 'product', 'destination', 'timestamp'])"
+        ".validate": "newData.hasChildren(['number', 'initialQuantity', 'remainingQuantity', 'product', 'destination', 'timestamp'])",
+        "remainingQuantity": {
+          ".validate": "newData.isNumber() && newData.val() >= 0"
+        },
+        "lastUpdated": {
+          ".validate": "newData.isString()"
+        }
       }
     },
-    
+      
+      
+      "payment_reconciliations": {
+      ".read": "auth != null",
+      ".write": "auth != null",
+      ".indexOn": ["timestamp", "ownerId", "status", "month"],
+      "$owner_id": {
+        ".read": "auth != null", 
+        ".write": "auth != null"
+      }
+    },
+
     "reminders": {
       "$userId": {
         ".read": "auth != null && $userId == auth.token.email.replace('.', '').replace('@', '')",
         ".write": "auth != null && $userId == auth.token.email.replace('.', '').replace('@', '')"
       }
     },
-    
-    "owner_financials": {
+
+    "permitPreAllocations": {
       ".read": "auth != null",
       ".write": "auth != null",
-      ".indexOn": ["lastUpdated", "ownerId", "month"],
+      ".indexOn": ["truckNumber", "permitNumber", "used"], 
+      "$alloc_id": {
+        ".validate": "newData.hasChildren(['truckNumber', 'permitNumber', 'quantity'])"
+      }
+    },
+
+    "owner_balances": {
+      ".read": "auth != null",
+      ".write": "auth != null",
+      ".indexOn": ["lastUpdated"],
       "$owner_id": {
-        ".read": "auth != null",
-        ".write": "auth != null",
-        "$month": {
-          ".validate": "newData.hasChildren(['balance', 'totalPaid', 'totalDue', 'lastUpdated']) && newData.child('balance').isNumber() && newData.child('balance').val() >= 0 && newData.child('totalPaid').isNumber() && newData.child('totalDue').isNumber() && newData.child('lastUpdated').isString()"
-        }
+        ".validate": "newData.hasChildren(['amount', 'lastUpdated']) && newData.child('amount').isNumber() && newData.child('lastUpdated').isString()"
       }
     },
 
-    "payments": {
+    "drivers": {
       ".read": "auth != null",
       ".write": "auth != null",
-      ".indexOn": ["timestamp", "ownerId", "month"],
-      "$owner_id": {
-        ".read": "auth != null",
-        ".write": "auth != null",
-        "$payment_id": {
-          ".validate": "newData.hasChildren(['id', 'type', 'amount', 'timestamp', 'status', 'metadata', 'allocations', 'balanceUsed']) && newData.child('type').val() === 'PAYMENT'"
-        }
-      }
-    },
-
-    "payment_reconciliations": {
-      ".read": "auth != null",
-      ".write": "auth != null",
-      ".indexOn": ["timestamp", "ownerId", "status", "month"],
-      "$owner_id": {
-        ".read": "auth != null", 
-        ".write": "auth != null",
-        "$reconciliation_id": {
-          ".validate": "newData.hasChildren(['id', 'theirBalance', 'ourBalance', 'whatWeOweThem', 'whatTheyShouldPay', 'difference', 'timestamp', 'status', 'note'])"
-        }
-      }
-    },
-
-    "truck_financials": {
-      ".read": "auth != null",
-      ".write": "auth != null",
-      ".indexOn": ["truckId", "status"],
-      "$truck_id": {
-        ".read": "auth != null",
-        ".write": "auth != null",
-        "$allocation_id": {
-          ".validate": "newData.hasChildren(['amount', 'timestamp', 'status']) && (newData.child('status').val() === 'COMPLETED' || newData.child('status').val() === 'PENDING')"
-        }
-      }
-    },
-
-    "balance_usage": {
-      ".read": "auth != null",
-      ".write": "auth != null",
-      ".indexOn": ["timestamp"],
-      "$owner_id": {
-        ".read": "auth != null",
-        ".write": "auth != null",
-        "$usage_id": {
-          ".validate": "newData.hasChildren(['amount', 'timestamp', 'usedFor', 'paymentId']) && newData.child('amount').isNumber() && newData.child('amount').val() >= 0 && newData.child('timestamp').isString() && newData.child('paymentId').isString()",
-          "usedFor": {
-            "$index": {
-              ".validate": "newData.isString()"
-            }
-          }
-        }
-      }
-    },
-
-    "truck_payments": {
-      ".read": "auth != null",
-      ".write": "auth != null",
-      ".indexOn": ["timestamp", "truckId"],
-      "$truck_id": {
-        ".read": "auth != null",
-        ".write": "auth != null",
-        "$payment_id": {
-          ".validate": "newData.hasChildren(['amount', 'timestamp', 'status']) && (newData.child('status').val() === 'COMPLETED' || newData.child('status').val() === 'PENDING')"
-        }
+      ".indexOn": ["phoneNumber"],
+      "$driver_id": {
+        ".validate": "newData.hasChildren(['phoneNumber', 'name', 'trucks', 'lastUpdated'])"
       }
     }
   }

@@ -5,9 +5,9 @@ import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { useEffect, useState } from "react"
 import { database } from "@/lib/firebase"
-import { ref, onValue, update, get, push, set } from "firebase/database"
+import { ref, onValue, update, get, push, set, query, orderByChild, equalTo } from "firebase/database"
 import { formatNumber, toFixed2, cn } from "@/lib/utils" // Add cn to imports
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -34,6 +34,8 @@ import {
   ChevronDown,
   Scale,
   Trash2, // Add Trash2 icon
+  Check as CheckIcon,
+  Pencil as PencilIcon,
 } from "lucide-react" // Add X and FileSpreadsheet icon to imports
 import { ThemeToggle } from "@/components/ui/molecules/theme-toggle" // Add ThemeToggle import
 import { Skeleton } from "@/components/ui/skeleton"
@@ -179,6 +181,17 @@ export default function OwnerDetailsPage() {
   const [ownerNameClickCount, setOwnerNameClickCount] = useState(0)
   const [isBalanceEditMode, setIsBalanceEditMode] = useState(false)
   const [manualBalance, setManualBalance] = useState<string>("")
+  
+  // Add new state for AT20 and price editing
+  const [editingAt20, setEditingAt20] = useState<string | null>(null)
+  const [newAt20Value, setNewAt20Value] = useState<string>("")
+  const [editingPrice, setEditingPrice] = useState<string | null>(null)
+  const [newPriceValue, setNewPriceValue] = useState<string>("")
+  const [isWorkIdDialogOpen, setIsWorkIdDialogOpen] = useState(false)
+  const [workIdInput, setWorkIdInput] = useState<string>("")
+  const [isVerifyingWorkId, setIsVerifyingWorkId] = useState(false)
+  const [pendingAt20Update, setPendingAt20Update] = useState<{truckId: string, newValue: string} | null>(null)
+  const [pendingPriceUpdate, setPendingPriceUpdate] = useState<{truckId: string, newValue: string} | null>(null)
 
   // Add new state variables after the existing state declarations
   const [showPendingOrders, setShowPendingOrders] = useState(false)
@@ -1511,7 +1524,187 @@ export default function OwnerDetailsPage() {
     .filter(rec => rec.status === 'accepted')
     .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
 
-  // Helper for month names
+  // Add function to verify work ID
+  const verifyWorkId = async () => {
+    if (!workIdInput.trim()) {
+      toast({
+        title: "Work ID Required",
+        description: "Please enter a valid Work ID",
+        variant: "destructive",
+      })
+      return
+    }
+    
+    setIsVerifyingWorkId(true)
+    
+    try {
+      // Verify the work ID against the database using query
+      const db = database
+      const usersRef = ref(db, 'users')
+      const workIdQuery = query(usersRef, orderByChild("workId"), equalTo(workIdInput.trim()))
+      const snapshot = await get(workIdQuery)
+      
+      if (snapshot.exists()) {
+        // Work ID exists, proceed with the update
+        if (pendingAt20Update) {
+          await updateAt20Value()
+        } else if (pendingPriceUpdate) {
+          await updatePriceValue()
+        }
+        setIsWorkIdDialogOpen(false)
+      } else {
+        toast({
+          title: "Invalid Work ID",
+          description: "The Work ID you entered is not valid",
+          variant: "destructive",
+        })
+      }
+    } catch (error) {
+      console.error("Error verifying work ID:", error)
+      toast({
+        title: "Verification Error",
+        description: "Failed to verify Work ID. Please try again.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsVerifyingWorkId(false)
+    }
+  }
+  
+  // Add function to update AT20 value
+  const updateAt20Value = async () => {
+    if (!pendingAt20Update) return
+    
+    try {
+      const { truckId, newValue } = pendingAt20Update
+      const db = database
+      const truckRef = ref(db, `work_details/${truckId}`)
+      
+      // Update the AT20 value
+      await update(truckRef, {
+        at20: parseFloat(newValue),
+        lastUpdated: new Date().toISOString(),
+        updatedBy: session?.user?.email || "unknown",
+      })
+      
+      // Update local state
+      setWorkDetails(prevDetails => 
+        prevDetails.map(truck => 
+          truck.id === truckId 
+            ? { ...truck, at20: newValue } 
+            : truck
+        )
+      )
+      
+      setEditingAt20(null)
+      setPendingAt20Update(null)
+      
+      toast({
+        title: "AT20 Updated",
+        description: "The AT20 value has been updated successfully",
+      })
+    } catch (error) {
+      console.error("Error updating AT20:", error)
+      toast({
+        title: "Update Error",
+        description: "Failed to update AT20 value. Please try again.",
+        variant: "destructive",
+      })
+    }
+  }
+  
+  // Add function to update Price value
+  const updatePriceValue = async () => {
+    if (!pendingPriceUpdate) return
+    
+    try {
+      const { truckId, newValue } = pendingPriceUpdate
+      const db = database
+      const truckRef = ref(db, `work_details/${truckId}`)
+      
+      // Update the price value
+      await update(truckRef, {
+        price: parseFloat(newValue),
+        lastUpdated: new Date().toISOString(),
+        updatedBy: session?.user?.email || "unknown",
+      })
+      
+      // Update local state
+      setWorkDetails(prevDetails => 
+        prevDetails.map(truck => 
+          truck.id === truckId 
+            ? { ...truck, price: newValue } 
+            : truck
+        )
+      )
+      
+      setEditingPrice(null)
+      setPendingPriceUpdate(null)
+      
+      toast({
+        title: "Price Updated",
+        description: "The price value has been updated successfully",
+      })
+    } catch (error) {
+      console.error("Error updating price:", error)
+      toast({
+        title: "Update Error",
+        description: "Failed to update price value. Please try again.",
+        variant: "destructive",
+      })
+    }
+  }
+  
+  // Add function to handle AT20 edit click
+  const handleAt20EditClick = (truckId: string, currentValue: string | number) => {
+    setEditingAt20(truckId)
+    setNewAt20Value(currentValue?.toString() || "")
+  }
+  
+  // Add function to handle Price edit click
+  const handlePriceEditClick = (truckId: string, currentValue: string | number) => {
+    setEditingPrice(truckId)
+    setNewPriceValue(currentValue?.toString() || "")
+  }
+  
+  // Add function to handle AT20 edit save
+  const handleAt20EditSave = (truckId: string) => {
+    if (!newAt20Value || isNaN(parseFloat(newAt20Value))) {
+      toast({
+        title: "Invalid Value",
+        description: "Please enter a valid number for AT20",
+        variant: "destructive",
+      })
+      return
+    }
+    
+    // Store the pending update and prompt for work ID
+    setPendingAt20Update({ truckId, newValue: newAt20Value })
+    setPendingPriceUpdate(null)
+    setWorkIdInput("")
+    setIsWorkIdDialogOpen(true)
+    setIsVerifyingWorkId(false)
+  }
+  
+  // Add function to handle Price edit save
+  const handlePriceEditSave = (truckId: string) => {
+    if (!newPriceValue || isNaN(parseFloat(newPriceValue))) {
+      toast({
+        title: "Invalid Value",
+        description: "Please enter a valid number for Price",
+        variant: "destructive",
+      })
+      return
+    }
+    
+    // Store the pending update and prompt for work ID
+    setPendingPriceUpdate({ truckId, newValue: newPriceValue })
+    setPendingAt20Update(null)
+    setWorkIdInput("")
+    setIsWorkIdDialogOpen(true)
+    setIsVerifyingWorkId(false)
+  }
+
   const monthNames = Array.from({ length: 12 }, (_, i) => 
     new Date(2000, i, 1).toLocaleString('default', { month: 'long' })
   );
@@ -2027,8 +2220,86 @@ export default function OwnerDetailsPage() {
                                 </td>
                                 <td className="p-2">{truck.truck_number}</td>
                                 <td className="p-2">{truck.product}</td>
-                                <td className="p-2">{truck.at20 || '-'}</td>
-                                <td className="p-2">${formatNumber(Number.parseFloat(truck.price))}</td>
+                                <td className="p-2">
+                                  {editingAt20 === truck.id ? (
+                                    <div className="flex items-center gap-1">
+                                      <Input
+                                        type="number"
+                                        value={newAt20Value}
+                                        onChange={(e) => setNewAt20Value(e.target.value)}
+                                        className="h-8 w-20"
+                                      />
+                                      <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        className="h-8 w-8 p-0"
+                                        onClick={() => handleAt20EditSave(truck.id)}
+                                      >
+                                        <CheckIcon className="h-4 w-4" />
+                                      </Button>
+                                      <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        className="h-8 w-8 p-0"
+                                        onClick={() => setEditingAt20(null)}
+                                      >
+                                        <X className="h-4 w-4" />
+                                      </Button>
+                                    </div>
+                                  ) : (
+                                    <div className="flex items-center gap-1">
+                                      <span>{truck.at20 || '-'}</span>
+                                      <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        className="h-6 w-6 p-0 opacity-50 hover:opacity-100"
+                                        onClick={() => handleAt20EditClick(truck.id, truck.at20 || '')}
+                                      >
+                                        <PencilIcon className="h-3 w-3" />
+                                      </Button>
+                                    </div>
+                                  )}
+                                </td>
+                                <td className="p-2">
+                                  {editingPrice === truck.id ? (
+                                    <div className="flex items-center gap-1">
+                                      <Input
+                                        type="number"
+                                        value={newPriceValue}
+                                        onChange={(e) => setNewPriceValue(e.target.value)}
+                                        className="h-8 w-20"
+                                      />
+                                      <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        className="h-8 w-8 p-0"
+                                        onClick={() => handlePriceEditSave(truck.id)}
+                                      >
+                                        <CheckIcon className="h-4 w-4" />
+                                      </Button>
+                                      <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        className="h-8 w-8 p-0"
+                                        onClick={() => setEditingPrice(null)}
+                                      >
+                                        <X className="h-4 w-4" />
+                                      </Button>
+                                    </div>
+                                  ) : (
+                                    <div className="flex items-center gap-1">
+                                      <span>${formatNumber(Number.parseFloat(truck.price))}</span>
+                                      <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        className="h-6 w-6 p-0 opacity-50 hover:opacity-100"
+                                        onClick={() => handlePriceEditClick(truck.id, truck.price || '')}
+                                      >
+                                        <PencilIcon className="h-3 w-3" />
+                                      </Button>
+                                    </div>
+                                  )}
+                                </td>
                                 <td className="p-2">${formatNumber(totalDue)}</td>
                                 <td className="p-2">${formatNumber(totalAllocated)}</td>
                                 <td className="p-2">${formatNumber(Math.abs(balance))}</td>
@@ -3008,6 +3279,69 @@ export default function OwnerDetailsPage() {
                 </div>
               )}
             </div>
+          </DialogContent>
+        </Dialog>
+        
+        {/* Add Work ID verification dialog */}
+        <Dialog open={isWorkIdDialogOpen} onOpenChange={(open) => {
+          setIsWorkIdDialogOpen(open);
+          if (!open) {
+            setEditingAt20(null);
+            setEditingPrice(null);
+            setPendingAt20Update(null);
+            setPendingPriceUpdate(null);
+          }
+        }}>
+          <DialogContent className="sm:max-w-[400px]">
+            <DialogHeader>
+              <DialogTitle>Verify Work ID</DialogTitle>
+              <DialogDescription>
+                Please enter a valid Work ID to update the {pendingAt20Update ? "AT20" : "price"} value.
+              </DialogDescription>
+            </DialogHeader>
+            <form onSubmit={(e) => {
+              e.preventDefault();
+              verifyWorkId();
+            }}>
+              <div className="space-y-4 py-4">
+                <div className="space-y-2">
+                  <Label htmlFor="workId">Work ID</Label>
+                  <Input
+                    id="workId"
+                    placeholder="Enter Work ID"
+                    value={workIdInput}
+                    onChange={(e) => setWorkIdInput(e.target.value)}
+                    disabled={isVerifyingWorkId}
+                  />
+                </div>
+              </div>
+              <DialogFooter>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setIsWorkIdDialogOpen(false);
+                    setEditingAt20(null);
+                    setEditingPrice(null);
+                    setPendingAt20Update(null);
+                    setPendingPriceUpdate(null);
+                  }}
+                  disabled={isVerifyingWorkId}
+                >
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={isVerifyingWorkId}>
+                  {isVerifyingWorkId ? (
+                    <>
+                      <span className="mr-2">Verifying</span>
+                      <RefreshCw className="h-4 w-4 animate-spin" />
+                    </>
+                  ) : (
+                    "Verify & Update"
+                  )}
+                </Button>
+              </DialogFooter>
+            </form>
           </DialogContent>
         </Dialog>
       </main>
