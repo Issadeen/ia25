@@ -71,9 +71,9 @@ export default function WorkPage() {
       description: "Manage invoices and track expenses",
       icon: Receipt,
       actions: [
-        { label: "Add Invoices", href: "/dashboard/work/invoices/new", icon: Plus },
-        { label: "View Invoices", href: "/dashboard/work/invoices", icon: Receipt },
-        { label: "Expense Tracker", href: "/dashboard/work/expenses/tracker", icon: BarChart3 }
+        { label: "Add Invoices", href: "/dashboard/work/invoices/new", icon: Plus, badge: "Coming Soon" },
+        { label: "View Invoices", href: "/dashboard/work/invoices", icon: Receipt, badge: "Coming Soon" },
+        { label: "Expense Tracker", href: "/dashboard/work/expenses/tracker", icon: BarChart3, badge: "Coming Soon" }
       ]
     }
   ];

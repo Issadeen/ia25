@@ -120,6 +120,18 @@
       "$driver_id": {
         ".validate": "newData.hasChildren(['phoneNumber', 'name', 'trucks', 'lastUpdated'])"
       }
+    },
+    
+    "gatepass_approvals": {
+      ".read": "auth != null",
+      ".write": "auth != null",
+      ".indexOn": ["status", "requestedAt", "expiryTime"],
+      "$approval_id": {
+        ".validate": "newData.hasChildren(['truckId', 'requestedAt', 'requestedBy', 'status', 'orderNo', 'truckNumber'])",
+        "expiryTime": {
+          ".validate": "newData.isNumber() || newData.val() == null"
+        }
+      }
     }
   }
 }

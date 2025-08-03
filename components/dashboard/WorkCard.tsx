@@ -2,11 +2,13 @@ import { LucideIcon } from "lucide-react";
 import Link from "next/link";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 
 interface WorkAction {
   label: string;
   href: string;
   icon: LucideIcon;
+  badge?: string;
 }
 
 interface WorkCardProps {
@@ -39,10 +41,18 @@ export function WorkCard({ title, description, icon: Icon, actions }: WorkCardPr
                   <Button
                     variant="outline"
                     size="sm"
-                    className="group/button hover:border-emerald-500/50"
+                    className="group/button hover:border-emerald-500/50 relative"
                   >
                     <action.icon className="h-4 w-4 mr-2 text-emerald-600 dark:text-emerald-400 group-hover/button:text-emerald-500" />
                     {action.label}
+                    {action.badge && (
+                      <Badge 
+                        variant="secondary" 
+                        className="absolute -top-2 -right-2 px-1 py-0 text-[0.6rem] bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-300"
+                      >
+                        {action.badge}
+                      </Badge>
+                    )}
                   </Button>
                 </Link>
               ))}
