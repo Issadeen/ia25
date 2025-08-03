@@ -397,24 +397,7 @@ const AddEntriesPage: React.FC = () => {
                       className="bg-white/50 dark:bg-gray-800/50 border-gray-200/50 dark:border-gray-700/50"
                     />
                   </div>
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">Truck</label>
-                    <Input
-                      value={truck}
-                      onChange={(e) => setTruck(e.target.value)}
-                      placeholder="Enter truck number"
-                      className="bg-white/50 dark:bg-gray-800/50 border-gray-200/50 dark:border-gray-700/50"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">Depot</label>
-                    <Input
-                      value={depot}
-                      onChange={(e) => setDepot(e.target.value)}
-                      placeholder="Enter depot name"
-                      className="bg-white/50 dark:bg-gray-800/50 border-gray-200/50 dark:border-gray-700/50"
-                    />
-                  </div>
+
                 </div>
 
                 <Button 
