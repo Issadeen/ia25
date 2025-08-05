@@ -28,6 +28,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { getDatabase, ref as dbRef, get, query, orderByChild, equalTo, update, push, remove } from 'firebase/database'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useToast } from "@/components/ui/use-toast"
+import { Notifications } from "@/components/Notifications"
 import {
   Table,
   TableBody,
@@ -506,6 +507,7 @@ export default function EntriesPage() {
     message: string,
     type: 'success' | 'error' | 'warning' | 'info' = 'info'
   ) => {
+    // Create notification for the bell icon
     const newNotification: Notification = {
       id: Date.now().toString(),
       title,
@@ -515,18 +517,35 @@ export default function EntriesPage() {
       read: false
     };
     
+    // Add to bell notifications
     setNotifications(prev => [newNotification, ...prev].slice(0, 50));
     setUnreadCount(prev => prev + 1);
     
+    // Animate bell
     setAnimateBell(true)
     setTimeout(() => setAnimateBell(false), 1000)
 
-    if (type === 'error') {
-      toast({
-        title,
-        description: message,
-        variant: "destructive"
-      });
+    // Show toast notification for all notification types
+    switch (type) {
+      case 'success':
+        Notifications.success(title, message);
+        break;
+      case 'error':
+        Notifications.error(title, message);
+        // Also show in UI toast for error type (keeping existing behavior)
+        toast({
+          title,
+          description: message,
+          variant: "destructive"
+        });
+        break;
+      case 'warning':
+        Notifications.warning(title, message);
+        break;
+      case 'info':
+      default:
+        Notifications.info(title, message);
+        break;
     }
   };
 

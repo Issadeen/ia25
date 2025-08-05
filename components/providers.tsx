@@ -3,6 +3,8 @@
 import { ThemeProvider } from "@/components/theme-provider"
 import { SessionProvider } from "next-auth/react"
 import { Toaster } from "@/components/ui/toaster"
+import { ToastProvider } from "@/components/ui/toast-notification"
+import { ToastNotificationInitializer } from "@/components/ToastNotificationInitializer"
 
 export default function Providers({ children }: { children: React.ReactNode }) {
   return (
@@ -13,8 +15,11 @@ export default function Providers({ children }: { children: React.ReactNode }) {
         enableSystem
         disableTransitionOnChange
       >
-        {children}
-        <Toaster />
+        <ToastProvider>
+          <ToastNotificationInitializer />
+          {children}
+          <Toaster />
+        </ToastProvider>
       </ThemeProvider>
     </SessionProvider>
   )

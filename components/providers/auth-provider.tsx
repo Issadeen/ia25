@@ -15,6 +15,8 @@ import { getFirebaseAuth } from '@/lib/firebase' // Adjust the import path as ne
 import { signInWithCustomToken } from 'firebase/auth'
 import { ThemeProvider } from "next-themes"
 import { Toaster } from "@/components/ui/toaster"
+import { ToastProvider } from "@/components/ui/toast-notification"
+import { ToastNotificationInitializer } from "@/components/ToastNotificationInitializer"
 
 interface AuthContextType {
   isAuthenticated: boolean
@@ -109,8 +111,11 @@ const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   return (
     <SessionProvider refetchInterval={0}>
       <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
-        {children}
-        <Toaster />
+        <ToastProvider>
+          <ToastNotificationInitializer />
+          {children}
+          <Toaster />
+        </ToastProvider>
       </ThemeProvider>
     </SessionProvider>
   )
