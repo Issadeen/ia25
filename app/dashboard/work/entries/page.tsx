@@ -612,48 +612,86 @@ export default function EntriesPage() {
 
   const fetchEntriesUsedInPermits = async (product: string, destination: string = 'ssd') => {
     const db = getDatabase()
+    console.log(`Fetching permit entries for ${product} to ${destination}`)
+    
     try {
       const snapshot = await get(dbRef(db, 'tr800'))
       if (snapshot.exists()) {
-        const entries = Object.entries(snapshot.val())
-          .map(([key, value]: [string, any]) => ({
-            key,
-            ...value
-          }))
-          .filter(entry => 
+        console.log(`Found tr800 entries, filtering for ${product}/${destination}`)
+        
+        // Get all entries first to see what's available
+        const allEntries = Object.entries(snapshot.val()).map(([key, value]: [string, any]) => ({
+          key,
+          ...value
+        }))
+        
+        console.log(`Total entries: ${allEntries.length}`)
+        
+        // Debug what's available for product
+        const productEntries = allEntries.filter(entry => 
+          entry.product && entry.product.toLowerCase() === product.toLowerCase()
+        )
+        console.log(`Entries matching product ${product}: ${productEntries.length}`)
+        
+        // Debug what's available for destination
+        const destinationEntries = allEntries.filter(entry => 
+          entry.destination && entry.destination.toLowerCase() === destination.toLowerCase()
+        )
+        console.log(`Entries matching destination ${destination}: ${destinationEntries.length}`)
+
+        // First try to find entries that match the exact product and destination
+        let entries = allEntries.filter(entry => 
+          entry.product && 
+          entry.destination && 
+          entry.product.toLowerCase() === product.toLowerCase() &&
+          entry.destination.toLowerCase() === destination.toLowerCase() &&
+          entry.remainingQuantity > 0
+        )
+        .sort((a, b) => b.timestamp - a.timestamp)
+        
+        console.log(`Filtered entries with remaining quantity: ${entries.length}`)
+        
+        // If no entries found with exact match, try to find permit entries with any destination
+        if (entries.length === 0) {
+          entries = allEntries.filter(entry => 
+            entry.product && 
             entry.product.toLowerCase() === product.toLowerCase() &&
-            entry.destination.toLowerCase() === destination.toLowerCase() &&
+            entry.permitNumber && // Make sure it's a permit entry
             entry.remainingQuantity > 0
           )
           .sort((a, b) => b.timestamp - a.timestamp)
-
+          
+          console.log(`Fallback: found ${entries.length} permit entries for ${product} with any destination`)
+        }
+        
         setAvailablePermitEntries(entries)
         
         if (entries.length > 0) {
           addNotification(
             "Available Permit Entries",
-            `Found ${entries.length} entries for ${product.toUpperCase()} to ${destination.toUpperCase()}`,
+            `Found ${entries.length} entries for ${product.toUpperCase()}${entries[0].destination ? ' to ' + entries[0].destination.toUpperCase() : ''}`,
             "info"
           )
         } else {
           addNotification(
             "No Entries Available",
-            `No entries found for ${product.toUpperCase()} to ${destination.toUpperCase()}`,
-            "error"
+            `No permit entries found for ${product.toUpperCase()}. Please contact an administrator to add permit entries.`,
+            "warning"
           )
         }
       } else {
         setAvailablePermitEntries([])
         addNotification(
           "No Entries Found",
-          `No entries found for product ${product.toUpperCase()}`,
+          `No entries found for product ${product.toUpperCase()}. Please contact an administrator.`,
           "error"
         )
       }
     } catch (error) {
+      console.error("Error fetching permit entries:", error);
       addNotification(
         "Error",
-        "Failed to fetch entries for permits",
+        "Failed to fetch entries for permits. Please try again.",
         "error"
       )
     }
@@ -972,6 +1010,13 @@ export default function EntriesPage() {
   }, [truckNumber, destination, product, checkPermitAllocation]);
 
   useEffect(() => {
+    if ((destination.toLowerCase() === 'ssd' || destination.toLowerCase() === 'drc') && product) {
+      // Fetch permit entries for SSD/DRC destinations when product changes
+      fetchEntriesUsedInPermits(product, destination.toLowerCase());
+    }
+  }, [destination, product]);
+
+  useEffect(() => {
     const checkReminders = async () => {
       // Access email safely using type assertion
       const user = session?.user;
@@ -1161,12 +1206,24 @@ export default function EntriesPage() {
                              destination.toLowerCase() === 'drc';
     
     if (needsPermitEntry && !entryUsedInPermit) {
-      addNotification(
-        "Permit Entry Required",
-        `Please select a permit entry for ${destination.toUpperCase()} allocation`,
-        "error"
-      );
-      return;
+      const useManualInstead = await confirmDialog({
+        title: "Permit Entry Required",
+        description: `No permit entry selected for ${destination.toUpperCase()} allocation. Would you like to switch to manual allocation instead?`,
+        confirmText: "Use Manual Allocation",
+        cancelText: "Cancel"
+      });
+      
+      if (useManualInstead) {
+        setShowManualAllocation(true);
+        return;
+      } else {
+        addNotification(
+          "Permit Entry Required",
+          `Please select a permit entry for ${destination.toUpperCase()} allocation`,
+          "error"
+        );
+        return;
+      }
     }
   
     setIsLoading(true);
@@ -2464,13 +2521,35 @@ export default function EntriesPage() {
                     <SelectValue placeholder={`Select ${destination.toUpperCase()} permit entry...`} />
                   </SelectTrigger>
                   <SelectContent>
-                    {availablePermitEntries.map((entry) => (
-                      <SelectItem key={entry.key} value={entry.key}>
-                        {entry.number} - Remaining: {entry.remainingQuantity.toLocaleString()}
+                    {availablePermitEntries.length > 0 ? (
+                      availablePermitEntries.map((entry) => (
+                        <SelectItem key={entry.key} value={entry.key}>
+                          {entry.number} - Remaining: {entry.remainingQuantity.toLocaleString()}
+                        </SelectItem>
+                      ))
+                    ) : (
+                      <SelectItem value="no-entries" disabled>
+                        No permit entries available. Contact administrator.
                       </SelectItem>
-                    ))}
+                    )}
                   </SelectContent>
                 </Select>
+                
+                {availablePermitEntries.length === 0 && (
+                  <div className="mt-2 flex items-center justify-between">
+                    <span className="text-sm text-amber-600 dark:text-amber-400">
+                      No permit entries available for {destination.toUpperCase()}
+                    </span>
+                    <Button 
+                      variant="outline" 
+                      size="sm"
+                      onClick={() => setShowManualAllocation(true)}
+                      className="text-xs"
+                    >
+                      Switch to Manual Allocation
+                    </Button>
+                  </div>
+                )}
               </div>
             )}
 
