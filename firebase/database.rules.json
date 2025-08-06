@@ -1,0 +1,144 @@
+{
+  "rules": {
+    ".read": "auth != null",
+    ".write": "auth != null",
+
+    "trucks": {
+      ".read": "auth != null",
+      ".write": "auth != null",
+      ".indexOn": ["truck_no"],
+      "$truck_id": {
+        ".validate": "newData.hasChildren(['truck_no', 'driver', 'transporter'])"
+      }
+    },
+
+    "users": {
+      ".read": "auth != null",
+      ".write": "auth != null || !data.exists()",
+      ".indexOn": ["email", "workId"],
+      "$user_id": {
+        ".read": "auth != null",
+        ".write": "auth != null && (!data.exists() || data.child('email').val() === auth.token.email)",
+        ".validate": "newData.hasChildren(['email', 'workId'])",
+        "password": {
+          ".read": "auth != null && data.parent().child('email').val() === auth.token.email"
+        }
+      }
+    },
+
+    "tr800": {
+      ".read": "auth != null",
+      ".write": "auth != null",
+      ".indexOn": ["number", "product", "destination", "timestamp"],
+      "$tr800_id": {
+        ".validate": "newData.hasChildren(['number', 'initialQuantity', 'remainingQuantity', 'product', 'destination', 'timestamp'])"
+      }
+    },
+
+    "truckEntries": {
+      ".read": "auth != null",
+      ".write": "auth != null",
+      ".indexOn": ["entryNumber", "timestamp"],
+      "$truck_id": {
+        ".validate": "newData.exists()"
+      }
+    },
+
+    "work_details": {
+      ".read": "auth != null",
+      ".write": "auth != null",
+      ".indexOn": ["truck_number", "owner", "orderno", "loaded", "timestamp", "permitAllocated", "at20", "price"], 
+      "$work_id": {
+        ".validate": "newData.exists()",
+        "at20": {
+          ".validate": "newData.isNumber() || (newData.isString() && newData.val().matches(/^[0-9]+(\\.[0-9]+)?$/)) || newData.val() == null"
+        },
+        "price": {
+          ".validate": "newData.isNumber() || newData.val() == null"
+        },
+        "lastUpdated": {
+          ".validate": "newData.isString() || newData.val() == null"
+        },
+        "updatedBy": {
+          ".validate": "newData.isString() || newData.val() == null"
+        }
+        ,
+        "loaded": {
+          ".validate": "newData.isBoolean() || newData.val() == null"
+        }
+      }
+    },
+
+    "allocations": {
+      ".read": "auth != null",
+      ".write": "auth != null",
+      ".indexOn": ["number", "timestamp"],
+      "$allocation_id": {
+        ".validate": "newData.hasChildren(['number', 'initialQuantity', 'remainingQuantity', 'product', 'destination', 'timestamp'])",
+        "remainingQuantity": {
+          ".validate": "newData.isNumber() && newData.val() >= 0"
+        },
+        "lastUpdated": {
+          ".validate": "newData.isString()"
+        }
+      }
+    },
+      
+      
+    "payment_reconciliations": {
+      ".read": "auth != null",
+      ".write": "auth != null",
+      ".indexOn": ["timestamp", "ownerId", "status", "month"],
+      "$owner_id": {
+        ".read": "auth != null", 
+        ".write": "auth != null"
+      }
+    },
+
+    "reminders": {
+      "$userId": {
+        ".read": "auth != null && $userId == auth.token.email.replace('.', '').replace('@', '')",
+        ".write": "auth != null && $userId == auth.token.email.replace('.', '').replace('@', '')"
+      }
+    },
+
+    "permitPreAllocations": {
+      ".read": "auth != null",
+      ".write": "auth != null",
+      ".indexOn": ["truckNumber", "permitNumber", "used"], 
+      "$alloc_id": {
+        ".validate": "newData.hasChildren(['truckNumber', 'permitNumber', 'quantity'])"
+      }
+    },
+
+    "owner_balances": {
+      ".read": "auth != null",
+      ".write": "auth != null",
+      ".indexOn": ["lastUpdated"],
+      "$owner_id": {
+        ".validate": "newData.hasChildren(['amount', 'lastUpdated']) && newData.child('amount').isNumber() && newData.child('lastUpdated').isString()"
+      }
+    },
+
+    "drivers": {
+      ".read": "auth != null",
+      ".write": "auth != null",
+      ".indexOn": ["phoneNumber"],
+      "$driver_id": {
+        ".validate": "newData.hasChildren(['phoneNumber', 'name', 'trucks', 'lastUpdated'])"
+      }
+    },
+    
+    "gatepass_approvals": {
+      ".read": "auth != null",
+      ".write": "auth != null",
+      ".indexOn": ["status", "requestedAt", "expiryTime"],
+      "$approval_id": {
+        ".validate": "newData.hasChildren(['truckId', 'requestedAt', 'requestedBy', 'status', 'orderNo', 'truckNumber'])",
+        "expiryTime": {
+          ".validate": "newData.isNumber() || newData.val() == null"
+        }
+      }
+    }
+  }
+}

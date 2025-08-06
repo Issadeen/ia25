@@ -6,7 +6,9 @@
     "dev": "next dev --turbopack",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "deploy:rules": "node scripts/deploy-rules.js",
+    "test:rules": "node scripts/test-security-rules.js"
   },
   "dependencies": {
     "@hello-pangea/dnd": "^16.6.0",

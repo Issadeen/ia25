@@ -13,13 +13,16 @@
     },
 
     "users": {
-      ".read": true,
+      ".read": "auth != null",
       ".write": "auth != null || !data.exists()",
       ".indexOn": ["email", "workId"],
       "$user_id": {
-        ".read": true,
+        ".read": "auth != null",
         ".write": "auth != null && (!data.exists() || data.child('email').val() === auth.token.email)",
-        ".validate": "newData.hasChildren(['email', 'workId'])"
+        ".validate": "newData.hasChildren(['email', 'workId'])",
+        "password": {
+          ".read": "auth != null && data.parent().child('email').val() === auth.token.email"
+        }
       }
     },
 
@@ -48,7 +51,7 @@
       "$work_id": {
         ".validate": "newData.exists()",
         "at20": {
-          ".validate": "newData.isNumber() || newData.val() == null"
+          ".validate": "newData.isNumber() || (newData.isString() && newData.val().matches(/^[0-9]+(\\.[0-9]+)?$/)) || newData.val() == null"
         },
         "price": {
           ".validate": "newData.isNumber() || newData.val() == null"
@@ -58,6 +61,10 @@
         },
         "updatedBy": {
           ".validate": "newData.isString() || newData.val() == null"
+        }
+        ,
+        "loaded": {
+          ".validate": "newData.isBoolean() || newData.val() == null"
         }
       }
     },

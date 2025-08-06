@@ -28,12 +28,12 @@ declare module "next-auth" {
 }
 
 import CredentialsProvider from "next-auth/providers/credentials"
-// Client SDK imports
+// Client SDK imports - kept for reference but replaced with Admin SDK in authorize
 import { getDatabase as getClientDatabase, ref as clientRef, get } from "firebase/database"
 import { app } from "./firebase"
 // Admin SDK imports
 import { getFirebaseAdminDb } from './firebase-admin';
-// No direct imports needed from 'firebase-admin/database' for ref/update
+import admin from 'firebase-admin';
 
 import GoogleProvider from 'next-auth/providers/google';
 import bcrypt from 'bcrypt';
@@ -71,30 +71,47 @@ export const authOptions: NextAuthOptions = {
         }
 
         try {
-          // Use Client SDK for initial read (assuming read rules allow it)
-          const clientDatabase = getClientDatabase(app);
-          const usersRef = clientRef(clientDatabase, 'users');
+          // Use Admin SDK instead of client SDK to bypass Firebase rules
+          const adminDatabase = getFirebaseAdminDb();
+          const usersRef = adminDatabase.ref('users');
 
           console.log("[Auth] Attempting to authenticate:", credentials.email);
 
-          const snapshot = await get(usersRef);
+          // Query specifically for the user with this email using Admin SDK
+          const snapshot = await usersRef
+            .orderByChild('email')
+            .equalTo(credentials.email.toLowerCase())
+            .once('value');
 
           if (!snapshot.exists()) {
-            console.log("[Auth] No users found in database");
+            console.log("[Auth] No user found with email:", credentials.email);
             throw new Error("No user found with this email.");
           }
 
-          const users = snapshot.val() as Record<string, FirebaseUser>;
-          const userEntry = Object.entries(users).find(
-            ([, u]) => u.email.toLowerCase() === credentials.email.toLowerCase()
-          );
+          // Process the user data from the snapshot
+          let userId: string | null = null;
+          let userData: any = null;
 
-          if (!userEntry) {
-            console.log("[Auth] User not found:", credentials.email);
-            throw new Error("No user found with this email.");
+          snapshot.forEach((childSnapshot) => {
+            userId = childSnapshot.key;
+            userData = childSnapshot.val();
+            return true; // Break the forEach loop
+          });
+
+          if (!userData || !userId) {
+            console.log("[Auth] User data could not be processed");
+            throw new Error("Authentication failed");
           }
 
-          const [userId, user] = userEntry; // Get the user ID (workId) and user data
+          // Create a properly typed user object
+          const user: FirebaseUser = {
+            email: userData.email,
+            password: userData.password,
+            workId: userData.workId,
+            name: userData.name,
+            image: userData.image
+          };
+
           const storedPassword = user.password;
           const providedPassword = credentials.password;
 
@@ -129,9 +146,7 @@ export const authOptions: NextAuthOptions = {
             console.log(`[Auth] User ${user.email} logged in with plain text password. Updating to hash using Admin SDK.`);
             try {
               const hashedPassword = await bcrypt.hash(providedPassword, saltRounds);
-              const adminDatabase = getFirebaseAdminDb();
-              const userRefToUpdate = adminDatabase.ref(`users/${userId}`);
-              await userRefToUpdate.update({ password: hashedPassword });
+              await usersRef.child(userId).update({ password: hashedPassword });
               console.log(`[Auth] Password for user ${user.email} successfully updated to hash.`);
             } catch (updateError) {
               console.error(`[Auth] Failed to update password hash for user ${user.email} using Admin SDK:`, updateError);
@@ -140,13 +155,18 @@ export const authOptions: NextAuthOptions = {
           }
 
           console.log("[Auth] Authentication successful for:", user.email);
+          console.log("[Auth] User workId:", user.workId);
+          
           // Password is correct
-          return {
+          const authUser = {
             id: user.workId, // Map workId to id for next-auth User object
             email: user.email,
             name: user.name || user.email, // Provide a fallback name
             image: user.image || null
           };
+          
+          console.log("[Auth] Returning auth user with id:", authUser.id);
+          return authUser;
         } catch (error) {
           console.error('[Auth] Error in authorize function:', error); // Log specific error
           if (error instanceof Error) {
@@ -174,33 +194,41 @@ export const authOptions: NextAuthOptions = {
       // This runs *before* the session callback
       // Persist the necessary user info to the token right after sign-in
       if (user) {
+        // Make sure to include the workId as token.id
         token.id = user.id; // user.id comes from authorize return (mapped from workId)
         token.email = user.email; // Ensure email is in the token
         token.name = user.name;
         token.picture = user.image;
+        
+        // Log token creation to verify workId is set
+        console.log("[Auth JWT] Created token with ID:", token.id);
       }
       return token; // The token is encrypted and stored in the session cookie
     },
     async session({ session, token }: { session: Session; token: JWT }): Promise<Session> {
       // This runs *after* the jwt callback, using the token data
-      // Only expose *non-sensitive* data to the client-side session object
       try {
         if (token && session.user) {
-          // Assign only the properties defined in the augmented Session['user'] type for the client
+          // Assign properties defined in the Session['user'] type for the client
           session.user.name = token.name;
           session.user.image = token.picture;
-          // session.user.id = token.id; // Add this ONLY if client-side ID is absolutely necessary
-
-          // DO NOT add email here: session.user.email = token.email;
-          // This keeps the email out of the client-side session object
+          
+          // Important: If there's an issue with workId, enable this:
+          // This makes the ID available client-side but increases attack surface
+          // session.user.id = token.id; 
+          
+          // For API routes, we'll use getToken() to access the ID server-side
+          
+          // DO NOT add email here - keep it out of the client-side session
+          // session.user.email = token.email;
 
           if (token.error) {
             session.error = token.error as string;
           }
+          
+          console.log("[Auth Session] Session created with token ID:", token.id);
         }
-        // Note: Server-side calls to getServerSession will also receive this pruned session object.
-        // Accessing the token directly (like in the api/user-info route) is needed for sensitive data server-side.
-        return session; // Return the modified session object intended for the client
+        return session;
       } catch (error) {
         console.error("[Auth Callback] Error in Session callback:", error);
         return { ...session, error: "SessionCallbackError", user: {
