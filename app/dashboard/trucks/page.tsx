@@ -18,6 +18,7 @@ import { getFirebaseAuth } from "@/lib/firebase";
 import { useRouter } from 'next/navigation';
 import { WorkIdDialog } from '@/components/dashboard/WorkIdDialog';
 import { useProfileImage } from '@/hooks/useProfileImage';
+import { useWorkIdVerification } from '@/hooks/useWorkIdVerification';
 
 interface TruckData {
   id: string;
@@ -203,35 +204,19 @@ PMS: ${formatCompartments(truck.pms_comps)} (Total: ${formatNumber(pmsTotal.toSt
     setIsVerifyingWorkId(true);
   };
 
+  // Import the new hook at the top of the file
+  const { verifyWorkId: verifyWorkIdFromSession } = useWorkIdVerification();
+  
   const verifyWorkId = async (workId: string): Promise<boolean> => {
     try {
-      const db = getDatabase();
+      // First, verify the workId against the session token
+      const isValid = await verifyWorkIdFromSession(workId);
       
-      // Instead of relying on the email from the API, we'll use the session directly
-      if (!session?.user?.email) {
-        throw new Error('User not authenticated');
-      }
-      
-      const userEmail = session.user.email.toLowerCase();
-      
-      const usersRef = dbRef(db, 'users');
-      const snapshot = await get(usersRef);
-
-      if (!snapshot.exists()) return false;
-
-      const users = Object.values(snapshot.val()) as FirebaseUserData[];
-      // Use the session email for comparison
-      const user = users.find(u => u.email === userEmail);
-
-      if (!user || user.workId !== workId.trim()) {
-        toast({
-          title: "Error",
-          description: "Invalid Work ID",
-          variant: "destructive"
-        });
+      if (!isValid) {
         return false;
       }
-
+      
+      // If validation is successful, navigate to the edit page
       if (selectedTruckId) {
         router.push(`/dashboard/trucks/edit/${selectedTruckId}`);
         setIsVerifyingWorkId(false); // Close dialog after successful verification

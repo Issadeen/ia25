@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getToken } from 'next-auth/jwt';
+import { getWorkIdByEmail } from '@/lib/workid-verification';
 
 export async function GET(request: Request) {
   try {
@@ -18,6 +19,19 @@ export async function GET(request: Request) {
 
     if (!token) {
       return NextResponse.json({ error: "Invalid session token" }, { status: 401 });
+    }
+
+    // If workId is missing but we have an email, try to fetch it from the database
+    if (!token.workId && token.email) {
+      console.log("WorkId missing from token, attempting to fetch from database");
+      const workId = await getWorkIdByEmail(token.email.toString());
+      
+      if (workId) {
+        token.workId = workId;
+        console.log("WorkId retrieved from database:", workId);
+      } else {
+        console.warn("Could not find workId for email:", token.email);
+      }
     }
 
     // Return only the essential fields needed for verification

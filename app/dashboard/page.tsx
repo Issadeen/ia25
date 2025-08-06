@@ -16,6 +16,7 @@ import { useInactivityTimer } from "@/hooks/useInactivityTimer";
 import { ParticlesBackground } from "@/components/Particles";
 import { AUTH_CONSTANTS } from "@/lib/constants";
 import { useProfileImage } from "@/hooks/useProfileImage";
+import { SessionDebugger } from "@/components/SessionDebugger";
 
 declare module "next-auth" {
   interface Session {
@@ -206,6 +207,11 @@ export default function DashboardPage() {
           userName={session?.user?.name || "User"}
           lastLogin={lastLogin}
         />
+        
+        {/* Debug session information */}
+        <div className="mt-8">
+          <SessionDebugger />
+        </div>
       </main>
 
       <AnimatePresence>

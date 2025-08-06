@@ -178,23 +178,28 @@ export default function ApprovalsPage() {
       const data = snapshot.val()
       if (data) {
         // Map the data to match the component's expected structure
-        const formattedApprovals = Object.entries(data).map(([id, rawData]: [string, any]) => ({
-          id,
-          truckNumber: rawData.truckNo, // Map truckNo to truckNumber
-          orderNo: rawData.orderNo,
-          status: rawData.status,
-          requestedAt: rawData.requestedAt,
-          requestedBy: rawData.requesterEmail || 'Unknown',
-          product: rawData.product,
-          destination: rawData.destination,
-          respondedAt: rawData.respondedAt || null,
-          rejectionReason: rawData.rejectionReason,
-          expiresAt: rawData.expiryTime ? new Date(rawData.expiryTime).toISOString() : undefined,
-          expiryTime: rawData.expiryTime,
-          approvedBy: rawData.approvedBy,
-          truckId: rawData.truckId || id, // Use the record ID as truckId if not present
-          owner: rawData.owner || 'Unknown' // Default owner if not present
-        }));
+        const formattedApprovals = Object.entries(data).map(([id, rawData]: [string, any]) => {
+          // Default to empty string for truckNo to avoid displaying 'undefined'
+          const truckNo = rawData.truckNo || '';
+          
+          return {
+            id,
+            truckNumber: truckNo, // Map truckNo to truckNumber
+            orderNo: rawData.orderNo || 'N/A',
+            status: rawData.status || 'pending',
+            requestedAt: rawData.requestedAt || new Date().toISOString(),
+            requestedBy: rawData.requesterEmail || rawData.requestedBy || 'Unknown',
+            product: rawData.product || 'N/A',
+            destination: rawData.destination || 'N/A',
+            respondedAt: rawData.respondedAt || null,
+            rejectionReason: rawData.rejectionReason,
+            expiresAt: rawData.expiryTime ? new Date(rawData.expiryTime).toISOString() : undefined,
+            expiryTime: rawData.expiryTime,
+            approvedBy: rawData.approvedBy,
+            truckId: rawData.truckId || id, // Use the record ID as truckId if not present
+            owner: rawData.owner || '' // Default to empty string instead of 'Unknown'
+          };
+        });
         
         setPendingApprovals(formattedApprovals.filter(a => a.status === 'pending'));
       } else {
@@ -467,9 +472,9 @@ export default function ApprovalsPage() {
 
   const getFilteredApprovals = () => {
     return getSortedApprovals().filter(approval => 
-      approval.truckNumber.toLowerCase().includes(searchFilter.toLowerCase()) ||
-      approval.orderNo.toLowerCase().includes(searchFilter.toLowerCase()) ||
-      approval.requestedBy.toLowerCase().includes(searchFilter.toLowerCase())
+      (approval.truckNumber?.toLowerCase() || '').includes(searchFilter.toLowerCase()) ||
+      (approval.orderNo?.toLowerCase() || '').includes(searchFilter.toLowerCase()) ||
+      (approval.requestedBy?.toLowerCase() || '').includes(searchFilter.toLowerCase())
     );
   };
 
@@ -627,10 +632,18 @@ export default function ApprovalsPage() {
             <div className="grid gap-2 sm:gap-4">
               {getFilteredApprovals().map((approval) => {
                 const gatePassInfo = getGatePassInfo(approval.truckNumber);
+                // Try to find the work detail by matching truck numbers
+                // First check for exact match, then try case-insensitive match
                 const workDetail = Object.values(workDetails).find(
-                  w => w.truck_number === approval.truckNumber
+                  w => w.truck_number === approval.truckNumber ||
+                       (w.truck_number && approval.truckNumber && 
+                        w.truck_number.toLowerCase() === approval.truckNumber.toLowerCase())
                 );
-                const owner = workDetail?.owner || 'Unknown Owner';
+                
+                // If we have approval.owner directly, use it, otherwise try to get from work details
+                const owner = approval.owner && approval.owner !== 'Unknown' 
+                  ? approval.owner 
+                  : workDetail?.owner || 'Unknown Owner';
 
                 return (
                   <motion.div
@@ -648,9 +661,11 @@ export default function ApprovalsPage() {
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2 text-sm sm:text-base">
                               <span className="font-semibold">{approval.truckNumber}</span>
-                              <Badge variant="outline" className="text-xs">
-                                {owner}
-                              </Badge>
+                              {owner && owner !== 'Unknown Owner' ? (
+                                <Badge variant="outline" className="text-xs">
+                                  {owner}
+                                </Badge>
+                              ) : null}
                             </div>
                             {countdowns[approval.id] > 0 && (
                               <Badge variant="secondary" className="text-xs animate-pulse">
@@ -662,8 +677,12 @@ export default function ApprovalsPage() {
 
                           {/* Compact info section */}
                           <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-xs sm:text-sm text-muted-foreground">
-                            <p>Order: {approval.orderNo}</p>
-                            <p>By: {approval.requestedBy}</p>
+                            {approval.orderNo && approval.orderNo !== 'N/A' && (
+                              <p>Order: {approval.orderNo}</p>
+                            )}
+                            {approval.requestedBy && approval.requestedBy !== 'Unknown' && (
+                              <p>By: {approval.requestedBy}</p>
+                            )}
                             {gatePassInfo && (
                               <p className="col-span-2 text-amber-600">
                                 <AlertTriangle className="inline h-3 w-3 mr-1" />

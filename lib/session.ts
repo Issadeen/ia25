@@ -10,10 +10,27 @@ interface SessionData extends Record<string, unknown> {
   // Add any other session data you want to store
 }
 
-export async function getSession(req: NextRequest): Promise<SessionData | null> {
-  const token = req.cookies.get('session-token')?.value
+export async function getSession(req: NextRequest | any): Promise<SessionData | null> {
+  // Handle both NextRequest and regular request objects
+  let token: string | undefined;
+  
+  if ('cookies' in req && typeof req.cookies.get === 'function') {
+    // NextRequest object
+    token = req.cookies.get('session-token')?.value;
+  } else if (req.cookies && typeof req.cookies === 'object') {
+    // Regular request object with cookies object
+    token = req.cookies['session-token'];
+  } else if (req.headers && req.headers.cookie) {
+    // Request with cookie header
+    const cookies = req.headers.cookie.split(';').reduce((acc: Record<string, string>, cookie: string) => {
+      const [key, value] = cookie.trim().split('=');
+      acc[key] = value;
+      return acc;
+    }, {});
+    token = cookies['session-token'];
+  }
 
-  if (!token) return null
+  if (!token) return null;
 
   try {
     const verified = await jwtVerify(token, new TextEncoder().encode(JWT_SECRET))
