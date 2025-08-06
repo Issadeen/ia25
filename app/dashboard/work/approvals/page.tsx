@@ -56,6 +56,10 @@ interface WorkDetail {
   id: string;
   owner: string;
   truck_number: string;
+  order_no?: string;
+  orders?: string[];
+  current_order?: string;
+  orderno?: string;
   // ...other fields...
 }
 
@@ -126,13 +130,12 @@ export default function ApprovalsPage() {
     if (isMuted) return;
     
     const audio = new Audio('/sounds/confirmation.mp3');
-    audio.volume = 0.5; // Set volume to 50%
+    audio.volume = 0.5;
     
-    // Only play if user has interacted with the page
     const playPromise = audio.play();
     if (playPromise !== undefined) {
       playPromise.catch(error => {
-        console.log("Audio playback failed:", error);
+        // Silent error handling for environments where audio can't play
       });
     }
   };
@@ -179,41 +182,25 @@ export default function ApprovalsPage() {
       if (data) {
         // Map the data to match the component's expected structure
         const formattedApprovals = Object.entries(data).map(([id, rawData]: [string, any]) => {
-          // Log the raw data for debugging
-          console.log('Raw approval data:', id, rawData);
-          
-          // Look up any referenced data
-          let truckInfo = null;
-          if (rawData.truckId) {
-            // If we have a truckId, we should try to look up its info directly
-            const truckRef = ref(database, `trucks/${rawData.truckId}`);
-            get(truckRef).then(snapshot => {
-              if (snapshot.exists()) {
-                console.log(`Found truck info for ${rawData.truckId}:`, snapshot.val());
-                // Could update this approval in state if needed
-              }
-            }).catch(err => console.error('Error fetching truck info:', err));
-          }
-          
-          // Default to empty string for truckNo to avoid displaying 'undefined'
-          const truckNo = rawData.truckNo || rawData.truckNumber || '';
+          // The truckNumber field is already properly set in the approval data from the request
+          const truckNumber = rawData.truckNumber || '';
           
           return {
             id,
-            truckNumber: truckNo, // Map truckNo to truckNumber
+            truckNumber,
             orderNo: rawData.orderNo || 'N/A',
             status: rawData.status || 'pending',
             requestedAt: rawData.requestedAt || new Date().toISOString(),
-            requestedBy: rawData.requesterEmail || rawData.requestedBy || 'Unknown',
+            requestedBy: rawData.requestedBy || 'Unknown',
             product: rawData.product || 'N/A',
             destination: rawData.destination || 'N/A',
             respondedAt: rawData.respondedAt || null,
             rejectionReason: rawData.rejectionReason,
-            expiresAt: rawData.expiryTime ? new Date(rawData.expiryTime).toISOString() : undefined,
+            expiresAt: rawData.expiresAt,
             expiryTime: rawData.expiryTime,
             approvedBy: rawData.approvedBy,
-            truckId: rawData.truckId || id, // Use the record ID as truckId if not present
-            owner: rawData.owner || '' // Default to empty string instead of 'Unknown'
+            truckId: rawData.truckId || id,
+            owner: rawData.owner || ''
           };
         });
         
@@ -239,7 +226,6 @@ export default function ApprovalsPage() {
     return () => unsubscribe();
   }, [isVerified]);
 
-  // Add function to calculate remaining time
   const calculateRemainingTime = (expiresAt: string) => {
     const now = new Date().getTime();
     const expiration = new Date(expiresAt).getTime();
@@ -291,11 +277,7 @@ export default function ApprovalsPage() {
     const workDetailsRef = ref(database, 'work_details');
     const unsubscribe = onValue(workDetailsRef, (snapshot) => {
       if (snapshot.exists()) {
-        const workDetailsData = snapshot.val();
-        console.log('Work details data from Firebase:', workDetailsData);
-        setWorkDetails(workDetailsData);
-      } else {
-        console.log('No work details found in Firebase');
+        setWorkDetails(snapshot.val());
       }
     });
 
@@ -395,7 +377,6 @@ export default function ApprovalsPage() {
       }
       return false;
     } catch (error) {
-      console.error('Driver verification error:', error);
       return false;
     }
   };
@@ -441,10 +422,9 @@ export default function ApprovalsPage() {
       playConfirmationSound();
       toast({
         title: "Approved",
-        description: `Gate pass for ${approval.truckNumber} approved`,
+        description: `Gate pass for ${approval.truckNumber || approval.orderNo} approved`,
       });
     } catch (error) {
-      console.error('Approval error:', error);
       toast({
         title: "Error",
         description: "Failed to approve gate pass",
@@ -467,7 +447,6 @@ export default function ApprovalsPage() {
         rejectedAt: new Date().toISOString()
       });
 
-      // Notify the requestor (you can implement email/notification system here)
       toast({
         title: "Rejected",
         description: "Gate pass request has been rejected",
@@ -652,23 +631,45 @@ export default function ApprovalsPage() {
             <div className="grid gap-2 sm:gap-4">
               {getFilteredApprovals().map((approval) => {
                 const gatePassInfo = getGatePassInfo(approval.truckNumber);
-                // Try to find the work detail by matching truck numbers
-                // First check for exact match, then try case-insensitive match
-                const workDetail = Object.values(workDetails).find(
-                  w => w.truck_number === approval.truckNumber ||
-                       (w.truck_number && approval.truckNumber && 
-                        w.truck_number.toLowerCase() === approval.truckNumber.toLowerCase())
-                );
+                // Get the order ID to help with matching if truck number is missing
+                const orderNo = approval.orderNo;
                 
-                // Debug the workDetails and matching
-                console.log('All work details:', Object.values(workDetails));
-                console.log('Current truck number:', approval.truckNumber);
-                console.log('Matching work detail found:', workDetail);
+                // Try to find the work detail by matching truck numbers or by order
+                let workDetail = null;
                 
-                // If we have approval.owner directly, use it, otherwise try to get from work details
-                const owner = approval.owner && approval.owner !== 'Unknown' 
-                  ? approval.owner 
-                  : workDetail?.owner || 'Unknown Owner';
+                // First try to match by truck number if we have one
+                if (approval.truckNumber) {
+                  workDetail = Object.values(workDetails).find(
+                    w => w.truck_number === approval.truckNumber ||
+                         (w.truck_number && approval.truckNumber && 
+                          w.truck_number.toLowerCase() === approval.truckNumber.toLowerCase())
+                  );
+                }
+                
+                // If no match by truck number, try to find by order
+                if (!workDetail && orderNo && orderNo !== 'N/A') {
+                  workDetail = Object.values(workDetails).find(
+                    w => w.orderno === orderNo || 
+                         w.order_no === orderNo ||
+                         w.orders?.includes(orderNo) ||
+                         w.current_order === orderNo
+                  );
+                }
+                
+                // Get owner from approval, work detail, or truckId (which might contain owner info)
+                let owner = '';
+                
+                if (approval.owner && approval.owner !== 'Unknown') {
+                  owner = approval.owner;
+                } else if (workDetail?.owner) {
+                  owner = workDetail.owner;
+                } else if (approval.truckId && typeof approval.truckId === 'string') {
+                  // Sometimes truckId contains owner info in format "owner/truck"
+                  const parts = approval.truckId.split('/');
+                  if (parts.length > 1) {
+                    owner = parts[0];
+                  }
+                }
 
                 return (
                   <motion.div
@@ -688,9 +689,11 @@ export default function ApprovalsPage() {
                               {approval.truckNumber ? (
                                 <span className="font-semibold">{approval.truckNumber}</span>
                               ) : (
-                                <span className="font-semibold text-muted-foreground">No Truck Number</span>
+                                <span className="font-semibold text-muted-foreground">
+                                  {approval.orderNo !== 'N/A' ? `Order: ${approval.orderNo}` : 'No Truck Number'}
+                                </span>
                               )}
-                              {owner && owner !== 'Unknown Owner' ? (
+                              {owner ? (
                                 <Badge variant="outline" className="text-xs">
                                   {owner}
                                 </Badge>
@@ -707,7 +710,7 @@ export default function ApprovalsPage() {
                           {/* Compact info section */}
                           <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-xs sm:text-sm text-muted-foreground">
                             {approval.orderNo && approval.orderNo !== 'N/A' && (
-                              <p>Order: {approval.orderNo}</p>
+                              <p className="font-medium">Order: {approval.orderNo}</p>
                             )}
                             {approval.requestedBy && approval.requestedBy !== 'Unknown' && (
                               <p>By: {approval.requestedBy}</p>
