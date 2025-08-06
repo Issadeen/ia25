@@ -179,8 +179,24 @@ export default function ApprovalsPage() {
       if (data) {
         // Map the data to match the component's expected structure
         const formattedApprovals = Object.entries(data).map(([id, rawData]: [string, any]) => {
+          // Log the raw data for debugging
+          console.log('Raw approval data:', id, rawData);
+          
+          // Look up any referenced data
+          let truckInfo = null;
+          if (rawData.truckId) {
+            // If we have a truckId, we should try to look up its info directly
+            const truckRef = ref(database, `trucks/${rawData.truckId}`);
+            get(truckRef).then(snapshot => {
+              if (snapshot.exists()) {
+                console.log(`Found truck info for ${rawData.truckId}:`, snapshot.val());
+                // Could update this approval in state if needed
+              }
+            }).catch(err => console.error('Error fetching truck info:', err));
+          }
+          
           // Default to empty string for truckNo to avoid displaying 'undefined'
-          const truckNo = rawData.truckNo || '';
+          const truckNo = rawData.truckNo || rawData.truckNumber || '';
           
           return {
             id,
@@ -275,7 +291,11 @@ export default function ApprovalsPage() {
     const workDetailsRef = ref(database, 'work_details');
     const unsubscribe = onValue(workDetailsRef, (snapshot) => {
       if (snapshot.exists()) {
-        setWorkDetails(snapshot.val());
+        const workDetailsData = snapshot.val();
+        console.log('Work details data from Firebase:', workDetailsData);
+        setWorkDetails(workDetailsData);
+      } else {
+        console.log('No work details found in Firebase');
       }
     });
 
@@ -640,6 +660,11 @@ export default function ApprovalsPage() {
                         w.truck_number.toLowerCase() === approval.truckNumber.toLowerCase())
                 );
                 
+                // Debug the workDetails and matching
+                console.log('All work details:', Object.values(workDetails));
+                console.log('Current truck number:', approval.truckNumber);
+                console.log('Matching work detail found:', workDetail);
+                
                 // If we have approval.owner directly, use it, otherwise try to get from work details
                 const owner = approval.owner && approval.owner !== 'Unknown' 
                   ? approval.owner 
@@ -660,7 +685,11 @@ export default function ApprovalsPage() {
                         <div className="flex flex-col gap-1 sm:gap-2">
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2 text-sm sm:text-base">
-                              <span className="font-semibold">{approval.truckNumber}</span>
+                              {approval.truckNumber ? (
+                                <span className="font-semibold">{approval.truckNumber}</span>
+                              ) : (
+                                <span className="font-semibold text-muted-foreground">No Truck Number</span>
+                              )}
                               {owner && owner !== 'Unknown Owner' ? (
                                 <Badge variant="outline" className="text-xs">
                                   {owner}
