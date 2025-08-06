@@ -13,6 +13,7 @@ import { toast } from "@/components/ui/use-toast"
 import { motion } from "framer-motion"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { useProfileImage } from '@/hooks/useProfileImage'
+import { useSessionToken } from '@/hooks/useSessionToken'
 import { ArrowLeft, Loader2, Check, X, FileText, AlertTriangle, Search, Clock, CheckSquare, Volume2, VolumeX, Sun, Moon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import {
@@ -85,6 +86,7 @@ export default function ApprovalsPage() {
   const [pendingApprovals, setPendingApprovals] = useState<GatePassApproval[]>([])
   const [gatePassHistory, setGatePassHistory] = useState<{[key: string]: { count: number, lastGenerated: string }}>({})
   const profilePicUrl = useProfileImage()
+  const { token: sessionToken, isLoading: isTokenLoading } = useSessionToken()
   const [searchFilter, setSearchFilter] = useState("")
   const [rejectionDialog, setRejectionDialog] = useState<{
     open: boolean;
@@ -301,24 +303,45 @@ export default function ApprovalsPage() {
   const handleVerify = async () => {
     setIsVerifying(true);
     try {
-      const response = await fetch('/api/auth/verify-approver', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ workId }),
-      });
+      // Check if the workId is empty
+      if (!workId.trim()) {
+        throw new Error('Please enter your Work ID');
+      }
 
-      const result = await response.json();
-
-      if (response.ok && result.success) {
-        setIsVerified(true);
-        toast({
-          title: "Verified",
-          description: "Identity verified successfully",
-        });
+      // Check if session token is available
+      if (sessionToken && sessionToken.workId) {
+        // Session-based verification (client-side)
+        if (sessionToken.workId === workId.trim()) {
+          setIsVerified(true);
+          toast({
+            title: "Verified",
+            description: "Identity verified successfully",
+          });
+          return;
+        } else {
+          throw new Error('Invalid Work ID');
+        }
       } else {
-        throw new Error(result.error || 'Verification failed');
+        // Fallback to API-based verification
+        const response = await fetch('/api/auth/verify-approver', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ workId }),
+        });
+
+        const result = await response.json();
+
+        if (response.ok && result.success) {
+          setIsVerified(true);
+          toast({
+            title: "Verified",
+            description: "Identity verified successfully",
+          });
+        } else {
+          throw new Error(result.error || 'Verification failed');
+        }
       }
     } catch (error) {
       toast({

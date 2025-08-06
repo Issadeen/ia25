@@ -21,6 +21,7 @@ declare module "next-auth" {
   // Also ensure the JWT token can hold the necessary fields server-side
   interface JWT {
     id?: string; // Corresponds to FirebaseUser workId
+    workId?: string; // Explicitly store workId for direct verification
     email?: string | null; // Ensure email is part of JWT
     // name?: string | null; // Already part of default JWT
     // picture?: string | null; // Already part of default JWT
@@ -192,6 +193,7 @@ export const authOptions: NextAuthOptions = {
       if (user) {
         // Make sure to include the workId as token.id
         token.id = user.id; // user.id comes from authorize return (mapped from workId)
+        token.workId = user.id; // Explicitly add workId for direct verification
         token.email = user.email; // Ensure email is in the token
         token.name = user.name;
         token.picture = user.image;
