@@ -1538,14 +1538,19 @@ export default function OwnerDetailsPage() {
     setIsVerifyingWorkId(true)
     
     try {
-      // Verify the work ID against the database using query
-      const db = database
-      const usersRef = ref(db, 'users')
-      const workIdQuery = query(usersRef, orderByChild("workId"), equalTo(workIdInput.trim()))
-      const snapshot = await get(workIdQuery)
+      // Use dedicated API endpoint for verification instead of direct DB access
+      const response = await fetch('/api/auth/verify-approver', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ workId: workIdInput.trim() }),
+      });
       
-      if (snapshot.exists()) {
-        // Work ID exists, proceed with the update
+      const result = await response.json();
+      
+      if (result.success) {
+        // Work ID verified, proceed with the update
         if (pendingAt20Update) {
           await updateAt20Value()
         } else if (pendingPriceUpdate) {

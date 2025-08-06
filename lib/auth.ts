@@ -155,18 +155,14 @@ export const authOptions: NextAuthOptions = {
           }
 
           console.log("[Auth] Authentication successful for:", user.email);
-          console.log("[Auth] User workId:", user.workId);
           
           // Password is correct
-          const authUser = {
+          return {
             id: user.workId, // Map workId to id for next-auth User object
             email: user.email,
             name: user.name || user.email, // Provide a fallback name
             image: user.image || null
           };
-          
-          console.log("[Auth] Returning auth user with id:", authUser.id);
-          return authUser;
         } catch (error) {
           console.error('[Auth] Error in authorize function:', error); // Log specific error
           if (error instanceof Error) {
@@ -199,9 +195,6 @@ export const authOptions: NextAuthOptions = {
         token.email = user.email; // Ensure email is in the token
         token.name = user.name;
         token.picture = user.image;
-        
-        // Log token creation to verify workId is set
-        console.log("[Auth JWT] Created token with ID:", token.id);
       }
       return token; // The token is encrypted and stored in the session cookie
     },
@@ -213,8 +206,7 @@ export const authOptions: NextAuthOptions = {
           session.user.name = token.name;
           session.user.image = token.picture;
           
-          // Important: If there's an issue with workId, enable this:
-          // This makes the ID available client-side but increases attack surface
+          // Important: Enable this ONLY if client-side ID is absolutely necessary
           // session.user.id = token.id; 
           
           // For API routes, we'll use getToken() to access the ID server-side
@@ -225,8 +217,6 @@ export const authOptions: NextAuthOptions = {
           if (token.error) {
             session.error = token.error as string;
           }
-          
-          console.log("[Auth Session] Session created with token ID:", token.id);
         }
         return session;
       } catch (error) {

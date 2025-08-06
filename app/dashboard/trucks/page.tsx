@@ -206,24 +206,21 @@ PMS: ${formatCompartments(truck.pms_comps)} (Total: ${formatNumber(pmsTotal.toSt
   const verifyWorkId = async (workId: string): Promise<boolean> => {
     try {
       const db = getDatabase();
-
-      // Fetch user info first
-      const userInfoRes = await fetch('/api/user-info');
-      if (!userInfoRes.ok) {
-        throw new Error('Failed to fetch user info for verification');
+      
+      // Instead of relying on the email from the API, we'll use the session directly
+      if (!session?.user?.email) {
+        throw new Error('User not authenticated');
       }
-      const userInfo = await userInfoRes.json();
-      const userEmail = userInfo.email; // Get email from API response
-
-      if (!userEmail) throw new Error('No user email found in fetched info'); // Check if email exists in response
-
+      
+      const userEmail = session.user.email.toLowerCase();
+      
       const usersRef = dbRef(db, 'users');
       const snapshot = await get(usersRef);
 
       if (!snapshot.exists()) return false;
 
       const users = Object.values(snapshot.val()) as FirebaseUserData[];
-      // Use the fetched email for comparison
+      // Use the session email for comparison
       const user = users.find(u => u.email === userEmail);
 
       if (!user || user.workId !== workId.trim()) {

@@ -1,8 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth/next';
 import { authOptions } from '@/lib/auth';
-import { getDatabase, ref, get, query, orderByChild, equalTo } from 'firebase/database';
-import { database } from '@/lib/firebase'; // Assuming firebase is initialized here
+import { getFirebaseAdminDb } from '@/lib/firebase-admin';
 
 export async function POST(request: Request) {
   const session = await getServerSession(authOptions);
@@ -18,10 +17,12 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: 'Work ID is required' }, { status: 400 });
     }
 
-    const usersRef = ref(database, 'users');
+    // Use Firebase Admin SDK to bypass security rules
+    const adminDb = getFirebaseAdminDb();
+    const usersRef = adminDb.ref('users');
+    
     // Query the database to find the user by email
-    const userQuery = query(usersRef, orderByChild('email'), equalTo(session.user.email));
-    const snapshot = await get(userQuery);
+    const snapshot = await usersRef.orderByChild('email').equalTo(session.user.email).once('value');
 
     if (!snapshot.exists()) {
       console.error(`Verification Error: User not found for email ${session.user.email}`);
@@ -40,9 +41,9 @@ export async function POST(request: Request) {
         return NextResponse.json({ success: false, error: 'User data not found' }, { status: 404 });
     }
 
-
     // Compare the provided workId with the one stored in the database
     if (userData.workId === workId) {
+      console.log(`Verification Successful: User ${session.user.email} provided correct workId`);
       return NextResponse.json({ success: true });
     } else {
       console.warn(`Verification Failed: Provided workId "${workId}" does not match stored workId for email ${session.user.email}`);

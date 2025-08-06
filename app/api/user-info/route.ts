@@ -25,20 +25,18 @@ export async function GET(request: Request) {
       secret 
     });
 
-    console.log("[User Info] Token data:", token);
-
     if (!token) {
       return NextResponse.json({ error: "Invalid session token" }, { status: 401 })
     }
 
-    // Return complete user info including id/workId from the token
+    // Return minimal user info needed for the application to function
+    // Note: email is only included because it's needed for existing workId verification flows
+    // Consider using the /api/auth/verify-approver endpoint for workId verification instead
     return NextResponse.json({
-      id: token.id,  // This should be the workId from Firebase user
-      email: token.email,
+      email: token.email, // Required for some existing verification flows
       name: token.name,
       image: token.picture,
-      // Include the full token data for debugging
-      _token: token
+      isAuthenticated: true
     })
 
   } catch (error) {

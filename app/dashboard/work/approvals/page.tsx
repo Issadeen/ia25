@@ -31,22 +31,24 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
 interface GatePassApproval {
   id: string;
-  truckId: string;
   requestedAt: string;
   requestedBy: string;
   status: 'pending' | 'approved' | 'rejected';
   orderNo: string;
   truckNumber: string;
-  owner: string; // Add owner field
-  rejectionReason?: string; // Add rejection reason field
-  respondedAt?: string; // When the approval was responded to
-  approvedBy?: string; // Who approved the request
-  expiryTime?: number; // Timestamp when the approval expires
+  product?: string;
+  destination?: string;
+  rejectionReason?: string;
+  respondedAt?: string | null;
+  approvedBy?: string;
+  expiryTime?: number;
   driverDetails?: {
     name: string;
     phone: string;
   };
-  expiresAt?: string; // Add expiration field
+  expiresAt?: string;
+  truckId?: string; // Made optional since it's not always present
+  owner?: string; // Made optional since it's not always present
 }
 
 interface WorkDetail {
@@ -165,6 +167,7 @@ export default function ApprovalsPage() {
     }
   }, [status, router])
 
+  // Modify the useEffect that fetches approvals to match API field names
   useEffect(() => {
     if (!isVerified) return;
 
@@ -172,8 +175,28 @@ export default function ApprovalsPage() {
     const unsubscribe = onValue(approvalsRef, (snapshot) => {
       const data = snapshot.val()
       if (data) {
-        const approvals = Object.values(data) as GatePassApproval[]
-        setPendingApprovals(approvals.filter(a => a.status === 'pending'))
+        // Map the data to match the component's expected structure
+        const formattedApprovals = Object.entries(data).map(([id, rawData]: [string, any]) => ({
+          id,
+          truckNumber: rawData.truckNo, // Map truckNo to truckNumber
+          orderNo: rawData.orderNo,
+          status: rawData.status,
+          requestedAt: rawData.requestedAt,
+          requestedBy: rawData.requesterEmail || 'Unknown',
+          product: rawData.product,
+          destination: rawData.destination,
+          respondedAt: rawData.respondedAt || null,
+          rejectionReason: rawData.rejectionReason,
+          expiresAt: rawData.expiryTime ? new Date(rawData.expiryTime).toISOString() : undefined,
+          expiryTime: rawData.expiryTime,
+          approvedBy: rawData.approvedBy,
+          truckId: rawData.truckId || id, // Use the record ID as truckId if not present
+          owner: rawData.owner || 'Unknown' // Default owner if not present
+        }));
+        
+        setPendingApprovals(formattedApprovals.filter(a => a.status === 'pending'));
+      } else {
+        setPendingApprovals([]);
       }
     })
 
@@ -358,8 +381,11 @@ export default function ApprovalsPage() {
       };
   
       // Also update the work detail to mark gate pass as generated
-      updates[`work_details/${approval.truckId}/gatePassGenerated`] = true;
-      updates[`work_details/${approval.truckId}/gatePassGeneratedAt`] = new Date().toISOString();
+      // Only if we have a valid truckId
+      if (approval.truckId) {
+        updates[`work_details/${approval.truckId}/gatePassGenerated`] = true;
+        updates[`work_details/${approval.truckId}/gatePassGeneratedAt`] = new Date().toISOString();
+      }
   
       // Apply all updates atomically
       await update(ref(database), updates);

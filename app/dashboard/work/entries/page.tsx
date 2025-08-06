@@ -377,22 +377,18 @@ export default function EntriesPage() {
   }
 
   const verifyWorkIdAgainstDb = useCallback(async (inputWorkId: string): Promise<boolean> => {
-    const db = getDatabase();
-    const usersRef = dbRef(db, 'users');
-    
     try {
-      const snapshot = await get(usersRef);
-      if (!snapshot.exists()) return false;
-  
-      let isValid = false;
-      snapshot.forEach((childSnapshot) => {
-        const userData = childSnapshot.val();
-        if (userData.workId === inputWorkId) {
-          isValid = true;
-        }
+      // Use dedicated API endpoint for verification instead of direct DB access
+      const response = await fetch('/api/auth/verify-approver', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ workId: inputWorkId }),
       });
       
-      return isValid;
+      const result = await response.json();
+      return result.success === true;
     } catch (error) {
       addNotification(
         "Error",
