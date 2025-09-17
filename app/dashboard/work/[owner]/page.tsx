@@ -40,7 +40,14 @@ import {
 import { ThemeToggle } from "@/components/ui/molecules/theme-toggle" // Add ThemeToggle import
 import { Skeleton } from "@/components/ui/skeleton"
 import jsPDF from "jspdf"
-import autoTable from "jspdf-autotable"
+import "jspdf-autotable"
+
+// Type declaration for jspdf-autotable
+declare module "jspdf" {
+  interface jsPDF {
+    autoTable: (options: any) => jsPDF;
+  }
+}
 import { OwnerBalanceDialog } from "@/components/ui/molecules/owner-balance-dialog" // Add OwnerBalanceDialog import
 import * as XLSX from "xlsx" // Add XLSX import
 import {
@@ -684,7 +691,7 @@ export default function OwnerDetailsPage() {
     doc.text(`${owner} - Financial Summary`, 14, 15)
 
     // Add summary section
-    autoTable(doc, {
+    doc.autoTable({
       startY: 25,
       head: [["Total Due", "Total Paid", "Balance", "Available Balance"]],
       body: [
@@ -698,7 +705,7 @@ export default function OwnerDetailsPage() {
     })
 
     // Add trucks table
-    autoTable(doc, {
+    doc.autoTable({
       startY: (doc as any).lastAutoTable?.finalY + 10 || 45,
       head: [["Truck", "Product", "At20", "Price", "Total Due", "Paid", "Balance", "Status"]],
       body: getFilteredWorkDetails()
@@ -1859,7 +1866,7 @@ export default function OwnerDetailsPage() {
               <ThemeToggle />
               <Avatar 
                 className="h-7 w-7 sm:h-8 sm:w-8 ring-2 ring-pink-500/50 cursor-pointer"
-                onClick={(e) => {
+                onClick={(e: React.MouseEvent<HTMLDivElement>) => {
                   // Count clicks within 500ms
                   const now = Date.now();
                   if (now - (Number(e.currentTarget.dataset.lastClick) || 0) < 500) {
@@ -1902,7 +1909,7 @@ export default function OwnerDetailsPage() {
             <div className="flex justify-end gap-2">
               <Select
                 value={String(selectedYear)}
-                onValueChange={(value) => setSelectedYear(Number(value))}
+                onValueChange={(value: string) => setSelectedYear(Number(value))}
               >
                 <SelectTrigger className="w-[120px] h-8 text-xs">
                   <SelectValue placeholder="Select Year" />
@@ -2187,7 +2194,7 @@ export default function OwnerDetailsPage() {
                                 getFilteredWorkDetails().filter(truck => truck.loaded && getTruckAllocations(truck, truckPayments).balance > 0).length > 0 &&
                                 selectedTrucks.size === getFilteredWorkDetails().filter(truck => truck.loaded && getTruckAllocations(truck, truckPayments).balance > 0).length
                               }
-                              onCheckedChange={(checked) => handleSelectAllTrucks(!!checked)}
+                              onCheckedChange={(checked: boolean) => handleSelectAllTrucks(!!checked)}
                               aria-label="Select all unpaid trucks"
                             />
                           </th>
@@ -2862,7 +2869,7 @@ export default function OwnerDetailsPage() {
                                       checked={!!paymentFormData.allocatedTrucks.find(
                                         (a) => a.truckId === truck.id
                                       )}
-                                      onCheckedChange={(checked) => handleTruckSelection(!!checked, truck)}
+                                      onCheckedChange={(checked: boolean) => handleTruckSelection(!!checked, truck)}
                                     />
                                     <div className="flex-1">
                                       <div className="font-medium">{truck.truck_number}</div>
@@ -3288,7 +3295,7 @@ export default function OwnerDetailsPage() {
         </Dialog>
         
         {/* Add Work ID verification dialog */}
-        <Dialog open={isWorkIdDialogOpen} onOpenChange={(open) => {
+        <Dialog open={isWorkIdDialogOpen} onOpenChange={(open: boolean) => {
           setIsWorkIdDialogOpen(open);
           if (!open) {
             setEditingAt20(null);
