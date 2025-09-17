@@ -40,14 +40,7 @@ import {
 import { ThemeToggle } from "@/components/ui/molecules/theme-toggle" // Add ThemeToggle import
 import { Skeleton } from "@/components/ui/skeleton"
 import jsPDF from "jspdf"
-import "jspdf-autotable"
-
-// Type declaration for jspdf-autotable
-declare module "jspdf" {
-  interface jsPDF {
-    autoTable: (options: any) => jsPDF;
-  }
-}
+import autoTable from "jspdf-autotable"
 import { OwnerBalanceDialog } from "@/components/ui/molecules/owner-balance-dialog" // Add OwnerBalanceDialog import
 import * as XLSX from "xlsx" // Add XLSX import
 import {
@@ -691,7 +684,7 @@ export default function OwnerDetailsPage() {
     doc.text(`${owner} - Financial Summary`, 14, 15)
 
     // Add summary section
-    doc.autoTable({
+    autoTable(doc, {
       startY: 25,
       head: [["Total Due", "Total Paid", "Balance", "Available Balance"]],
       body: [
@@ -705,7 +698,7 @@ export default function OwnerDetailsPage() {
     })
 
     // Add trucks table
-    doc.autoTable({
+    autoTable(doc, {
       startY: (doc as any).lastAutoTable?.finalY + 10 || 45,
       head: [["Truck", "Product", "At20", "Price", "Total Due", "Paid", "Balance", "Status"]],
       body: getFilteredWorkDetails()
@@ -825,7 +818,7 @@ export default function OwnerDetailsPage() {
     });
 
     // Add the table with optimized column widths
-    (doc as any).autoTable({
+    autoTable(doc, {
       startY: startY,
       head: [[
         'Truck Number',
