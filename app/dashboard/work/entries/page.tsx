@@ -1959,7 +1959,7 @@ export default function EntriesPage() {
           )}
 
           {summaryData.length > 0 ? (
-            <Card className="border-0 shadow-lg bg-white/50 dark:bg-gray-900/50 backdrop-blur-sm">
+            <Card className="bg-white dark:bg-[#020817] border border-gray-200 dark:border-gray-700/30 shadow-sm">
               <CardContent className="p-6">
                 <Table>
                   <TableHeader>
@@ -2075,7 +2075,7 @@ export default function EntriesPage() {
               </CardContent>
             </Card>
           ) : (
-            <Card className="border-0 shadow-lg bg-white/50 dark:bg-gray-900/50 backdrop-blur-sm">
+            <Card className="bg-white dark:bg-[#020817] border border-gray-200 dark:border-gray-700/30 shadow-sm">
               <CardContent className="p-6 text-center text-muted-foreground">
                 No entries with remaining quantities found.
               </CardContent>
@@ -2167,7 +2167,7 @@ export default function EntriesPage() {
             </CardContent>
           </Card>
 
-          <Card className="border-0 shadow-lg bg-white/50 dark:bg-gray-900/50 backdrop-blur-sm">
+          <Card className="bg-white dark:bg-[#020817] border border-gray-200 dark:border-gray-700/30 shadow-sm">
             <CardContent className="p-6">
               <div className="overflow-auto -mx-2 sm:mx-0">
                 <div className="min-w-[700px] p-2">
@@ -2392,7 +2392,7 @@ export default function EntriesPage() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.3 }}
         >
-          <Card className="border-0 shadow-lg bg-white/50 dark:bg-gray-900/50 backdrop-blur-sm">
+          <Card className="bg-white dark:bg-[#020817] border border-gray-200 dark:border-gray-700/30 shadow-sm">
             <CardHeader>
               <CardTitle className="text-2xl font-semibold bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">
                 Manual Allocation
@@ -2479,7 +2479,7 @@ export default function EntriesPage() {
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3 }}
       >
-        <Card className="border-0 shadow-lg bg-white/50 dark:bg-gray-900/50 backdrop-blur-sm">
+        <Card className="bg-white dark:bg-[#020817] border border-gray-200 dark:border-gray-700/30 shadow-sm">
           <CardHeader>
             <CardTitle className="text-2xl font-semibold bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">
               Allocation Form
@@ -2491,6 +2491,7 @@ export default function EntriesPage() {
                 placeholder="Truck Number"
                 value={truckNumber}
                 onChange={(e) => setTruckNumber(e.target.value)}
+                className="bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400"
               />
               <Input
                 placeholder="Product"
@@ -2502,6 +2503,7 @@ export default function EntriesPage() {
                     fetchAvailableEntries(value, destination)
                   }
                 }}
+                className="bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400"
               />
               <Input
                 placeholder="Destination"
@@ -2513,11 +2515,13 @@ export default function EntriesPage() {
                     fetchAvailableEntries(product, value)
                   }
                 }}
+                className="bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400"
               />
               <Input
                 placeholder="AT20 Quantity"
                 value={at20Quantity}
                 onChange={(e) => setAt20Quantity(e.target.value)}
+                className="bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400"
               />
             </div>
 
@@ -2606,7 +2610,7 @@ export default function EntriesPage() {
         </Card>
 
         {entriesData.length > 0 && (
-          <Card className="mt-6 border-0 shadow-lg bg-white/50 dark:bg-gray-900/50 backdrop-blur-sm">
+          <Card className="mt-6 bg-white dark:bg-[#020817] border border-gray-200 dark:border-gray-700/30 shadow-sm">
             <CardHeader>
               <CardTitle className="text-2xl font-semibold bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">
                 Allocation Results
@@ -2656,7 +2660,7 @@ export default function EntriesPage() {
   const renderPendingOrders = () => {
     if (isPendingLoading) {
       return (
-        <Card className="border-0 shadow-lg bg-white/50 dark:bg-gray-900/50 backdrop-blur-sm">
+        <Card className="bg-white dark:bg-[#020817] border border-gray-200 dark:border-gray-700/30 shadow-sm">
           <CardContent className="p-6 text-center">
             <Loader2 className="h-6 w-6 animate-spin mx-auto" />
             <p className="mt-2">Loading pending orders...</p>
@@ -2667,7 +2671,7 @@ export default function EntriesPage() {
 
     if (pendingOrders.length === 0) {
       return (
-        <Card className="border-0 shadow-lg bg-white/50 dark:bg-gray-900/50 backdrop-blur-sm">
+        <Card className="bg-white dark:bg-[#020817] border border-gray-200 dark:border-gray-700/30 shadow-sm">
           <CardContent className="p-6 text-center text-muted-foreground">
             No pending orders found.
           </CardContent>
@@ -2676,7 +2680,7 @@ export default function EntriesPage() {
     }
 
     return (
-      <Card className="border-0 shadow-lg bg-white/50 dark:bg-gray-900/50 backdrop-blur-sm">
+      <Card className="bg-white dark:bg-[#020817] border border-gray-200 dark:border-gray-700/30 shadow-sm">
         <CardHeader>
           <CardTitle className="text-2xl font-semibold bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent">
             Pending Orders
@@ -3190,15 +3194,8 @@ export default function EntriesPage() {
   };
 
   return (
-    <div className={`min-h-screen relative ${
-      !mounted ? 'bg-white dark:bg-gray-900' : 
-      theme === 'dark' ? 'bg-gray-900 text-gray-100' : 'bg-white text-gray-900'
-    }`}>
-      <header className={`sticky top-0 z-50 w-full border-b ${
-        theme === 'dark' 
-          ? 'bg-gray-900 border-gray-800' 
-          : 'bg-white border-gray-200'
-      } shadow-sm`}>
+    <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-teal-50 dark:from-gray-900 dark:via-gray-900 dark:to-gray-800">
+      <header className="sticky top-0 z-50 w-full border-b bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 shadow-sm">
         <div className="container mx-auto px-2 sm:px-4 py-2 sm:py-3">
           <div className="flex justify-between items-center">
             <div className="flex items-center gap-1 sm:gap-4">
@@ -3419,7 +3416,11 @@ export default function EntriesPage() {
                 }
               }} 
               variant="outline" 
-              className={`flex items-center justify-center gap-2 w-full sm:w-auto ${currentView === 'summary' ? 'bg-primary text-primary-foreground' : ''}`}
+              className={`flex items-center justify-center gap-2 w-full sm:w-auto transition-all duration-200 ${
+                currentView === 'summary' 
+                  ? 'bg-emerald-100 text-emerald-700 border-emerald-300 dark:bg-emerald-900 dark:text-emerald-100 dark:border-emerald-700' 
+                  : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50 dark:bg-gray-800 dark:text-gray-200 dark:border-gray-600 dark:hover:bg-gray-700'
+              }`}
               size="sm"
             >
               <PieChart className="h-4 w-4" /> 
@@ -3432,7 +3433,11 @@ export default function EntriesPage() {
                 setShowMobileMenu(false)
               }} 
               variant="outline" 
-              className={`flex items-center justify-center gap-2 w-full sm:w-auto ${currentView === 'usage' ? 'bg-primary text-primary-foreground' : ''}`}
+              className={`flex items-center justify-center gap-2 w-full sm:w-auto transition-all duration-200 ${
+                currentView === 'usage' 
+                  ? 'bg-emerald-100 text-emerald-700 border-emerald-300 dark:bg-emerald-900 dark:text-emerald-100 dark:border-emerald-700' 
+                  : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50 dark:bg-gray-800 dark:text-gray-200 dark:border-gray-600 dark:hover:bg-gray-700'
+              }`}
               size="sm"
             >
               <FileText className="h-4 w-4" /> 
@@ -3447,7 +3452,11 @@ export default function EntriesPage() {
                 setShowMobileMenu(false)
               }} 
               variant="outline" 
-              className={`flex items-center justify-center gap-2 w-full sm:w-auto ${currentView === 'manual' ? 'bg-primary text-primary-foreground' : ''}`}
+              className={`flex items-center justify-center gap-2 w-full sm:w-auto transition-all duration-200 ${
+                currentView === 'manual' 
+                  ? 'bg-emerald-100 text-emerald-700 border-emerald-300 dark:bg-emerald-900 dark:text-emerald-100 dark:border-emerald-700' 
+                  : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50 dark:bg-gray-800 dark:text-gray-200 dark:border-gray-600 dark:hover:bg-gray-700'
+              }`}
               size="sm"
             >
               <ClipboardList className="h-4 w-4" /> 
