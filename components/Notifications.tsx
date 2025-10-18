@@ -1,18 +1,19 @@
 'use client';
 
-import { useEffect } from 'react';
 import { showToast, showSuccess, showError, showInfo, showWarning } from '@/lib/notification-service';
 
 /**
  * A utility component that makes it easy to show toast notifications
- * from anywhere in your application.
+ * from anywhere in your application using Sonner.
  *
  * Usage: 
- * 1. Import toast functions directly: 
- *    import { showToast, showSuccess, showError } from '@/lib/notification-service';
+ * 1. Import Notifications or toast functions directly: 
+ *    import { Notifications } from '@/components/Notifications';
+ *    import { toast } from 'sonner';
  * 
  * 2. Use them anywhere in your application:
- *    showSuccess('Success', 'Your action was completed successfully');
+ *    Notifications.success('Success', 'Your action was completed successfully');
+ *    toast.success('Success', { description: 'Your action was completed' });
  */
 export const Notifications = {
   show: showToast,

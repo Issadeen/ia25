@@ -3,6 +3,7 @@ import "./globals.css"
 import { Providers } from '@/components/providers/auth-provider'
 import { FirebaseProvider } from '@/lib/contexts/firebase-context'
 import { ThemeProvider } from '@/components/theme-provider'
+import { Toaster } from '@/components/ui/sonner'
 
 const inter = Inter({ subsets: ["latin"] })
 
@@ -19,6 +20,7 @@ export default function RootLayout({
       <body>
         <Providers>
           {children}
+          <Toaster />
         </Providers>
       </body>
     </html>

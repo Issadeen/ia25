@@ -7,6 +7,7 @@ import { useTheme } from "next-themes"
 import * as Popover from '@radix-ui/react-popover'
 import { 
   ArrowLeft,
+  ArrowLeftRight,
   ArrowUp,
   Sun,
   Moon,
@@ -321,6 +322,8 @@ export default function EntriesPage() {
   const [isAdminMode, setIsAdminMode] = useState(false);
   const [hiddenDuplicates, setHiddenDuplicates] = useState<Set<string>>(new Set());
   const [showDuplicates, setShowDuplicates] = useState(false);
+  const [allowCrossDestination, setAllowCrossDestination] = useState(false);
+  const allocateButtonClickRef = useRef<{ lastClick: number; clickCount: number }>({ lastClick: 0, clickCount: 0 });
 
   const { data: session, status } = useSession()
   const router = useRouter()
@@ -354,6 +357,7 @@ export default function EntriesPage() {
     setError(null)
     setSelectedEntriesWithVolumes([]);
     setRemainingRequired(0);
+    setAllowCrossDestination(false);
   }
 
   const restoreLastForm = () => {
@@ -521,26 +525,28 @@ export default function EntriesPage() {
     setAnimateBell(true)
     setTimeout(() => setAnimateBell(false), 1000)
 
-    // Show toast notification for all notification types
+    // Show toast notification - using only the Notifications system (no duplicate UI toast)
+    // Different durations based on importance
+    const durations = {
+      success: 3000,  // 3 seconds for success
+      error: 6000,    // 6 seconds for errors (more time to read)
+      warning: 5000,  // 5 seconds for warnings
+      info: 4000      // 4 seconds for info
+    };
+
     switch (type) {
       case 'success':
-        Notifications.success(title, message);
+        Notifications.success(title, message, durations.success);
         break;
       case 'error':
-        Notifications.error(title, message);
-        // Also show in UI toast for error type (keeping existing behavior)
-        toast({
-          title,
-          description: message,
-          variant: "destructive"
-        });
+        Notifications.error(title, message, durations.error);
         break;
       case 'warning':
-        Notifications.warning(title, message);
+        Notifications.warning(title, message, durations.warning);
         break;
       case 'info':
       default:
-        Notifications.info(title, message);
+        Notifications.info(title, message, durations.info);
         break;
     }
   };
@@ -768,7 +774,7 @@ export default function EntriesPage() {
         return;
       }
 
-      console.log('Fetching entries for:', { product, destination });
+      console.log('Fetching entries for:', { product, destination, allowCrossDestination });
       
       const snapshot = await get(dbRef(db, 'tr800'));
       if (!snapshot.exists()) {
@@ -782,6 +788,12 @@ export default function EntriesPage() {
       }
 
       const entries: Entry[] = [];
+      
+      // Define cross-destination mapping for SSD and DRC
+      const crossDestinations = ['ssd', 'drc'];
+      const targetDestinations = allowCrossDestination && crossDestinations.includes(destination.toLowerCase())
+        ? crossDestinations
+        : [destination.toLowerCase()];
       
       snapshot.forEach((childSnapshot) => {
         const data = childSnapshot.val();
@@ -800,7 +812,7 @@ export default function EntriesPage() {
 
         if (
           entryProduct === product.toLowerCase() &&
-          entryDestination === destination.toLowerCase() &&
+          targetDestinations.includes(entryDestination) &&
           remainingQuantity > 0
         ) {
           entries.push({
@@ -825,9 +837,13 @@ export default function EntriesPage() {
       setAvailableEntries(entries);
       
       if (entries.length > 0) {
+        const destinationInfo = allowCrossDestination && crossDestinations.includes(destination.toLowerCase())
+          ? `${destination.toUpperCase()} (includes ${crossDestinations.filter(d => d !== destination.toLowerCase()).join(', ').toUpperCase()} entries)`
+          : destination.toUpperCase();
+        
         addNotification(
           "Entries Found",
-          `Found ${entries.length} entries for ${product.toUpperCase()} to ${destination.toUpperCase()}`,
+          `Found ${entries.length} entries for ${product.toUpperCase()} to ${destinationInfo}`,
           "info"
         );
       } else {
@@ -906,7 +922,7 @@ export default function EntriesPage() {
       setAvailableEntries([]);
       setSelectedEntries([]);
     }
-  }, [product, destination]);
+  }, [product, destination, allowCrossDestination]);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -1013,6 +1029,10 @@ export default function EntriesPage() {
 
   useEffect(() => {
     setEntryUsedInPermit('')
+    // Reset cross-destination if destination is not SSD or DRC
+    if (!['ssd', 'drc'].includes(destination.toLowerCase())) {
+      setAllowCrossDestination(false);
+    }
   }, [destination])
 
   useEffect(() => {
@@ -1440,9 +1460,26 @@ export default function EntriesPage() {
       setOriginalData(tempOriginalData)
       setEntriesData(allocations)
   
+      // Check if any cross-destination entries were used
+      const crossDestinationEntries = allocations.filter(
+        alloc => alloc.destination.toLowerCase() !== destination.toLowerCase()
+      );
+      
+      if (crossDestinationEntries.length > 0) {
+        const crossDestInfo = crossDestinationEntries.map(e => 
+          `${e.number} (${e.destination.toUpperCase()})`
+        ).join(', ');
+        
+        addNotification(
+          "Cross-Destination Allocation",
+          `Used ${crossDestinationEntries.length} ${crossDestinationEntries[0].destination.toUpperCase()} ${crossDestinationEntries.length === 1 ? 'entry' : 'entries'} for ${destination.toUpperCase()} truck: ${crossDestInfo}`,
+          "warning"
+        );
+      }
+  
       addNotification(
         "Success",
-        `Allocated ${requiredQuantity.toLocaleString()} liters for ${destination.toUpperCase()} using ${allocations.length} entries`,
+        `Allocated ${requiredQuantity.toLocaleString()} liters for ${destination.toUpperCase()} using ${allocations.length} ${allocations.length === 1 ? 'entry' : 'entries'}`,
         "success"
       )
   
@@ -2578,11 +2615,48 @@ export default function EntriesPage() {
               </div>
             )}
 
+            {allowCrossDestination && (
+              <div className="mt-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <AlertTriangle className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                      <span className="text-sm font-medium text-blue-700 dark:text-blue-300">
+                        Cross-Destination Mode Active
+                      </span>
+                    </div>
+                    <p className="text-xs text-blue-600 dark:text-blue-400 mt-1">
+                      SSD and DRC entries can be used interchangeably for {product.toUpperCase()} allocations
+                    </p>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setAllowCrossDestination(false);
+                      addNotification(
+                        "Cross-Destination Disabled",
+                        "Allocation restricted to destination-specific entries only",
+                        "info"
+                      );
+                    }}
+                    className="text-xs border-blue-300 dark:border-blue-700 hover:bg-blue-100 dark:hover:bg-blue-900/40"
+                  >
+                    Disable
+                  </Button>
+                </div>
+              </div>
+            )}
+
             <div className="mt-6 flex flex-col sm:flex-row gap-3">
               <Button 
                 onClick={getEntries}
                 disabled={isLoading}
-                className="w-full sm:w-auto bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-600 hover:from-emerald-500 hover:via-teal-400 hover:to-blue-500 text-white"
+                className={`w-full sm:w-auto ${
+                  allowCrossDestination 
+                    ? 'bg-gradient-to-r from-blue-600 via-purple-500 to-pink-600 hover:from-blue-500 hover:via-purple-400 hover:to-pink-500' 
+                    : 'bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-600 hover:from-emerald-500 hover:via-teal-400 hover:to-blue-500'
+                } text-white relative`}
               >
                 {isLoading ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
@@ -2590,6 +2664,11 @@ export default function EntriesPage() {
                   <RefreshCw className="h-4 w-4" />
                 )}
                 Allocate
+                {allowCrossDestination && (
+                  <span className="ml-2 px-1.5 py-0.5 bg-white/20 rounded text-xs">
+                    Cross
+                  </span>
+                )}
               </Button>
               <Button
                 variant="outline"
@@ -2629,16 +2708,43 @@ export default function EntriesPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {entriesData.map((entry, index) => (
-                    <TableRow key={index}>
-                      <TableCell>{entry.number}</TableCell>
-                      <TableCell>{entry.truckNumber}</TableCell>
-                      <TableCell>{entry.initialQuantity}</TableCell>
-                      <TableCell>{entry.remainingQuantity}</TableCell>
-                      <TableCell>{entry.subtractedQuantity}</TableCell>
-                      <TableCell>{entry.destination}</TableCell>
-                    </TableRow>
-                  ))}
+                  {entriesData.map((entry, index) => {
+                    const isCrossDestination = allowCrossDestination && 
+                      entry.destination.toLowerCase() !== destination.toLowerCase();
+                    
+                    return (
+                      <TableRow 
+                        key={index}
+                        className={isCrossDestination ? 'bg-blue-50 dark:bg-blue-950/20 border-l-4 border-l-blue-500' : ''}
+                      >
+                        <TableCell>
+                          <div className="flex items-center gap-2">
+                            {entry.number}
+                            {isCrossDestination && (
+                              <Badge variant="outline" className="bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300 text-xs">
+                                <ArrowLeftRight className="h-3 w-3 mr-1" />
+                                Cross
+                              </Badge>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell>{entry.truckNumber}</TableCell>
+                        <TableCell>{entry.initialQuantity.toLocaleString()}</TableCell>
+                        <TableCell>{entry.remainingQuantity.toLocaleString()}</TableCell>
+                        <TableCell>{entry.subtractedQuantity.toLocaleString()}</TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-2">
+                            {entry.destination.toUpperCase()}
+                            {isCrossDestination && (
+                              <span className="text-xs text-blue-600 dark:text-blue-400">
+                                (Used for {destination.toUpperCase()})
+                              </span>
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
                 </TableBody>
               </Table>
               <div className="mt-6 flex flex-col sm:flex-row gap-3">
@@ -2808,55 +2914,79 @@ export default function EntriesPage() {
           </div>
         </div>
         <div className="space-y-4 mt-2">
-          {availableEntries.map((entry) => (
-            <div key={entry.key} className="p-4 border rounded-lg bg-card">
-              <div className="flex items-center justify-between mb-2">
-                <div className="font-medium flex items-center gap-2">
-                  {entry.number}
-                  {entry.permitNumber && (
-                    <Badge variant="outline" className="bg-blue-100/50 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300">
-                      <Receipt className="h-3 w-3 mr-1" />
-                      Permit Entry
-                    </Badge>
-                  )}
+          {availableEntries.map((entry) => {
+            const isCrossDestination = allowCrossDestination && 
+              entry.destination.toLowerCase() !== destination.toLowerCase();
+            
+            return (
+              <div 
+                key={entry.key} 
+                className={`p-4 border rounded-lg transition-all ${
+                  isCrossDestination 
+                    ? 'bg-blue-50 dark:bg-blue-950/30 border-blue-300 dark:border-blue-700 shadow-md ring-2 ring-blue-200 dark:ring-blue-800' 
+                    : 'bg-card border-gray-200 dark:border-gray-700'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <div className="font-medium flex items-center gap-2">
+                    {entry.number}
+                    {isCrossDestination && (
+                      <Badge variant="outline" className="bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300 border-blue-400 dark:border-blue-600">
+                        <ArrowLeftRight className="h-3 w-3 mr-1" />
+                        {entry.destination.toUpperCase()} Entry
+                      </Badge>
+                    )}
+                    {entry.permitNumber && (
+                      <Badge variant="outline" className="bg-purple-100/50 text-purple-700 dark:bg-purple-900/50 dark:text-purple-300">
+                        <Receipt className="h-3 w-3 mr-1" />
+                        Permit
+                      </Badge>
+                    )}
+                  </div>
+                  <div className="text-sm text-muted-foreground">
+                    Available: {entry.remainingQuantity.toLocaleString()} liters
+                  </div>
                 </div>
-                <div className="text-sm text-muted-foreground">
-                  Available: {entry.remainingQuantity.toLocaleString()} liters
-                </div>
-              </div>
-              <div className="flex items-center gap-4">
-                <Input
-                  type="number"
-                  placeholder="Volume to allocate"
-                  className="max-w-[200px]"
-                  max={entry.remainingQuantity}
-                  onChange={(e) => {
-                    const value = parseFloat(e.target.value || '0');
-                    if (value > entry.remainingQuantity) {
-                      addNotification(
-                        "Invalid Volume",
-                        `Cannot exceed available quantity of ${entry.remainingQuantity.toLocaleString()} liters`,
-                        "error"
-                      );
-                      return;
-                    }
-                    
-                    setSelectedEntriesWithVolumes(prev => {
-                      const newSelections = prev.filter(item => item.entryKey !== entry.key);
-                      if (value > 0) {
-                        newSelections.push({ entryKey: entry.key, allocatedVolume: value });
+                {isCrossDestination && (
+                  <div className="mb-2 text-xs text-blue-600 dark:text-blue-400 flex items-center gap-1">
+                    <AlertTriangle className="h-3 w-3" />
+                    Using {entry.destination.toUpperCase()} entry for {destination.toUpperCase()} truck
+                  </div>
+                )}
+                <div className="flex items-center gap-4">
+                  <Input
+                    type="number"
+                    placeholder="Volume to allocate"
+                    className="max-w-[200px]"
+                    max={entry.remainingQuantity}
+                    onChange={(e) => {
+                      const value = parseFloat(e.target.value || '0');
+                      if (value > entry.remainingQuantity) {
+                        addNotification(
+                          "Invalid Volume",
+                          `Cannot exceed available quantity of ${entry.remainingQuantity.toLocaleString()} liters`,
+                          "error"
+                        );
+                        return;
                       }
-                      return newSelections;
-                    });
-                  }}
-                  value={selectedEntriesWithVolumes.find(item => item.entryKey === entry.key)?.allocatedVolume || ''}
-                />
-                <div className="text-sm text-muted-foreground">
-                  Remaining after allocation: {(entry.remainingQuantity - (selectedEntriesWithVolumes.find(item => item.entryKey === entry.key)?.allocatedVolume || 0)).toLocaleString()} liters
+                      
+                      setSelectedEntriesWithVolumes(prev => {
+                        const newSelections = prev.filter(item => item.entryKey !== entry.key);
+                        if (value > 0) {
+                          newSelections.push({ entryKey: entry.key, allocatedVolume: value });
+                        }
+                        return newSelections;
+                      });
+                    }}
+                    value={selectedEntriesWithVolumes.find(item => item.entryKey === entry.key)?.allocatedVolume || ''}
+                  />
+                  <div className="text-sm text-muted-foreground">
+                    Remaining after allocation: {(entry.remainingQuantity - (selectedEntriesWithVolumes.find(item => item.entryKey === entry.key)?.allocatedVolume || 0)).toLocaleString()} liters
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     );
@@ -2964,9 +3094,26 @@ export default function EntriesPage() {
       setOriginalData(tempOriginalData);
       setEntriesData(allocations);
       
+      // Check if any cross-destination entries were used
+      const crossDestinationEntries = allocations.filter(
+        alloc => alloc.destination.toLowerCase() !== destination.toLowerCase()
+      );
+      
+      if (crossDestinationEntries.length > 0) {
+        const crossDestInfo = crossDestinationEntries.map(e => 
+          `${e.number} (${e.destination.toUpperCase()})`
+        ).join(', ');
+        
+        addNotification(
+          "Cross-Destination Allocation",
+          `Used ${crossDestinationEntries.length} ${crossDestinationEntries[0].destination.toUpperCase()} ${crossDestinationEntries.length === 1 ? 'entry' : 'entries'} for ${destination.toUpperCase()} truck: ${crossDestInfo}`,
+          "warning"
+        );
+      }
+      
       addNotification(
         "Success",
-        `Allocated ${at20Quantity} liters using ${allocations.length} entries`,
+        `Allocated ${at20Quantity} liters using ${allocations.length} ${allocations.length === 1 ? 'entry' : 'entries'}`,
         "success"
       );
       
@@ -3071,6 +3218,39 @@ export default function EntriesPage() {
         "Edit and remove functionality is now available",
         "info"
       );
+    }
+  };
+
+  const handleHeaderClick = () => {
+    const now = Date.now();
+    const timeSinceLastClick = now - allocateButtonClickRef.current.lastClick;
+    
+    // Reset count if more than 2 seconds have passed
+    if (timeSinceLastClick > 2000) {
+      allocateButtonClickRef.current.clickCount = 1;
+    } else {
+      allocateButtonClickRef.current.clickCount += 1;
+    }
+    
+    allocateButtonClickRef.current.lastClick = now;
+    
+    // Check if SSD or DRC destination
+    const isCrossDestinationEligible = ['ssd', 'drc'].includes(destination.toLowerCase());
+    
+    if (allocateButtonClickRef.current.clickCount === 3 && isCrossDestinationEligible && product) {
+      setAllowCrossDestination(prev => {
+        const newValue = !prev;
+        addNotification(
+          newValue ? "Cross-Destination Enabled" : "Cross-Destination Disabled",
+          newValue 
+            ? `SSD trucks can now use DRC entries and vice versa for ${product.toUpperCase()}`
+            : "Allocation restricted to destination-specific entries only",
+          "info"
+        );
+        return newValue;
+      });
+      // Reset click count after toggle
+      allocateButtonClickRef.current.clickCount = 0;
     }
   };
 
@@ -3207,7 +3387,11 @@ export default function EntriesPage() {
               >
                 <ArrowLeft className="h-4 w-4 sm:h-5 sm:w-5" />
               </Button>
-              <h1 className="text-sm sm:text-xl font-semibold bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent truncate">
+              <h1 
+                className="text-sm sm:text-xl font-semibold bg-gradient-to-r from-emerald-600 via-teal-500 to-blue-500 bg-clip-text text-transparent truncate cursor-pointer select-none hover:opacity-80 transition-opacity"
+                onClick={handleHeaderClick}
+                title="Triple-click to toggle cross-destination mode (SSD/DRC only)"
+              >
                 Allocate Entries
               </h1>
             </div>

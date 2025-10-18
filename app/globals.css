@@ -60,3 +60,50 @@ body {
     @apply bg-background text-foreground;
   }
 }
+
+/* Sonner Toast Customization */
+[data-sonner-toast] {
+  @apply backdrop-blur-md;
+}
+
+[data-sonner-toast][data-styled="true"] {
+  @apply shadow-2xl border-2;
+}
+
+/* Success toast styling */
+[data-sonner-toast][data-type="success"] {
+  @apply border-green-500/50 dark:border-green-600/50;
+}
+
+/* Error toast styling */
+[data-sonner-toast][data-type="error"] {
+  @apply border-red-500/50 dark:border-red-600/50;
+}
+
+/* Warning toast styling */
+[data-sonner-toast][data-type="warning"] {
+  @apply border-amber-500/50 dark:border-amber-600/50;
+}
+
+/* Info toast styling */
+[data-sonner-toast][data-type="info"] {
+  @apply border-blue-500/50 dark:border-blue-600/50;
+}
+
+/* Toast stacking - each subsequent toast appears slightly behind */
+[data-sonner-toaster] [data-sonner-toast]:not([data-front="true"]) {
+  @apply opacity-90 scale-[0.97];
+  transform-origin: top;
+}
+
+/* Hover effect on stacked toasts */
+[data-sonner-toaster]:hover [data-sonner-toast]:not([data-front="true"]) {
+  @apply opacity-100 scale-100;
+}
+
+/* Mobile responsiveness */
+@media (max-width: 640px) {
+  [data-sonner-toast] {
+    @apply w-full mx-2;
+  }
+}

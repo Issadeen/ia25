@@ -1,11 +1,4 @@
-import { useToastNotification } from "@/components/ui/toast-notification";
-
-// This is a singleton instance of the notification service
-let toastNotificationHook: ReturnType<typeof useToastNotification> | null = null;
-
-export const setToastNotificationHook = (hook: ReturnType<typeof useToastNotification> | null) => {
-  toastNotificationHook = hook;
-};
+import { toast } from "sonner";
 
 export const showToast = (
   title: string,
@@ -13,15 +6,25 @@ export const showToast = (
   type: "success" | "info" | "warning" | "error" = "info",
   duration: number = 5000
 ) => {
-  if (toastNotificationHook) {
-    toastNotificationHook.showToast({
-      title,
-      message,
-      type,
-      duration,
-    });
-  } else {
-    console.warn("Toast notification hook not set. Make sure you're using the ToastProvider.");
+  const options = {
+    description: message,
+    duration,
+  };
+
+  switch (type) {
+    case "success":
+      toast.success(title, options);
+      break;
+    case "error":
+      toast.error(title, options);
+      break;
+    case "warning":
+      toast.warning(title, options);
+      break;
+    case "info":
+    default:
+      toast.info(title, options);
+      break;
   }
 };
 
