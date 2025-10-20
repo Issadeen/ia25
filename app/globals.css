@@ -62,8 +62,20 @@ body {
 }
 
 /* Sonner Toast Customization */
+/* Ensure toaster is fixed and doesn't affect layout */
+[data-sonner-toaster] {
+  position: fixed !important;
+  pointer-events: none;
+  z-index: 9999;
+}
+
+[data-sonner-toaster] > * {
+  pointer-events: auto;
+}
+
 [data-sonner-toast] {
   @apply backdrop-blur-md;
+  will-change: transform, opacity;
 }
 
 [data-sonner-toast][data-styled="true"] {

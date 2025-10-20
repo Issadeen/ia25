@@ -41,6 +41,9 @@ const Toaster = ({ ...props }: ToasterProps) => {
       expand={true}
       richColors
       closeButton
+      offset="16px"
+      gap={8}
+      visibleToasts={5}
       {...props}
     />
   )

@@ -6,7 +6,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 // Add Avatar imports
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 // Remove useTheme and Sun/Moon imports since they're now in theme-toggle
-import { useEffect, useState } from "react"
+import { useEffect, useState, useMemo, useCallback } from "react"
 import { useSession } from "next-auth/react"
 import { useRouter } from "next/navigation"
 // Add Triangle to imports
@@ -299,6 +299,9 @@ export default function OrdersPage() {
   // Add state for owner balances
   const [ownerBalances, setOwnerBalances] = useState<{[owner: string]: OwnerBalance}>({});
 
+  // Add pagination state
+  const [displayLimit, setDisplayLimit] = useState(50); // Show 50 orders initially
+
   // Add new state
   const [balanceUsageHistory, setBalanceUsageHistory] = useState<{[owner: string]: BalanceUsage[]}>({});
 
@@ -417,8 +420,62 @@ export default function OrdersPage() {
     }
   };
 
-  // 2. Define functions before useEffect hooks
-  const updateSummaryData = (data: WorkDetail[]) => {
+  // Memoize sorted work details to avoid re-sorting on every render
+  const sortedWorkDetails = useMemo(() => {
+    return [...workDetails].sort((a, b) => {
+      // Sort by owner name alphabetically
+      return a.owner.toLowerCase().localeCompare(b.owner.toLowerCase())
+    })
+  }, [workDetails]);
+
+  // Memoize filtered work details
+  const filteredWorkDetails = useMemo(() => {
+    return sortedWorkDetails.filter(detail => {
+      // Hide completed orders and released orders unless showCompleted is true
+      if (!showCompleted && (detail.released || detail.status === "completed")) {
+        return false;
+      }
+
+      const matchesOwner = ownerFilter ? detail.owner.toLowerCase().includes(ownerFilter.toLowerCase()) : true;
+      const matchesProduct = productFilter !== "ALL" ? detail.product === productFilter : true;
+      
+      // Queue status filter
+      const matchesQueueStatus = queueFilter === "ALL" 
+        ? true 
+        : queueFilter === "QUEUED" 
+          ? detail.status === "queued" || detail.status === "completed"
+          : detail.status !== "queued" && detail.status !== "completed";
+      
+      // Loaded status filter
+      const matchesLoadedStatus = loadedFilter === "ALL"
+        ? true
+        : loadedFilter === "LOADED"
+          ? detail.loaded
+          : !detail.loaded;
+      
+      const matchesSearch = searchTerm
+        ? detail.owner.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          detail.truck_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          detail.orderno.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          detail.product.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          detail.destination.toLowerCase().includes(searchTerm.toLowerCase())
+        : true;
+
+      return matchesOwner && 
+             matchesProduct && 
+             matchesQueueStatus && 
+             matchesLoadedStatus && 
+             matchesSearch;
+    });
+  }, [sortedWorkDetails, showCompleted, ownerFilter, productFilter, queueFilter, loadedFilter, searchTerm]);
+
+  // Memoize displayed (paginated) work details
+  const displayedWorkDetails = useMemo(() => {
+    return filteredWorkDetails.slice(0, displayLimit);
+  }, [filteredWorkDetails, displayLimit]);
+
+  // 2. Define functions before useEffect hooks - memoized to prevent unnecessary re-calculations
+  const updateSummaryData = useCallback((data: WorkDetail[]) => {
     // First group orders by truck number and original order number
     const groupedOrders = data.reduce((acc, detail) => {
       const key = `${detail.truck_number}-${detail.originalOrderNo || detail.orderno}`;
@@ -533,7 +590,7 @@ export default function OrdersPage() {
   
     setSummaryStats(stats);
     setOwnerSummary(ownerSummaryData);
-  };
+  }, []); // Empty dependency array since it only uses its parameter
 
   const handleStatusChange = async (id: string, currentStatus: string) => {
     try {
@@ -1510,8 +1567,12 @@ const calculateOwnerTotals = (owner: string | null) => {
   }, [status, router])
 
   useEffect(() => {
+    let isMounted = true;
+    
     const workDetailsRef = ref(database, 'work_details')
     const unsubscribe = onValue(workDetailsRef, (snapshot) => {
+      if (!isMounted) return;
+      
       const data = snapshot.val()
       if (data) {
         const details = Object.entries(data).map(([id, detail]: [string, any]) => ({
@@ -1524,8 +1585,16 @@ const calculateOwnerTotals = (owner: string | null) => {
       setIsLoading(false)
     })
 
-    return () => unsubscribe()
+    return () => {
+      isMounted = false;
+      unsubscribe();
+    }
   }, [])
+
+  // Reset pagination when filters change
+  useEffect(() => {
+    setDisplayLimit(50);
+  }, [searchTerm, ownerFilter, productFilter, queueFilter, loadedFilter, showCompleted]);
 
   const profilePicUrl = useProfileImage()
 
@@ -1775,53 +1844,9 @@ const handlePriceEdit = async (id: string, newPrice: string) => {
     return null
   }
 
-  const getSortedWorkDetails = () => {
-    return [...workDetails].sort((a, b) => {
-      // Sort by owner name alphabetically
-      return a.owner.toLowerCase().localeCompare(b.owner.toLowerCase())
-    })
-  }
-
-  // Modify getFilteredWorkDetails to include the completed filter
-const getFilteredWorkDetails = () => {
-  return getSortedWorkDetails().filter(detail => {
-    // Hide completed orders and released orders unless showCompleted is true
-    if (!showCompleted && (detail.released || detail.status === "completed")) {
-      return false;
-    }
-
-    const matchesOwner = ownerFilter ? detail.owner.toLowerCase().includes(ownerFilter.toLowerCase()) : true;
-    const matchesProduct = productFilter !== "ALL" ? detail.product === productFilter : true;
-    
-    // Queue status filter
-    const matchesQueueStatus = queueFilter === "ALL" 
-      ? true 
-      : queueFilter === "QUEUED" 
-        ? detail.status === "queued" || detail.status === "completed"
-        : detail.status !== "queued" && detail.status !== "completed";
-    
-    // Loaded status filter
-    const matchesLoadedStatus = loadedFilter === "ALL"
-      ? true
-      : loadedFilter === "LOADED"
-        ? detail.loaded
-        : !detail.loaded;
-    
-    const matchesSearch = searchTerm
-      ? detail.owner.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        detail.truck_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        detail.orderno.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        detail.product.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        detail.destination.toLowerCase().includes(searchTerm.toLowerCase())
-      : true;
-
-    return matchesOwner && 
-           matchesProduct && 
-           matchesQueueStatus && 
-           matchesLoadedStatus && 
-           matchesSearch;
-  });
-};
+  // Keep legacy function for compatibility with existing code
+  const getSortedWorkDetails = () => sortedWorkDetails;
+  const getFilteredWorkDetails = () => filteredWorkDetails;
 
   // Update handleGenerateGatePass to show warning for unloaded trucks
 const handleGenerateGatePass = async (detail: WorkDetail) => {
@@ -2591,7 +2616,7 @@ const showTruckQuickView = (detail: WorkDetail) => {
               <div className="min-w-[800px] p-4 sm:p-0">
                 <div className="flex justify-between items-center mb-2">
                   <span className="text-sm text-muted-foreground">
-                    {getFilteredWorkDetails().length} orders found
+                    {filteredWorkDetails.length} orders found {displayedWorkDetails.length < filteredWorkDetails.length && `(showing ${displayedWorkDetails.length})`}
                   </span>
                   <Button
                     variant="outline"
@@ -2608,10 +2633,10 @@ const showTruckQuickView = (detail: WorkDetail) => {
                       {bulkActionMode && (
                         <th className="p-3 text-left">
                           <Checkbox 
-                            checked={selectedRows.length > 0 && selectedRows.length === getFilteredWorkDetails().length}
+                            checked={selectedRows.length > 0 && selectedRows.length === displayedWorkDetails.length}
                             onCheckedChange={(checked) => {
                               if (checked) {
-                                setSelectedRows(getFilteredWorkDetails().map(d => d.id));
+                                setSelectedRows(displayedWorkDetails.map(d => d.id));
                               } else {
                                 setSelectedRows([]);
                               }
@@ -2637,7 +2662,7 @@ const showTruckQuickView = (detail: WorkDetail) => {
                   </thead>
                   <AnimatePresence mode="wait">
                     <tbody>
-                      {getFilteredWorkDetails().map((detail, index) => {
+                      {displayedWorkDetails.map((detail, index) => {
                         const isEditing = editableRows[detail.id]?._editing;
                         const editedDetail = editableRows[detail.id] || detail;
                       
@@ -2995,6 +3020,21 @@ const showTruckQuickView = (detail: WorkDetail) => {
                       </tbody>
                   </AnimatePresence>
                 </table>
+
+                {/* Load More Button */}
+                {filteredWorkDetails.length > displayLimit && (
+                  <div className="mt-6 flex justify-center">
+                    <button
+                      onClick={() => setDisplayLimit(prev => prev + 50)}
+                      className="px-6 py-3 bg-gradient-to-r from-emerald-600 to-teal-500 text-white rounded-lg hover:from-emerald-700 hover:to-teal-600 transition-all duration-200 flex items-center gap-2 shadow-lg"
+                    >
+                      <span>Load More Orders</span>
+                      <span className="text-sm opacity-90">
+                        ({filteredWorkDetails.length - displayLimit} remaining)
+                      </span>
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           )}

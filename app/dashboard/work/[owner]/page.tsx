@@ -3,7 +3,7 @@
 import { useParams, useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
-import { useEffect, useState } from "react"
+import { useEffect, useState, useMemo, useCallback } from "react"
 import { database } from "@/lib/firebase"
 import { ref, onValue, update, get, push, set, query, orderByChild, equalTo } from "firebase/database"
 import { formatNumber, toFixed2, cn } from "@/lib/utils" // Add cn to imports
@@ -267,103 +267,19 @@ export default function OwnerDetailsPage() {
   // Add new state for selected trucks total
   const [selectedTrucksTotal, setSelectedTrucksTotal] = useState(0)
 
-  // Fetch data when component mounts
-  useEffect(() => {
-    const fetchOwnerData = async () => {
-      try {
-        // Fetch work details
-        const workDetailsRef = ref(database, `work_details`)
-        onValue(workDetailsRef, (snapshot) => {
-          if (snapshot.exists()) {
-            const data = Object.entries(snapshot.val())
-              .map(([id, detail]: [string, any]) => ({ id, ...detail }))
-              .filter((detail) => detail.owner === owner)
-            setWorkDetails(data)
-          }
-        })
+  // Add pagination state
+  const [displayLimit, setDisplayLimit] = useState(50) // Show 50 trucks initially
 
-        // Fetch payments
-        const paymentsRef = ref(database, `payments/${owner}`)
-        onValue(paymentsRef, (snapshot) => {
-          if (snapshot.exists()) {
-            const payments = Object.entries(snapshot.val()).map(([id, data]: [string, any]) => ({ id, ...data }))
-            setOwnerPayments(payments)
-          }
-        })
+  const profilePicUrl = useProfileImage()
 
-        // Fetch balance
-        const balanceRef = ref(database, `owner_balances/${owner}`)
-        onValue(balanceRef, (snapshot) => {
-          if (snapshot.exists()) {
-            setOwnerBalance(snapshot.val())
-          }
-        })
-
-        // Fetch truck payments
-        const truckPaymentsRef = ref(database, "truckPayments")
-        onValue(truckPaymentsRef, (snapshot) => {
-          if (snapshot.exists()) {
-            setTruckPayments(snapshot.val())
-          }
-        })
-
-        // Fetch balance usage history
-        const historyRef = ref(database, `balance_usage/${owner}`)
-        onValue(historyRef, (snapshot) => {
-          if (snapshot.exists()) {
-            setBalanceUsageHistory(Object.values(snapshot.val()))
-          }
-        })
-
-        // Fetch payment order
-        const orderRef = ref(database, `payment_order/${owner}`)
-        onValue(orderRef, (snapshot) => {
-          if (snapshot.exists()) {
-            setPaymentOrder(snapshot.val())
-          }
-        })
-
-        // Fetch reconciliations
-        const reconciliationsRef = ref(database, `payment_reconciliations/${owner}`)
-        onValue(reconciliationsRef, (snapshot) => {
-          if (snapshot.exists()) {
-            setReconciliations(Object.values(snapshot.val()))
-          }
-        })
-
-        setIsLoading(false)
-      } catch (error) {
-        console.error("Error fetching data:", error)
-        toast({
-          title: "Error",
-          description: "Failed to load owner data",
-        })
-      }
-    }
-
-    fetchOwnerData()
-  }, [owner, selectedYear, selectedMonths])
-
-  // Add these helper functions to filter data by date
+  // Helper function to filter data by month - must be defined before useMemo hooks use it
   const filterByMonth = (date: string, year: number, months: Set<number>) => {
     const itemDate = new Date(date);
     return itemDate.getFullYear() === year && months.has(itemDate.getMonth() + 1);
   };
 
-  const getFilteredOwnerPayments = () => {
-    return ownerPayments.filter(payment => 
-      filterByMonth(payment.timestamp, selectedYear, selectedMonths)
-    );
-  };
-
-  const getFilteredBalanceHistory = () => {
-    return balanceUsageHistory.filter(entry => 
-      filterByMonth(entry.timestamp, selectedYear, selectedMonths)
-    );
-  };
-
-  // Update the getFilteredWorkDetails function to only fetch due and pending payments
-  const getFilteredWorkDetails = () => {
+  // Memoize filtered work details for better performance
+  const filteredWorkDetails = useMemo(() => {
     return workDetails.filter(truck => {
       // Only include loaded trucks that aren't fully paid
       if (truck.loaded) {
@@ -389,6 +305,137 @@ export default function OwnerDetailsPage() {
       // Default: exclude
       return false;
     });
+  }, [workDetails, truckPayments, selectedTrucks, selectedYear, selectedMonths]);
+
+  // Memoize displayed (paginated) work details
+  const displayedWorkDetails = useMemo(() => {
+    const loaded = filteredWorkDetails.filter(t => t.loaded);
+    return loaded.slice(0, displayLimit);
+  }, [filteredWorkDetails, displayLimit]);
+
+  // Keep legacy function for compatibility
+  const getFilteredWorkDetails = useCallback(() => filteredWorkDetails, [filteredWorkDetails]);
+
+  // Reset pagination when filters change
+  useEffect(() => {
+    setDisplayLimit(50);
+  }, [selectedYear, selectedMonths]);
+
+  // Fetch data when component mounts - with proper cleanup
+  useEffect(() => {
+    let isMounted = true;
+    const unsubscribers: (() => void)[] = [];
+
+    const fetchOwnerData = async () => {
+      try {
+        // Fetch work details - filtered by owner
+        const workDetailsRef = ref(database, `work_details`)
+        const unsubWork = onValue(workDetailsRef, (snapshot) => {
+          if (!isMounted) return;
+          if (snapshot.exists()) {
+            const data = Object.entries(snapshot.val())
+              .map(([id, detail]: [string, any]) => ({ id, ...detail }))
+              .filter((detail) => detail.owner === owner)
+            setWorkDetails(data)
+          }
+        })
+        unsubscribers.push(unsubWork);
+
+        // Fetch payments
+        const paymentsRef = ref(database, `payments/${owner}`)
+        const unsubPayments = onValue(paymentsRef, (snapshot) => {
+          if (!isMounted) return;
+          if (snapshot.exists()) {
+            const payments = Object.entries(snapshot.val()).map(([id, data]: [string, any]) => ({ id, ...data }))
+            setOwnerPayments(payments)
+          }
+        })
+        unsubscribers.push(unsubPayments);
+
+        // Fetch balance
+        const balanceRef = ref(database, `owner_balances/${owner}`)
+        const unsubBalance = onValue(balanceRef, (snapshot) => {
+          if (!isMounted) return;
+          if (snapshot.exists()) {
+            setOwnerBalance(snapshot.val())
+          }
+        })
+        unsubscribers.push(unsubBalance);
+
+        // Fetch truck payments
+        const truckPaymentsRef = ref(database, "truckPayments")
+        const unsubTruckPayments = onValue(truckPaymentsRef, (snapshot) => {
+          if (!isMounted) return;
+          if (snapshot.exists()) {
+            setTruckPayments(snapshot.val())
+          }
+        })
+        unsubscribers.push(unsubTruckPayments);
+
+        // Fetch balance usage history
+        const historyRef = ref(database, `balance_usage/${owner}`)
+        const unsubHistory = onValue(historyRef, (snapshot) => {
+          if (!isMounted) return;
+          if (snapshot.exists()) {
+            setBalanceUsageHistory(Object.values(snapshot.val()))
+          }
+        })
+        unsubscribers.push(unsubHistory);
+
+        // Fetch payment order
+        const orderRef = ref(database, `payment_order/${owner}`)
+        const unsubOrder = onValue(orderRef, (snapshot) => {
+          if (!isMounted) return;
+          if (snapshot.exists()) {
+            setPaymentOrder(snapshot.val())
+          }
+        })
+        unsubscribers.push(unsubOrder);
+
+        // Fetch reconciliations
+        const reconciliationsRef = ref(database, `payment_reconciliations/${owner}`)
+        const unsubReconciliations = onValue(reconciliationsRef, (snapshot) => {
+          if (!isMounted) return;
+          if (snapshot.exists()) {
+            setReconciliations(Object.values(snapshot.val()))
+          }
+        })
+        unsubscribers.push(unsubReconciliations);
+
+        if (isMounted) {
+          setIsLoading(false)
+        }
+      } catch (error) {
+        console.error("Error fetching data:", error)
+        if (isMounted) {
+          toast({
+            title: "Error",
+            description: "Failed to load owner data",
+          })
+        }
+      }
+    }
+
+    fetchOwnerData()
+
+    // Cleanup function
+    return () => {
+      isMounted = false;
+      unsubscribers.forEach(unsub => unsub());
+    }
+  }, [owner, selectedYear, selectedMonths])
+
+  // Add these helper functions to filter data by date
+  const getFilteredOwnerPayments = () => {
+    return ownerPayments.filter(payment => 
+      filterByMonth(payment.timestamp, selectedYear, selectedMonths)
+    );
+  };
+
+  const getFilteredBalanceHistory = () => {
+    return balanceUsageHistory.filter(entry => 
+      filterByMonth(entry.timestamp, selectedYear, selectedMonths)
+    );
   };
 
   // Update calculateTotals to use filtered data
@@ -1407,8 +1454,6 @@ export default function OwnerDetailsPage() {
     }
   }, [workDetails])
 
-  const profilePicUrl = useProfileImage()
-
   // Add function to get active balance based on view
   const getActiveBalance = (): number => {
     const ourBalance = ownerBalance?.amount || 0
@@ -2202,14 +2247,14 @@ export default function OwnerDetailsPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {getFilteredWorkDetails().filter(truck => truck.loaded).length === 0 ? (
+                        {filteredWorkDetails.filter(truck => truck.loaded).length === 0 ? (
                           <tr>
                             <td colSpan={9} className="p-4 text-center text-muted-foreground">
                               No loaded trucks for the selected period.
                             </td>
                           </tr>
                         ) : (
-                          getFilteredWorkDetails().filter(truck => truck.loaded).map(truck => {
+                          displayedWorkDetails.map(truck => {
                             const { totalDue, totalAllocated, balance, pendingAmount } = getTruckAllocations(truck, truckPayments);
                             const isUnpaid = balance > 0;
                             return (
@@ -2334,6 +2379,22 @@ export default function OwnerDetailsPage() {
                         )}
                       </tbody>
                     </table>
+
+                    {/* Load More Button */}
+                    {filteredWorkDetails.filter(t => t.loaded).length > displayLimit && (
+                      <div className="mt-6 flex justify-center">
+                        <Button
+                          onClick={() => setDisplayLimit(prev => prev + 50)}
+                          variant="outline"
+                          className="px-6 py-3 flex items-center gap-2"
+                        >
+                          <span>Load More Trucks</span>
+                          <span className="text-sm opacity-90">
+                            ({filteredWorkDetails.filter(t => t.loaded).length - displayLimit} remaining)
+                          </span>
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 </div>
               </Card>

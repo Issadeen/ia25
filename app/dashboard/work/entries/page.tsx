@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef, useCallback } from "react"
+import { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import { useSession, signOut } from "next-auth/react"
 import { useRouter } from "next/navigation"
 import { useTheme } from "next-themes"
@@ -29,7 +29,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { getDatabase, ref as dbRef, get, query, orderByChild, equalTo, update, push, remove } from 'firebase/database'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useToast } from "@/components/ui/use-toast"
-import { Notifications } from "@/components/Notifications"
+import { toast as sonnerToast } from "sonner"
 import {
   Table,
   TableBody,
@@ -325,11 +325,24 @@ export default function EntriesPage() {
   const [allowCrossDestination, setAllowCrossDestination] = useState(false);
   const allocateButtonClickRef = useRef<{ lastClick: number; clickCount: number }>({ lastClick: 0, clickCount: 0 });
 
+  // Pagination state for available entries
+  const [displayLimit, setDisplayLimit] = useState(20); // Show 20 entries initially
+
   const { data: session, status } = useSession()
   const router = useRouter()
   const { theme, setTheme } = useTheme()
   const { toast } = useToast()
   const profilePicUrl = useProfileImage()
+
+  // Memoize displayed (paginated) entries
+  const displayedEntries = useMemo(() => {
+    return availableEntries.slice(0, displayLimit);
+  }, [availableEntries, displayLimit]);
+
+  // Reset pagination when product or destination changes
+  useEffect(() => {
+    setDisplayLimit(20);
+  }, [product, destination]);
 
   function generateProfileImageFilename(email: string): string {
     return email.toLowerCase().replace(/[@.]/g, '_') + '_com.jpg'
@@ -525,7 +538,7 @@ export default function EntriesPage() {
     setAnimateBell(true)
     setTimeout(() => setAnimateBell(false), 1000)
 
-    // Show toast notification - using only the Notifications system (no duplicate UI toast)
+    // Show toast notification using Sonner
     // Different durations based on importance
     const durations = {
       success: 3000,  // 3 seconds for success
@@ -536,17 +549,29 @@ export default function EntriesPage() {
 
     switch (type) {
       case 'success':
-        Notifications.success(title, message, durations.success);
+        sonnerToast.success(title, { 
+          description: message,
+          duration: durations.success 
+        });
         break;
       case 'error':
-        Notifications.error(title, message, durations.error);
+        sonnerToast.error(title, { 
+          description: message,
+          duration: durations.error 
+        });
         break;
       case 'warning':
-        Notifications.warning(title, message, durations.warning);
+        sonnerToast.warning(title, { 
+          description: message,
+          duration: durations.warning 
+        });
         break;
       case 'info':
       default:
-        Notifications.info(title, message, durations.info);
+        sonnerToast.info(title, { 
+          description: message,
+          duration: durations.info 
+        });
         break;
     }
   };
@@ -2904,7 +2929,13 @@ export default function EntriesPage() {
     return (
       <div className="mt-6">
         <div className="flex justify-between items-center mb-4">
-          <Label className="text-lg font-semibold">Available Entries:</Label>
+          <div>
+            <Label className="text-lg font-semibold">Available Entries:</Label>
+            <p className="text-xs text-muted-foreground mt-1">
+              {availableEntries.length} entries found
+              {displayedEntries.length < availableEntries.length && ` (showing ${displayedEntries.length})`}
+            </p>
+          </div>
           <div className="text-sm text-muted-foreground">
             Required: {requiredQuantity.toLocaleString()} liters
             <br />
@@ -2914,7 +2945,7 @@ export default function EntriesPage() {
           </div>
         </div>
         <div className="space-y-4 mt-2">
-          {availableEntries.map((entry) => {
+          {displayedEntries.map((entry) => {
             const isCrossDestination = allowCrossDestination && 
               entry.destination.toLowerCase() !== destination.toLowerCase();
             
@@ -2987,6 +3018,21 @@ export default function EntriesPage() {
               </div>
             );
           })}
+          
+          {/* Load More Button */}
+          {availableEntries.length > displayLimit && (
+            <div className="mt-6 flex justify-center">
+              <button
+                onClick={() => setDisplayLimit(prev => prev + 20)}
+                className="px-6 py-3 bg-gradient-to-r from-emerald-600 to-teal-500 text-white rounded-lg hover:from-emerald-700 hover:to-teal-600 transition-all duration-200 flex items-center gap-2 shadow-lg"
+              >
+                <span>Load More Entries</span>
+                <span className="text-sm opacity-90">
+                  ({availableEntries.length - displayLimit} remaining)
+                </span>
+              </button>
+            </div>
+          )}
         </div>
       </div>
     );
