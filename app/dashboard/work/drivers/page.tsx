@@ -62,6 +62,7 @@ export default function DriversPage() {
   const [copiedItem, setCopiedItem] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [displayLimit, setDisplayLimit] = useState(20) // Show 20 initially
   const profilePicUrl = useProfileImage()
 
   // Use debounced search term to improve performance
@@ -72,6 +73,11 @@ export default function DriversPage() {
     setMounted(true)
   }, [])
 
+  // Reset display limit when search changes
+  useEffect(() => {
+    setDisplayLimit(20)
+  }, [debouncedSearchTerm])
+
   useEffect(() => {
     if (status === "unauthenticated") {
       router.push("/login")
@@ -79,23 +85,38 @@ export default function DriversPage() {
   }, [status, router])
 
   useEffect(() => {
+    let isMounted = true
     setIsLoading(true)
     setError(null)
     
     const driversRef = ref(database, 'drivers')
+    
+    // Use onValue with once: true equivalent by using get instead for initial load
     const unsubscribe = onValue(driversRef, (snapshot) => {
+      if (!isMounted) return
+      
       try {
         if (snapshot.exists()) {
           const data = snapshot.val()
           
-          // Handle different data structures
+          // Handle different data structures with optimized processing
           let driversArray: DriverInfo[] = []
           
           if (Array.isArray(data)) {
             driversArray = data.filter(Boolean)
           } else if (typeof data === 'object') {
-            driversArray = Object.values(data).filter(Boolean) as DriverInfo[]
+            // Pre-filter and process data more efficiently
+            driversArray = Object.values(data)
+              .filter((item): item is DriverInfo => {
+                return Boolean(item) && 
+                       item !== null &&
+                       typeof item === 'object' && 
+                       'phoneNumber' in item
+              })
           }
+          
+          // Sort once at data load to avoid sorting on every search
+          driversArray.sort((a, b) => (a.name || '').localeCompare(b.name || ''))
           
           setDrivers(driversArray)
         } else {
@@ -103,27 +124,36 @@ export default function DriversPage() {
         }
       } catch (err) {
         console.error('Error processing drivers data:', err)
-        setError('Failed to load drivers data')
-        toast({
-          title: "Error",
-          description: "Failed to load drivers data. Please refresh the page.",
-          variant: "destructive",
-        })
+        if (isMounted) {
+          setError('Failed to load drivers data')
+          toast({
+            title: "Error",
+            description: "Failed to load drivers data. Please refresh the page.",
+            variant: "destructive",
+          })
+        }
       } finally {
-        setIsLoading(false)
+        if (isMounted) {
+          setIsLoading(false)
+        }
       }
     }, (error) => {
       console.error('Firebase error:', error)
-      setError('Failed to connect to database')
-      setIsLoading(false)
-      toast({
-        title: "Connection Error",
-        description: "Failed to connect to the database. Please check your connection.",
-        variant: "destructive",
-      })
+      if (isMounted) {
+        setError('Failed to connect to database')
+        setIsLoading(false)
+        toast({
+          title: "Connection Error",
+          description: "Failed to connect to the database. Please check your connection.",
+          variant: "destructive",
+        })
+      }
     })
 
-    return () => unsubscribe()
+    return () => {
+      isMounted = false
+      unsubscribe()
+    }
   }, [])
 
   // Update handleCopy to always copy both truck and phone
@@ -149,47 +179,52 @@ export default function DriversPage() {
 
 
 
-  // Memoized filtered drivers with improved search logic and performance monitoring
+  // Optimized filtered drivers with improved search logic
   const filteredDrivers = useMemo(() => {
-    const startTime = performance.now()
-    
     if (!debouncedSearchTerm.trim()) {
       return drivers
     }
 
     const searchTermLower = debouncedSearchTerm.toLowerCase().trim()
     
-    const result = drivers.filter(driver => {
-      // Ensure all fields exist and are strings
-      const name = (driver.name || '').toLowerCase()
-      const phoneNumber = (driver.phoneNumber || '').toString()
-      const trucks = Array.isArray(driver.trucks) ? driver.trucks : []
+    // Use a more efficient filter with early returns
+    return drivers.filter(driver => {
+      // Quick null/undefined checks
+      if (!driver) return false
       
-      // Search in name (case-insensitive)
-      if (name.includes(searchTermLower)) {
+      // Search in name (most common search)
+      const name = driver.name?.toLowerCase()
+      if (name && name.includes(searchTermLower)) {
         return true
       }
       
       // Search in phone number (exact match for numbers)
-      if (phoneNumber.includes(debouncedSearchTerm)) {
+      const phoneNumber = driver.phoneNumber?.toString()
+      if (phoneNumber && phoneNumber.includes(debouncedSearchTerm)) {
         return true
       }
       
-      // Search in truck numbers (case-insensitive)
-      if (trucks.some(truck => 
-        (truck || '').toLowerCase().includes(searchTermLower)
-      )) {
-        return true
+      // Search in truck numbers (check if trucks exist first)
+      if (Array.isArray(driver.trucks) && driver.trucks.length > 0) {
+        return driver.trucks.some(truck => 
+          truck && truck.toLowerCase().includes(searchTermLower)
+        )
       }
       
       return false
     })
-
-    const endTime = performance.now()
-    const searchTime = endTime - startTime
-    
-    return result
   }, [drivers, debouncedSearchTerm])
+
+  // Paginated drivers for better performance
+  const displayedDrivers = useMemo(() => {
+    return filteredDrivers.slice(0, displayLimit)
+  }, [filteredDrivers, displayLimit])
+
+  const hasMore = filteredDrivers.length > displayLimit
+
+  const loadMore = () => {
+    setDisplayLimit(prev => prev + 20)
+  }
 
   if (!mounted) return null
 
@@ -310,7 +345,7 @@ export default function DriversPage() {
                   <p className="text-sm text-muted-foreground">
                     {debouncedSearchTerm ? (
                       <>
-                        Showing {filteredDrivers.length} of {drivers.length} drivers
+                        Showing {Math.min(displayLimit, filteredDrivers.length)} of {filteredDrivers.length} drivers
                         {debouncedSearchTerm && (
                           <span className="ml-1">
                             matching "{debouncedSearchTerm}"
@@ -318,14 +353,14 @@ export default function DriversPage() {
                         )}
                       </>
                     ) : (
-                      <>Showing all {drivers.length} drivers</>
+                      <>Showing {Math.min(displayLimit, drivers.length)} of {drivers.length} drivers</>
                     )}
                   </p>
                 </div>
               )}
               
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {filteredDrivers.map((driver, index) => (
+              {displayedDrivers.map((driver, index) => (
                 <motion.div
                   key={`${driver.phoneNumber}-${driver.name}`}
                   variants={cardVariants}
@@ -402,6 +437,19 @@ export default function DriversPage() {
                 </motion.div>
               ))}
             </div>
+            
+            {/* Load More Button */}
+            {hasMore && !isLoading && (
+              <div className="flex justify-center pt-6">
+                <Button
+                  onClick={loadMore}
+                  variant="outline"
+                  className="min-w-[200px]"
+                >
+                  Load More ({filteredDrivers.length - displayLimit} remaining)
+                </Button>
+              </div>
+            )}
             </div>
           )}
         </div>
