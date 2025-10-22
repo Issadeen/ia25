@@ -46,6 +46,7 @@ import * as XLSX from "xlsx" // Add XLSX import
 import {
   getTruckAllocations,
   syncTruckPaymentStatus, // Add syncTruckPaymentStatus import
+  updatePaymentStatuses, // Add updatePaymentStatuses import
   type PaymentCorrection,
   correctPaymentAllocation, // Add PaymentCorrection and correctPaymentAllocation import
 } from "@/lib/payment-utils"
@@ -108,6 +109,10 @@ interface TruckPaymentHistory {
   note: string
   truckNumber: string
 }
+
+// Payment tolerance - small balances under this amount are considered paid
+// This prevents issues with rounding (e.g., $0.06 balances)
+const PAYMENT_TOLERANCE = 0.10; // 10 cents
 
 // Add new type for grouped payments
 interface GroupedTruckPayment {
@@ -538,12 +543,7 @@ export default function OwnerDetailsPage() {
         // Update truck status
         const truck = workDetails.find((t) => t.id === allocation.truckId)
         if (truck) {
-          const { balance } = getTruckAllocations(truck, truckPayments)
-          const newBalance = toFixed2(balance - allocation.amount)
-
-          updates[`work_details/${allocation.truckId}/paymentStatus`] = newBalance <= 0 ? "paid" : "partial"
-          updates[`work_details/${allocation.truckId}/paymentPending`] = newBalance > 0
-          updates[`work_details/${allocation.truckId}/paid`] = newBalance <= 0
+          await updatePaymentStatuses(database, updates, truck, allocation, truckPayments, owner)
         }
       }
 
@@ -1152,7 +1152,7 @@ export default function OwnerDetailsPage() {
       const truck = workDetails.find((t) => t.id === truckId)
       if (!truck) return
 
-      const updates = await syncTruckPaymentStatus(database, truck, truckPayments)
+      const updates = await syncTruckPaymentStatus(database, truck, truckPayments, owner)
       await update(ref(database), updates)
 
       toast({
@@ -1175,7 +1175,7 @@ export default function OwnerDetailsPage() {
       const allUpdates: { [path: string]: any } = {}
 
       for (const truck of workDetails.filter((t) => t.loaded)) {
-        const updates = await syncTruckPaymentStatus(database, truck, truckPayments)
+        const updates = await syncTruckPaymentStatus(database, truck, truckPayments, owner)
         Object.assign(allUpdates, updates)
       }
 

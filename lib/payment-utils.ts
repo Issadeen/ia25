@@ -2,12 +2,17 @@ import { toFixed2 } from "./utils";
 import type { WorkDetail, TruckPayment } from "@/types";
 import { ref, push, DatabaseReference, update, get } from "firebase/database";
 
+// Small balance tolerance - amounts below this are considered paid
+const BALANCE_TOLERANCE = 0.50; // $0.50 threshold
+
 // Update existing interfaces
 export interface TruckAllocation {
-  totalAllocated: number;
-  totalDue: number;
-  balance: number;
-  pendingAmount: number;
+  totalAllocated: number
+  totalDue: number
+  balance: number
+  pendingAmount: number
+  originalBalance?: number // Original balance before tolerance applied
+  toleranceApplied?: boolean // Whether tolerance was applied
 }
 
 // Use Firebase Database type
@@ -47,14 +52,23 @@ export const getTruckAllocations = (
     ? toFixed2(parseFloat(truck.price) * parseFloat(truck.at20))
     : 0;
   
-  const balance = toFixed2(totalDue - totalAllocated);
+  const originalBalance = toFixed2(totalDue - totalAllocated);
+  let balance = originalBalance;
+  
+  // If balance is below tolerance threshold, treat it as zero (fully paid)
+  if (balance > 0 && balance < BALANCE_TOLERANCE) {
+    balance = 0;
+  }
+  
   const pendingAmount = (balance > 0 && truck.paymentPending) ? balance : 0;
   
   return {
     totalAllocated,
     totalDue,
     balance,
-    pendingAmount
+    pendingAmount,
+    originalBalance, // Keep the original balance for audit purposes
+    toleranceApplied: originalBalance > 0 && originalBalance < BALANCE_TOLERANCE
   };
 };
 
@@ -113,13 +127,27 @@ export const validatePaymentForm = (
 };
 
 export const updatePaymentStatuses = async (
+  database: Database,
   updates: { [path: string]: any },
   truck: WorkDetail,
   allocation: { amount: number },
-  truckPayments: { [truckId: string]: TruckPayment[] }
+  truckPayments: { [truckId: string]: TruckPayment[] },
+  owner?: string
 ) => {
   const { balance } = getTruckAllocations(truck, truckPayments);
-  const newBalance = toFixed2(balance - allocation.amount);
+  const originalNewBalance = toFixed2(balance - allocation.amount);
+  let newBalance = originalNewBalance;
+  
+  // Apply tolerance - balances below threshold are considered paid
+  if (newBalance > 0 && newBalance < BALANCE_TOLERANCE) {
+    newBalance = 0;
+    
+    // Record tolerance write-off
+    if (owner) {
+      const writeOffUpdates = await recordToleranceWriteOff(database, truck, originalNewBalance, owner);
+      Object.assign(updates, writeOffUpdates);
+    }
+  }
   
   if (newBalance <= 0) {
     updates[`work_details/${truck.id}/paymentStatus`] = 'paid';
@@ -133,9 +161,11 @@ export const updatePaymentStatuses = async (
 export const syncTruckPaymentStatus = async (
   database: Database,
   truck: WorkDetail,
-  truckPayments: { [truckId: string]: TruckPayment[] }
+  truckPayments: { [truckId: string]: TruckPayment[] },
+  owner?: string
 ) => {
-  const { balance, totalAllocated, totalDue } = getTruckAllocations(truck, truckPayments);
+  const allocation = getTruckAllocations(truck, truckPayments);
+  const { balance, totalAllocated, totalDue, originalBalance, toleranceApplied } = allocation;
   const updates: { [path: string]: any } = {};
 
   // If status is completed, mark as paid regardless of balance
@@ -154,10 +184,17 @@ export const syncTruckPaymentStatus = async (
 
   // If loaded and has payments, update status
   if (truck.loaded) {
+    // balance will be 0 if it's below BALANCE_TOLERANCE (handled in getTruckAllocations)
     if (balance <= 0) {
       updates[`work_details/${truck.id}/paymentStatus`] = 'paid';
       updates[`work_details/${truck.id}/paymentPending`] = false;
       updates[`work_details/${truck.id}/paid`] = true;
+      
+      // Record tolerance write-off if it was applied
+      if (toleranceApplied && originalBalance && owner) {
+        const writeOffUpdates = await recordToleranceWriteOff(database, truck, originalBalance, owner);
+        Object.assign(updates, writeOffUpdates);
+      }
       // Also update status if it was queued
       if (truck.status === 'queued') {
         updates[`work_details/${truck.id}/status`] = 'completed';
@@ -281,6 +318,46 @@ export const updateBalanceAfterReconciliation = async (
     timestamp,
     type: "reconciliation_adjustment",
     note: "Balance adjusted after reconciliation"
+  };
+  
+  await update(ref(database), updates);
+  return updates;
+};
+
+// Record tolerance write-offs for audit purposes
+export const recordToleranceWriteOff = async (
+  database: Database,
+  truck: WorkDetail,
+  originalBalance: number,
+  owner: string
+) => {
+  const timestamp = new Date().toISOString();
+  const writeOffRef = push(ref(database, `tolerance_writeoffs/${owner}`));
+  
+  const updates: { [path: string]: any } = {};
+  
+  updates[`tolerance_writeoffs/${owner}/${writeOffRef.key}`] = {
+    truckId: truck.id,
+    truckNumber: truck.truck_number,
+    product: truck.product,
+    originalBalance: toFixed2(originalBalance),
+    writtenOffAmount: toFixed2(originalBalance),
+    tolerance: BALANCE_TOLERANCE,
+    timestamp,
+    at20: truck.at20,
+    totalDue: truck.at20 ? toFixed2(parseFloat(truck.price) * parseFloat(truck.at20)) : 0,
+    note: `Balance below tolerance threshold ($${BALANCE_TOLERANCE}) - auto-forgiven`
+  };
+  
+  // Also add to audit log
+  const auditRef = push(ref(database, `audit_logs/${owner}`));
+  updates[`audit_logs/${owner}/${auditRef.key}`] = {
+    type: 'tolerance_writeoff',
+    truckId: truck.id,
+    truckNumber: truck.truck_number,
+    amount: toFixed2(originalBalance),
+    timestamp,
+    note: `Small balance write-off: $${toFixed2(originalBalance)}`
   };
   
   await update(ref(database), updates);
