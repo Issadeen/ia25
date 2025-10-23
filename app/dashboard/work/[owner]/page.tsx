@@ -482,10 +482,14 @@ export default function OwnerDetailsPage() {
 
     const totals = loadedTrucks.reduce(
       (sum, truck) => {
-        const { totalDue, totalAllocated, pendingAmount } = getTruckAllocations(truck, truckPayments);
+        const { totalDue, totalAllocated, pendingAmount, balance } = getTruckAllocations(truck, truckPayments);
+        
+        // If there's an overpayment (negative balance), separate it from the actual payment
+        const amountPaidAgainstDue = balance < 0 ? totalDue : totalAllocated;
+        
         return {
           totalDue: sum.totalDue + totalDue,
-          totalPaid: sum.totalPaid + totalAllocated,
+          totalPaid: sum.totalPaid + amountPaidAgainstDue, // Only count actual payments, not overpayments
           pendingTotal: sum.pendingTotal + (pendingAmount || 0),
         };
       },
@@ -1058,6 +1062,42 @@ export default function OwnerDetailsPage() {
   useEffect(() => {
     fetchOwnerBalances()
   }, [owner, workDetails, truckPayments]) // Added dependencies
+
+  // Auto-fix retroactive credits if there are overpayments without credits
+  useEffect(() => {
+    let timeoutId: NodeJS.Timeout;
+    
+    const autoFixCredits = async () => {
+      // Check if there are overpayments (negative balances) but no available credits
+      const hasOverpayments = workDetails.some(truck => {
+        if (!truck.loaded) return false
+        const { balance } = getTruckAllocations(truck, truckPayments)
+        return balance < 0
+      })
+
+      // If we have overpayments but no credits, auto-fix
+      if (hasOverpayments && availableCredits === 0) {
+        try {
+          const response = await fetch('/api/admin/fix-credits', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ owner })
+          })
+          const data = await response.json()
+          // Silently complete - the Firebase listener will pick up the new credits
+        } catch (error) {
+          // Silent fail - don't bother the user with auto-fix errors
+        }
+      }
+    }
+
+    // Debounce the auto-fix to avoid too many calls
+    if (workDetails.length > 0) {
+      timeoutId = setTimeout(autoFixCredits, 500)
+    }
+
+    return () => clearTimeout(timeoutId)
+  }, [owner, workDetails, truckPayments, availableCredits])
 
   // Add functions for truck selection
   const handleTruckSelect = (truckId: string) => {
@@ -2374,8 +2414,8 @@ export default function OwnerDetailsPage() {
                         </div>
                         <div className="p-2 sm:p-4 rounded-lg border">
                           <div className="text-xs sm:text-sm font-medium text-muted-foreground">Balance</div>
-                          <div className={`text-lg sm:text-2xl font-bold ${totals.balance < 0 ? 'text-blue-600' : totals.balance === 0 ? 'text-green-600' : 'text-red-600'}`}>
-                            {totals.balance < 0 ? `-$${formatNumber(Math.abs(totals.balance))} (Credit)` : `$${formatNumber(Math.abs(totals.balance))}`}
+                          <div className={`text-lg sm:text-2xl font-bold ${totals.balance === 0 ? 'text-green-600' : 'text-red-600'}`}>
+                            $${formatNumber(Math.abs(totals.balance))}
                             {totals.pendingTotal > 0 && (
                               <div className="text-xs sm:text-sm text-orange-500">
                                 Includes ${formatNumber(totals.pendingTotal)} pending
@@ -2383,42 +2423,23 @@ export default function OwnerDetailsPage() {
                             )}
                           </div>
                         </div>
-                        <div className="p-2 sm:p-4 rounded-lg border relative">
-                          <div className="text-xs sm:text-sm font-medium text-muted-foreground">
-                            {activeBalanceView === 'ours' && availableCredits > 0 ? 'Credited Amount' :
-                             activeBalanceView === 'ours' ? 'Available Balance' : 
-                             activeBalanceView === 'theirs' ? 'Their Balance' : 
-                             'Balance Difference'}
-                          </div>
+                        <div className="p-2 sm:p-4 rounded-lg border">
+                          <div className="text-xs sm:text-sm font-medium text-muted-foreground">Total Credits</div>
                           <div className={cn(
                             "text-lg sm:text-2xl font-bold",
-                            activeBalanceView === 'ours' && availableCredits > 0 ? 'text-blue-600' :
-                            activeBalanceView === 'ours' ? 'text-green-600' :
-                            activeBalanceView === 'theirs' ? 'text-blue-600' :
-                            'text-amber-600'
+                            availableCredits > 0 ? 'text-blue-600' : 'text-muted-foreground'
                           )}>
-                            {activeBalanceView === 'ours' && availableCredits > 0 ? 
-                              `$${formatNumber(availableCredits)}` :
-                              `$${formatNumber(Math.abs(activeBalance))}`
-                            }
+                            ${formatNumber(availableCredits)}
                           </div>
-                          {activeBalanceView === 'ours' && availableCredits > 0 && (
+                          {availableCredits > 0 && (
                             <div className="text-xs text-blue-600 mt-1">
-                              ✓ Credited
+                              ✓ Available to use
                             </div>
                           )}
-                          {activeBalanceView === 'ours' && availableCredits === 0 && (
+                          {availableCredits === 0 && (
                             <div className="text-xs text-muted-foreground mt-1">
                               No credits
                             </div>
-                          )}
-                          {activeBalanceView !== 'ours' && acceptedReconciliations.length > 0 && (
-                            <button 
-                              onClick={() => setShowReconciliationHistory(true)}
-                              className="absolute bottom-1 right-1 text-[10px] text-muted-foreground hover:text-foreground"
-                            >
-                              Reconciliation Info
-                            </button>
                           )}
                         </div>
                       </>
