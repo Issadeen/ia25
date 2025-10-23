@@ -117,6 +117,8 @@ export async function auditTruck(
   }
 
   // Check for duplicate truck entries
+  // NOTE: Same truck can appear multiple times if it's different trips on different dates
+  // Only flag as duplicate if it's the SAME trip (same date, same product, same quantity)
   const allWorkDetailsRef = ref(database, `work_details`);
   const allWorkDetailsSnap = await get(allWorkDetailsRef);
   
@@ -126,16 +128,22 @@ export async function auditTruck(
       .filter((t: any) => 
         t.truck_number === truck.truck_number && 
         t.owner === owner &&
-        t.id !== truck.id
+        t.id !== truck.id &&
+        // IMPORTANT: Only flag as duplicate if same trip details (same date, product, quantity)
+        // Different dates = separate trips (legitimate)
+        t.createdAt === truck.createdAt &&
+        t.product === truck.product &&
+        t.quantity === truck.quantity &&
+        t.destination === truck.destination
       );
     
     if (allTrucks.length > 0) {
       report.duplicateEntries = allTrucks.map((t: any) => t.id);
       report.issues.push(
-        `Truck ${truck.truck_number} appears ${allTrucks.length + 1} times in the database`
+        `Truck ${truck.truck_number} appears ${allTrucks.length + 1} times with IDENTICAL details (same trip)`
       );
       report.fixes.push(
-        `Consolidate payments from duplicate entries or mark them as separate trips`
+        `Consolidate payments from duplicate entries (same trip) - keep one, delete the other`
       );
     }
   }
