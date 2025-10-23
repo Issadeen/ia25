@@ -54,21 +54,26 @@ export const getTruckAllocations = (
   
   const originalBalance = toFixed2(totalDue - totalAllocated);
   let balance = originalBalance;
+  let toleranceApplied = false;
   
-  // If balance is below tolerance threshold, treat it as zero (fully paid)
+  // ONLY apply tolerance to POSITIVE balances (underpayment)
+  // NEVER apply tolerance to NEGATIVE balances (overpayment/credit)
+  // Overpayments are legitimate credits that should be tracked
   if (balance > 0 && balance < BALANCE_TOLERANCE) {
     balance = 0;
+    toleranceApplied = true;
   }
   
+  // Pending amount only applies if there's an actual unpaid balance (positive)
   const pendingAmount = (balance > 0 && truck.paymentPending) ? balance : 0;
   
   return {
     totalAllocated,
     totalDue,
-    balance,
+    balance, // Can be negative (credit) or positive (owing) or zero (paid)
     pendingAmount,
     originalBalance, // Keep the original balance for audit purposes
-    toleranceApplied: originalBalance > 0 && originalBalance < BALANCE_TOLERANCE
+    toleranceApplied
   };
 };
 
@@ -137,10 +142,13 @@ export const updatePaymentStatuses = async (
   const { balance } = getTruckAllocations(truck, truckPayments);
   const originalNewBalance = toFixed2(balance - allocation.amount);
   let newBalance = originalNewBalance;
+  let toleranceApplied = false;
   
-  // Apply tolerance - balances below threshold are considered paid
+  // Apply tolerance ONLY for positive balances (underpayment)
+  // NEVER apply tolerance to negative balances (credits/overpayment)
   if (newBalance > 0 && newBalance < BALANCE_TOLERANCE) {
     newBalance = 0;
+    toleranceApplied = true;
     
     // Record tolerance write-off
     if (owner) {
@@ -149,9 +157,52 @@ export const updatePaymentStatuses = async (
     }
   }
   
+  // Status logic:
+  // - Positive balance (owing) → Due or Pending
+  // - Zero balance (exact payment) → Paid
+  // - Negative balance (overpaid/credit) → Paid (customer has credit for next load)
   if (newBalance <= 0) {
     updates[`work_details/${truck.id}/paymentStatus`] = 'paid';
     updates[`work_details/${truck.id}/paymentPending`] = false;
+    
+    // If there's a credit (negative balance), add it to available balance
+    if (newBalance < 0 && owner) {
+      const creditAmount = toFixed2(Math.abs(newBalance));
+      const creditId = `credit_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      
+      updates[`owner_credits/${owner}/${creditId}`] = {
+        id: creditId,
+        truckId: truck.id,
+        truckNumber: truck.truck_number,
+        amount: creditAmount,
+        timestamp: new Date().toISOString(),
+        source: 'overpayment',
+        status: 'available',
+        note: `Credit from overpayment on ${truck.truck_number}`
+      };
+      
+      // Add to balance usage history for tracking
+      const historyId = `history_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      updates[`balance_usage/${owner}/${historyId}`] = {
+        amount: creditAmount,
+        timestamp: new Date().toISOString(),
+        type: 'deposit',
+        usedFor: [truck.id],
+        paymentId: creditId,
+        note: `Credit generated from truck ${truck.truck_number} overpayment`
+      };
+      
+      // Update owner available balance - ADD the credit
+      const balanceHistoryId = `history_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      updates[`balance_usage/${owner}/${balanceHistoryId}`] = {
+        amount: creditAmount,
+        timestamp: new Date().toISOString(),
+        type: 'deposit',
+        usedFor: [],
+        paymentId: `overpayment_${creditId}`,
+        note: `Overpayment credit from truck ${truck.truck_number}: -${newBalance}`
+      };
+    }
   } else if (allocation.amount > 0) {
     updates[`work_details/${truck.id}/paymentStatus`] = 'partial';
     updates[`work_details/${truck.id}/paymentPending`] = true;
@@ -190,6 +241,34 @@ export const syncTruckPaymentStatus = async (
       updates[`work_details/${truck.id}/paymentPending`] = false;
       updates[`work_details/${truck.id}/paid`] = true;
       
+      // If there's a credit (negative balance), add it to available balance
+      if (balance < 0 && owner) {
+        const creditAmount = toFixed2(Math.abs(balance));
+        const creditId = `credit_sync_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        
+        updates[`owner_credits/${owner}/${creditId}`] = {
+          id: creditId,
+          truckId: truck.id,
+          truckNumber: truck.truck_number,
+          amount: creditAmount,
+          timestamp: new Date().toISOString(),
+          source: 'overpayment',
+          status: 'available',
+          note: `Credit from overpayment on ${truck.truck_number}`
+        };
+        
+        // Add to balance usage history for tracking
+        const historyId = `history_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        updates[`balance_usage/${owner}/${historyId}`] = {
+          amount: creditAmount,
+          timestamp: new Date().toISOString(),
+          type: 'deposit',
+          usedFor: [],
+          paymentId: creditId,
+          note: `Credit from truck ${truck.truck_number} overpayment: -$${toFixed2(Math.abs(balance))}`
+        };
+      }
+      
       // Record tolerance write-off if it was applied
       if (toleranceApplied && originalBalance && owner) {
         const writeOffUpdates = await recordToleranceWriteOff(database, truck, originalBalance, owner);
@@ -208,8 +287,9 @@ export const syncTruckPaymentStatus = async (
 
   // Add audit log with additional status info
   const timestamp = new Date().toISOString();
-  const auditRef = push(ref(database, `payment_status_fixes`));
-  updates[`payment_status_fixes/${auditRef.key}`] = {
+  const auditId = `audit_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  updates[`payment_status_fixes/${auditId}`] = {
+    id: auditId,
     truckId: truck.id,
     truckNumber: truck.truck_number,
     timestamp,
@@ -323,6 +403,47 @@ export const updateBalanceAfterReconciliation = async (
   await update(ref(database), updates);
   return updates;
 };
+
+/**
+ * Calculate available balance including prepayments and overpayment credits
+ */
+export async function getAvailableBalance(
+  database: Database,
+  owner: string
+): Promise<{ prepayment: number; credits: number; total: number }> {
+  let prepayment = 0;
+  let credits = 0;
+
+  // Get prepayment balance
+  const balanceRef = ref(database, `owner_balances/${owner}`);
+  const balanceSnap = await get(balanceRef);
+  if (balanceSnap.exists()) {
+    const balance = balanceSnap.val();
+    if (typeof balance === 'object' && balance.amount) {
+      prepayment = balance.amount;
+    } else if (typeof balance === 'number') {
+      prepayment = balance;
+    }
+  }
+
+  // Get available credits from overpayments
+  const creditsRef = ref(database, `owner_credits/${owner}`);
+  const creditsSnap = await get(creditsRef);
+  if (creditsSnap.exists()) {
+    const creditsData = Object.values(creditsSnap.val()) as any[];
+    credits = toFixed2(
+      creditsData
+        .filter((c) => c.status === 'available')
+        .reduce((sum, c) => sum + (c.amount || 0), 0)
+    );
+  }
+
+  return {
+    prepayment: toFixed2(prepayment),
+    credits: toFixed2(credits),
+    total: toFixed2(prepayment + credits)
+  };
+}
 
 // Record tolerance write-offs for audit purposes
 export const recordToleranceWriteOff = async (

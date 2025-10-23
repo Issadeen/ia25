@@ -85,7 +85,7 @@
     },
       
       
-    "payment_reconciliations": {
+      "payment_reconciliations": {
       ".read": "auth != null",
       ".write": "auth != null",
       ".indexOn": ["timestamp", "ownerId", "status", "month"],
@@ -117,6 +117,41 @@
       ".indexOn": ["lastUpdated"],
       "$owner_id": {
         ".validate": "newData.hasChildren(['amount', 'lastUpdated']) && newData.child('amount').isNumber() && newData.child('lastUpdated').isString()"
+      }
+    },
+
+    "owner_credits": {
+      ".read": "auth != null",
+      ".write": "auth != null",
+      ".indexOn": ["timestamp", "status", "source"],
+      "$owner_id": {
+        ".read": "auth != null",
+        ".write": "auth != null",
+        "$credit_id": {
+          ".validate": "newData.hasChildren(['amount', 'timestamp', 'status']) && newData.child('amount').isNumber() && newData.child('timestamp').isString()"
+        }
+      }
+    },
+
+    "balance_usage": {
+      ".read": "auth != null",
+      ".write": "auth != null",
+      ".indexOn": ["timestamp", "type"],
+      "$owner_id": {
+        ".read": "auth != null",
+        ".write": "auth != null",
+        "$usage_id": {
+          ".validate": "newData.hasChildren(['amount', 'timestamp', 'type']) && newData.child('amount').isNumber() && newData.child('timestamp').isString()"
+        }
+      }
+    },
+
+    "payment_status_fixes": {
+      ".read": "auth != null",
+      ".write": "auth != null",
+      ".indexOn": ["timestamp", "truckId"],
+      "$audit_id": {
+        ".validate": "newData.hasChildren(['timestamp'])"
       }
     },
 

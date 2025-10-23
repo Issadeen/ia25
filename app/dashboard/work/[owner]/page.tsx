@@ -49,7 +49,15 @@ import {
   updatePaymentStatuses, // Add updatePaymentStatuses import
   type PaymentCorrection,
   correctPaymentAllocation, // Add PaymentCorrection and correctPaymentAllocation import
+  getAvailableBalance, // Add getAvailableBalance import
 } from "@/lib/payment-utils"
+import {
+  auditTruck,
+  auditOwner,
+  fixUnlinkedPayments,
+  generateReconciliationSummary,
+  type TruckReconciliationReport
+} from "@/lib/reconciliation-helpers"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -275,6 +283,15 @@ export default function OwnerDetailsPage() {
   // Add pagination state
   const [displayLimit, setDisplayLimit] = useState(50) // Show 50 trucks initially
 
+  // Add reconciliation audit state
+  const [isAuditRunning, setIsAuditRunning] = useState(false)
+  const [auditResults, setAuditResults] = useState<any>(null)
+  const [showAuditDialog, setShowAuditDialog] = useState(false)
+  const [selectedTruckAudit, setSelectedTruckAudit] = useState<any>(null)
+
+  // Add state for tracking overpayment credits
+  const [availableCredits, setAvailableCredits] = useState(0)
+
   const profilePicUrl = useProfileImage()
 
   // Helper function to filter data by month - must be defined before useMemo hooks use it
@@ -366,6 +383,22 @@ export default function OwnerDetailsPage() {
           }
         })
         unsubscribers.push(unsubBalance);
+
+        // Fetch overpayment credits
+        const creditsRef = ref(database, `owner_credits/${owner}`)
+        const unsubCredits = onValue(creditsRef, (snapshot) => {
+          if (!isMounted) return;
+          if (snapshot.exists()) {
+            const creditsData = Object.values(snapshot.val()) as any[];
+            const totalCredits = creditsData
+              .filter((c) => c.status === 'available')
+              .reduce((sum, c) => sum + (c.amount || 0), 0);
+            setAvailableCredits(totalCredits);
+          } else {
+            setAvailableCredits(0);
+          }
+        })
+        unsubscribers.push(unsubCredits);
 
         // Fetch truck payments
         const truckPaymentsRef = ref(database, "truckPayments")
@@ -1195,6 +1228,105 @@ export default function OwnerDetailsPage() {
     }
   }
 
+  // Add new handler to fix retroactive credits
+  const handleFixRetroactiveCredits = async () => {
+    try {
+      const response = await fetch('/api/admin/fix-credits', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ owner })
+      })
+
+      const data = await response.json()
+
+      if (data.success) {
+        toast({
+          title: "Credits Fixed",
+          description: `Created ${data.creditsCreated} credit records from overpayments`,
+        })
+      } else {
+        toast({
+          title: "Error",
+          description: data.error || "Failed to fix credits",
+          variant: "destructive",
+        })
+      }
+    } catch (error) {
+      console.error("Fix credits error:", error)
+      toast({
+        title: "Error",
+        description: "Failed to fix retroactive credits",
+        variant: "destructive",
+      })
+    }
+  }
+
+  // Add new handler to mark credits as used
+  const handleMarkCreditsUsed = async () => {
+    try {
+      // Get all available credits for this owner
+      const creditsRef = ref(database, `owner_credits/${owner}`)
+      const creditsSnapshot = await get(creditsRef)
+
+      if (!creditsSnapshot.exists()) {
+        toast({
+          title: "No Credits",
+          description: "No credits found to mark as used",
+        })
+        return
+      }
+
+      const creditsData = creditsSnapshot.val()
+      const availableCreditIds = Object.entries(creditsData)
+        .filter(([_, credit]: any) => credit.status === 'available')
+        .map(([id, _]) => id)
+
+      if (availableCreditIds.length === 0) {
+        toast({
+          title: "No Available Credits",
+          description: "All credits have already been used",
+        })
+        return
+      }
+
+      // Call API to mark credits as used
+      const response = await fetch('/api/admin/mark-credits-used', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ 
+          owner,
+          creditIds: availableCreditIds
+        })
+      })
+
+      const data = await response.json()
+
+      if (data.success) {
+        toast({
+          title: "Credits Marked as Used",
+          description: `${data.creditsMarked} credits ($${data.totalAmount.toFixed(2)}) marked as used`,
+        })
+      } else {
+        toast({
+          title: "Error",
+          description: data.error || "Failed to mark credits as used",
+          variant: "destructive",
+        })
+      }
+    } catch (error) {
+      console.error("Mark credits used error:", error)
+      toast({
+        title: "Error",
+        description: "Failed to mark credits as used",
+        variant: "destructive",
+      })
+    }
+  }
+
   // Add new handler
   const handleCorrectionSubmit = async () => {
     if (!selectedCorrection || !correctionAmount || !correctionNote) return
@@ -1463,11 +1595,13 @@ export default function OwnerDetailsPage() {
       .filter(rec => rec.status === 'accepted')
       .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0]
     
-    if (!latestAccepted) return ourBalance
+    if (!latestAccepted) {
+      return ourBalance;
+    }
     
     switch (activeBalanceView) {
       case 'ours':
-        return ourBalance
+        return ourBalance;
       case 'theirs':
         return latestAccepted.theirBalance
       case 'difference':
@@ -1789,6 +1923,91 @@ export default function OwnerDetailsPage() {
         .join(', ');
     }
     return `${selectedMonths.size} Months Selected`;
+  };
+
+  // Add audit functions
+  const handleRunAudit = async () => {
+    if (!owner) return;
+    
+    setIsAuditRunning(true);
+    try {
+      const result = await auditOwner(database, owner);
+      setAuditResults(result);
+      setShowAuditDialog(true);
+      
+      toast({
+        title: "Audit Complete",
+        description: `Found ${result.trucksWithIssues} truck(s) with issues out of ${result.totalTrucks} total`,
+      });
+    } catch (error) {
+      console.error("Audit error:", error);
+      toast({
+        title: "Audit Failed",
+        description: "Failed to run reconciliation audit",
+        variant: "destructive",
+      });
+    } finally {
+      setIsAuditRunning(false);
+    }
+  };
+
+  const handleAuditTruck = async (truckId: string) => {
+    if (!owner) return;
+    
+    const truck = workDetails.find(t => t.id === truckId);
+    if (!truck) return;
+    
+    setIsAuditRunning(true);
+    try {
+      const report = await auditTruck(database, truck, owner);
+      setSelectedTruckAudit(report);
+      setShowAuditDialog(true);
+      
+      if (report.issues.length > 0) {
+        toast({
+          title: "Issues Found",
+          description: `Found ${report.issues.length} issue(s) with this truck`,
+          variant: "destructive",
+        });
+      } else {
+        toast({
+          title: "No Issues",
+          description: "This truck has no payment allocation issues",
+        });
+      }
+    } catch (error) {
+      console.error("Audit error:", error);
+      toast({
+        title: "Audit Failed",
+        description: "Failed to audit truck",
+        variant: "destructive",
+      });
+    } finally {
+      setIsAuditRunning(false);
+    }
+  };
+
+  const handleFixUnlinkedPayments = async (report: TruckReconciliationReport) => {
+    if (!owner || report.unlinkedPayments.length === 0) return;
+    
+    try {
+      await fixUnlinkedPayments(database, report.truckId, report.unlinkedPayments);
+      
+      toast({
+        title: "Payments Fixed",
+        description: `Restored ${report.unlinkedPayments.length} payment(s) totaling $${formatNumber(report.unlinkedPayments.reduce((sum, p) => sum + p.amount, 0))}`,
+      });
+      
+      // Re-run audit to confirm fix
+      await handleAuditTruck(report.truckId);
+    } catch (error) {
+      console.error("Fix error:", error);
+      toast({
+        title: "Fix Failed",
+        description: "Failed to fix unlinked payments",
+        variant: "destructive",
+      });
+    }
   };
 
   return (
@@ -2155,8 +2374,8 @@ export default function OwnerDetailsPage() {
                         </div>
                         <div className="p-2 sm:p-4 rounded-lg border">
                           <div className="text-xs sm:text-sm font-medium text-muted-foreground">Balance</div>
-                          <div className={`text-lg sm:text-2xl font-bold ${totals.balance < 0 ? 'text-green-600' : 'text-red-600'}`}>
-                            ${formatNumber(Math.abs(totals.balance))}
+                          <div className={`text-lg sm:text-2xl font-bold ${totals.balance < 0 ? 'text-blue-600' : totals.balance === 0 ? 'text-green-600' : 'text-red-600'}`}>
+                            {totals.balance < 0 ? `-$${formatNumber(Math.abs(totals.balance))} (Credit)` : `$${formatNumber(Math.abs(totals.balance))}`}
                             {totals.pendingTotal > 0 && (
                               <div className="text-xs sm:text-sm text-orange-500">
                                 Includes ${formatNumber(totals.pendingTotal)} pending
@@ -2166,18 +2385,33 @@ export default function OwnerDetailsPage() {
                         </div>
                         <div className="p-2 sm:p-4 rounded-lg border relative">
                           <div className="text-xs sm:text-sm font-medium text-muted-foreground">
-                            {activeBalanceView === 'ours' ? 'Available Balance' : 
+                            {activeBalanceView === 'ours' && availableCredits > 0 ? 'Credited Amount' :
+                             activeBalanceView === 'ours' ? 'Available Balance' : 
                              activeBalanceView === 'theirs' ? 'Their Balance' : 
                              'Balance Difference'}
                           </div>
                           <div className={cn(
                             "text-lg sm:text-2xl font-bold",
+                            activeBalanceView === 'ours' && availableCredits > 0 ? 'text-blue-600' :
                             activeBalanceView === 'ours' ? 'text-green-600' :
                             activeBalanceView === 'theirs' ? 'text-blue-600' :
                             'text-amber-600'
                           )}>
-                            ${formatNumber(Math.abs(activeBalance))}
+                            {activeBalanceView === 'ours' && availableCredits > 0 ? 
+                              `$${formatNumber(availableCredits)}` :
+                              `$${formatNumber(Math.abs(activeBalance))}`
+                            }
                           </div>
+                          {activeBalanceView === 'ours' && availableCredits > 0 && (
+                            <div className="text-xs text-blue-600 mt-1">
+                              ✓ Credited
+                            </div>
+                          )}
+                          {activeBalanceView === 'ours' && availableCredits === 0 && (
+                            <div className="text-xs text-muted-foreground mt-1">
+                              No credits
+                            </div>
+                          )}
                           {activeBalanceView !== 'ours' && acceptedReconciliations.length > 0 && (
                             <button 
                               onClick={() => setShowReconciliationHistory(true)}
@@ -2214,10 +2448,41 @@ export default function OwnerDetailsPage() {
                     <Button
                       variant="outline"
                       size="sm"
+                      onClick={handleRunAudit}
+                      disabled={isAuditRunning}
+                      className="text-xs"
+                      title="Run Payment Reconciliation Audit"
+                    >
+                      <AlertCircle className="mr-1 h-3 w-3" />
+                      {isAuditRunning ? "Auditing..." : "Audit Payments"}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
                       onClick={handleFixAllStatuses}
                       className="text-xs"
                     >
                       Fix All Statuses
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleFixRetroactiveCredits}
+                      className="text-xs"
+                      title="Create credits for existing overpayments"
+                    >
+                      <AlertCircle className="mr-1 h-3 w-3" />
+                      Fix Retroactive Credits
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleMarkCreditsUsed}
+                      className="text-xs"
+                      title="Mark all available credits as used"
+                    >
+                      <CheckIcon className="mr-1 h-3 w-3" />
+                      Mark Credits Used
                     </Button>
                   </div>
                 </div>
@@ -2352,16 +2617,35 @@ export default function OwnerDetailsPage() {
                                 </td>
                                 <td className="p-2">${formatNumber(totalDue)}</td>
                                 <td className="p-2">${formatNumber(totalAllocated)}</td>
-                                <td className="p-2">${formatNumber(Math.abs(balance))}</td>
+                                <td className="p-2">
+                                  <span className={
+                                    balance < 0 ? "text-blue-600 font-medium" :
+                                    balance === 0 ? "text-green-600" : 
+                                    "text-red-600"
+                                  }>
+                                    {balance < 0 ? `-$${formatNumber(Math.abs(balance))}` : `$${formatNumber(Math.abs(balance))}`}
+                                  </span>
+                                </td>
                                 <td className="p-2">
                                   <div className="flex items-center gap-2">
                                     <span className={
-                                      balance <= 0 ? "text-green-600" : 
+                                      balance < 0 ? "text-blue-600 font-medium" :
+                                      balance === 0 ? "text-green-600" : 
                                       truck.paymentPending ? "text-orange-500" : 
                                       "text-red-600"
                                     }>
-                                      {balance <= 0 ? "Paid" : truck.paymentPending ? "Pending" : "Due"}
+                                      {balance < 0 ? "✓ Credit" : balance === 0 ? "Paid" : truck.paymentPending ? "Pending" : "Due"}
                                     </span>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => handleAuditTruck(truck.id)}
+                                      className="h-6 w-6 p-0"
+                                      title="Audit payment allocation"
+                                      disabled={isAuditRunning}
+                                    >
+                                      <AlertCircle className="h-3 w-3 text-blue-500" />
+                                    </Button>
                                     <Button
                                       variant="ghost"
                                       size="sm"
@@ -2682,8 +2966,6 @@ export default function OwnerDetailsPage() {
                             )
                             .filter(Boolean)
                             .sort((a, b) => new Date(a.paymentTimestamp).getTime() - new Date(b.paymentTimestamp).getTime()); // Sort by original payment timestamp
-
-                          console.log("Payments for truck", truck.truck_number, payments.map(p => p.date.toLocaleDateString()));
 
                           const totalPaid = payments.reduce((sum, p) => sum + p.amount, 0);
 
@@ -3408,6 +3690,232 @@ export default function OwnerDetailsPage() {
                 </Button>
               </DialogFooter>
             </form>
+          </DialogContent>
+        </Dialog>
+
+        {/* Audit Results Dialog */}
+        <Dialog open={showAuditDialog} onOpenChange={setShowAuditDialog}>
+          <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <AlertCircle className="h-5 w-5 text-blue-500" />
+                Payment Reconciliation Audit
+              </DialogTitle>
+              <DialogDescription>
+                {selectedTruckAudit 
+                  ? "Detailed audit results for truck" 
+                  : "Overall payment allocation analysis"}
+              </DialogDescription>
+            </DialogHeader>
+            
+            {selectedTruckAudit ? (
+              /* Single Truck Audit */
+              <div className="space-y-4">
+                <Card className="p-4">
+                  <h3 className="font-semibold mb-2">Truck Information</h3>
+                  <div className="grid grid-cols-2 gap-4 text-sm">
+                    <div>
+                      <span className="text-muted-foreground">Truck Number:</span>
+                      <p className="font-medium">{selectedTruckAudit.truckNumber}</p>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">Product:</span>
+                      <p className="font-medium">{selectedTruckAudit.product}</p>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">At20:</span>
+                      <p className="font-medium">{selectedTruckAudit.at20}</p>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">Price:</span>
+                      <p className="font-medium">${selectedTruckAudit.price}</p>
+                    </div>
+                  </div>
+                </Card>
+
+                <Card className="p-4">
+                  <h3 className="font-semibold mb-2">Financial Summary</h3>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <span className="text-sm text-muted-foreground">Total Due:</span>
+                      <p className="text-lg font-bold">${formatNumber(selectedTruckAudit.totalDue)}</p>
+                    </div>
+                    <div>
+                      <span className="text-sm text-muted-foreground">Total Allocated:</span>
+                      <p className="text-lg font-bold">${formatNumber(selectedTruckAudit.totalAllocated)}</p>
+                    </div>
+                    <div>
+                      <span className="text-sm text-muted-foreground">Current Balance:</span>
+                      <p className="text-lg font-bold text-red-600">${formatNumber(selectedTruckAudit.currentBalance)}</p>
+                    </div>
+                    <div>
+                      <span className="text-sm text-muted-foreground">Expected Balance:</span>
+                      <p className="text-lg font-bold text-green-600">${formatNumber(selectedTruckAudit.expectedBalance)}</p>
+                    </div>
+                  </div>
+                  {Math.abs(selectedTruckAudit.discrepancy) > 0.01 && (
+                    <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-md">
+                      <p className="text-sm font-medium text-amber-800">
+                        Discrepancy: ${formatNumber(Math.abs(selectedTruckAudit.discrepancy))}
+                      </p>
+                    </div>
+                  )}
+                </Card>
+
+                {selectedTruckAudit.paymentsFound.length > 0 && (
+                  <Card className="p-4">
+                    <h3 className="font-semibold mb-2">Linked Payments ({selectedTruckAudit.paymentsFound.length})</h3>
+                    <div className="space-y-2 max-h-40 overflow-y-auto">
+                      {selectedTruckAudit.paymentsFound.map((payment: any, idx: number) => (
+                        <div key={idx} className="flex justify-between text-sm border-b pb-2">
+                          <span className="text-muted-foreground">{new Date(payment.timestamp).toLocaleDateString()}</span>
+                          <span className="font-medium">${formatNumber(payment.amount)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </Card>
+                )}
+
+                {selectedTruckAudit.unlinkedPayments.length > 0 && (
+                  <Card className="p-4 border-amber-300 bg-amber-50">
+                    <div className="flex justify-between items-center mb-2">
+                      <h3 className="font-semibold text-amber-800">Unlinked Payments ({selectedTruckAudit.unlinkedPayments.length})</h3>
+                      <Button
+                        size="sm"
+                        onClick={() => handleFixUnlinkedPayments(selectedTruckAudit)}
+                        className="bg-amber-600 hover:bg-amber-700"
+                      >
+                        Fix All
+                      </Button>
+                    </div>
+                    <div className="space-y-2 max-h-40 overflow-y-auto">
+                      {selectedTruckAudit.unlinkedPayments.map((payment: any, idx: number) => (
+                        <div key={idx} className="flex justify-between text-sm border-b border-amber-200 pb-2">
+                          <div>
+                            <p className="text-amber-800">{new Date(payment.timestamp).toLocaleDateString()}</p>
+                            <p className="text-xs text-amber-600">Payment ID: {payment.paymentId}</p>
+                          </div>
+                          <span className="font-medium text-amber-800">${formatNumber(payment.amount)}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <p className="text-xs text-amber-700 mt-2">
+                      These payments are allocated to this truck but missing from truckPayments
+                    </p>
+                  </Card>
+                )}
+
+                {selectedTruckAudit.duplicateEntries.length > 0 && (
+                  <Card className="p-4 border-red-300 bg-red-50">
+                    <h3 className="font-semibold text-red-800 mb-2">Duplicate Entries</h3>
+                    <p className="text-sm text-red-700 mb-2">
+                      This truck number appears {selectedTruckAudit.duplicateEntries.length + 1} times in the database
+                    </p>
+                    <div className="space-y-1 text-xs text-red-600">
+                      {selectedTruckAudit.duplicateEntries.map((id: string) => (
+                        <p key={id}>ID: {id}</p>
+                      ))}
+                    </div>
+                  </Card>
+                )}
+
+                {selectedTruckAudit.issues.length > 0 && (
+                  <Card className="p-4">
+                    <h3 className="font-semibold mb-2 text-red-600">Issues Found</h3>
+                    <ul className="space-y-1 text-sm">
+                      {selectedTruckAudit.issues.map((issue: string, idx: number) => (
+                        <li key={idx} className="flex items-start gap-2">
+                          <span className="text-red-500">•</span>
+                          <span>{issue}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </Card>
+                )}
+
+                {selectedTruckAudit.fixes.length > 0 && (
+                  <Card className="p-4 bg-blue-50">
+                    <h3 className="font-semibold mb-2 text-blue-600">Recommended Fixes</h3>
+                    <ul className="space-y-1 text-sm">
+                      {selectedTruckAudit.fixes.map((fix: string, idx: number) => (
+                        <li key={idx} className="flex items-start gap-2">
+                          <span className="text-blue-500">•</span>
+                          <span>{fix}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </Card>
+                )}
+              </div>
+            ) : auditResults ? (
+              /* Overall Audit Results */
+              <div className="space-y-4">
+                <Card className="p-4">
+                  <div className="grid grid-cols-3 gap-4 text-center">
+                    <div>
+                      <p className="text-sm text-muted-foreground">Total Trucks</p>
+                      <p className="text-2xl font-bold">{auditResults.totalTrucks}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-muted-foreground">With Issues</p>
+                      <p className="text-2xl font-bold text-amber-600">{auditResults.trucksWithIssues}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-muted-foreground">Total Discrepancy</p>
+                      <p className="text-2xl font-bold text-red-600">${formatNumber(auditResults.totalDiscrepancy)}</p>
+                    </div>
+                  </div>
+                </Card>
+
+                {auditResults.reports.length > 0 ? (
+                  <div className="space-y-2">
+                    <h3 className="font-semibold">Trucks with Issues</h3>
+                    {auditResults.reports.map((report: TruckReconciliationReport) => (
+                      <Card key={report.truckId} className="p-4 hover:bg-muted/50 cursor-pointer" onClick={() => setSelectedTruckAudit(report)}>
+                        <div className="flex justify-between items-start">
+                          <div>
+                            <p className="font-medium">{report.truckNumber}</p>
+                            <p className="text-sm text-muted-foreground">{report.product}</p>
+                            <p className="text-xs text-red-600 mt-1">{report.issues.length} issue(s)</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-sm text-muted-foreground">Current Balance</p>
+                            <p className="font-bold text-red-600">${formatNumber(report.currentBalance)}</p>
+                            {report.unlinkedPayments.length > 0 && (
+                              <p className="text-xs text-amber-600 mt-1">
+                                {report.unlinkedPayments.length} unlinked payment(s)
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      </Card>
+                    ))}
+                  </div>
+                ) : (
+                  <Card className="p-8 text-center">
+                    <div className="flex flex-col items-center gap-2">
+                      <CheckIcon className="h-12 w-12 text-green-500" />
+                      <p className="font-semibold text-green-600">No Issues Found!</p>
+                      <p className="text-sm text-muted-foreground">All payment allocations are correct</p>
+                    </div>
+                  </Card>
+                )}
+              </div>
+            ) : null}
+
+            <DialogFooter>
+              {selectedTruckAudit && (
+                <Button variant="outline" onClick={() => setSelectedTruckAudit(null)}>
+                  Back to Overview
+                </Button>
+              )}
+              <Button onClick={() => {
+                setShowAuditDialog(false);
+                setSelectedTruckAudit(null);
+              }}>
+                Close
+              </Button>
+            </DialogFooter>
           </DialogContent>
         </Dialog>
       </main>
