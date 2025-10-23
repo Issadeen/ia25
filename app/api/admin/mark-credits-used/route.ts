@@ -1,6 +1,7 @@
 import { initializeApp, getApps, cert } from 'firebase-admin/app'
 import { getDatabase } from 'firebase-admin/database'
 import { NextRequest, NextResponse } from 'next/server'
+import { validateMarkCreditsUsedRequest } from '@/lib/credit-validation'
 
 // Initialize Firebase Admin SDK
 function initializeAdmin() {
@@ -22,18 +23,14 @@ function initializeAdmin() {
 
 export async function POST(request: NextRequest) {
   try {
-    const { owner, creditIds } = await request.json()
+    const data = await request.json()
+    const { owner, creditIds } = data
 
-    if (!owner) {
+    // Validate request
+    const validation = validateMarkCreditsUsedRequest(data)
+    if (!validation.valid) {
       return NextResponse.json(
-        { error: 'Owner parameter required' },
-        { status: 400 }
-      )
-    }
-
-    if (!creditIds || creditIds.length === 0) {
-      return NextResponse.json(
-        { error: 'No credit IDs provided' },
+        { error: validation.error },
         { status: 400 }
       )
     }

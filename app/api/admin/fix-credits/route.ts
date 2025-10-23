@@ -2,6 +2,7 @@ import { initializeApp, getApps, cert } from 'firebase-admin/app'
 import { getDatabase } from 'firebase-admin/database'
 import { NextRequest, NextResponse } from 'next/server'
 import { toFixed2 } from '@/lib/utils'
+import { validateOwner, validateCreditRecord, validateCreditAmount } from '@/lib/credit-validation'
 
 // Initialize Firebase Admin SDK
 function initializeAdmin() {
@@ -25,9 +26,11 @@ export async function POST(request: NextRequest) {
   try {
     const { owner } = await request.json()
 
-    if (!owner) {
+    // Validate owner parameter
+    const ownerValidation = validateOwner(owner)
+    if (!ownerValidation.valid) {
       return NextResponse.json(
-        { error: 'Owner parameter required' },
+        { error: ownerValidation.error },
         { status: 400 }
       )
     }
@@ -100,18 +103,38 @@ export async function POST(request: NextRequest) {
       // If there's an overpayment (negative balance), create credit record
       if (balance < 0) {
         const creditAmount = toFixed2(Math.abs(balance))
-        const creditId = `credit_retroactive_${truck.id}_${Date.now()}`
+        
+        // Validate credit amount
+        const amountValidation = validateCreditAmount(creditAmount)
+        if (!amountValidation.valid) {
+          return NextResponse.json(
+            { error: `Validation failed for ${truck.truck_number}: ${amountValidation.error}` },
+            { status: 400 }
+          )
+        }
 
-        updates[`owner_credits/${owner}/${creditId}`] = {
+        const creditId = `credit_retroactive_${truck.id}_${Date.now()}`
+        const creditRecord = {
           id: creditId,
           truckId: truck.id,
           truckNumber: truck.truck_number,
           amount: creditAmount,
           timestamp: new Date().toISOString(),
-          source: 'overpayment_retroactive',
-          status: 'available',
+          source: 'overpayment_retroactive' as const,
+          status: 'available' as const,
           note: `Retroactive credit from overpayment on ${truck.truck_number}`
         }
+
+        // Validate the credit record before creating
+        const recordValidation = validateCreditRecord(creditRecord)
+        if (!recordValidation.valid) {
+          return NextResponse.json(
+            { error: `Credit record validation failed for ${truck.truck_number}: ${recordValidation.error}` },
+            { status: 400 }
+          )
+        }
+
+        updates[`owner_credits/${owner}/${creditId}`] = creditRecord
 
         // Also add to balance usage history
         const historyId = `history_retroactive_${truck.id}_${Date.now()}`

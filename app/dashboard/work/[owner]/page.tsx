@@ -291,6 +291,7 @@ export default function OwnerDetailsPage() {
 
   // Add state for tracking overpayment credits
   const [availableCredits, setAvailableCredits] = useState(0)
+  const [creditFixAttempted, setCreditFixAttempted] = useState(false)
 
   const profilePicUrl = useProfileImage()
 
@@ -1068,6 +1069,8 @@ export default function OwnerDetailsPage() {
     let timeoutId: NodeJS.Timeout;
     
     const autoFixCredits = async () => {
+      if (creditFixAttempted) return; // Skip if already attempted this session
+
       // Check if there are overpayments (negative balances) but no available credits
       const hasOverpayments = workDetails.some(truck => {
         if (!truck.loaded) return false
@@ -1077,6 +1080,7 @@ export default function OwnerDetailsPage() {
 
       // If we have overpayments but no credits, auto-fix
       if (hasOverpayments && availableCredits === 0) {
+        setCreditFixAttempted(true) // Mark as attempted to prevent re-runs
         try {
           const response = await fetch('/api/admin/fix-credits', {
             method: 'POST',
@@ -1092,12 +1096,12 @@ export default function OwnerDetailsPage() {
     }
 
     // Debounce the auto-fix to avoid too many calls
-    if (workDetails.length > 0) {
+    if (workDetails.length > 0 && !creditFixAttempted) {
       timeoutId = setTimeout(autoFixCredits, 500)
     }
 
     return () => clearTimeout(timeoutId)
-  }, [owner, workDetails, truckPayments, availableCredits])
+  }, [owner, workDetails, truckPayments, availableCredits, creditFixAttempted])
 
   // Add functions for truck selection
   const handleTruckSelect = (truckId: string) => {
