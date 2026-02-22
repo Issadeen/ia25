@@ -42,5 +42,6 @@ next-env.d.ts
 # Firebase config files
 database.rules.json
 .database.rules.json
+firebase/database.rules.json
 firebase.json
 .firebaserc

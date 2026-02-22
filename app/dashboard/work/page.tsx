@@ -18,7 +18,8 @@ import {
   Moon,
   Sun,
   BarChart3,
-  CheckCircle2
+  CheckCircle2,
+  Truck
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
@@ -63,6 +64,7 @@ export default function WorkPage() {
       icon: BarChart3,
       actions: [
         { label: "View Orders", href: "/dashboard/work/orders", icon: FileText },
+        { label: "3rd Party", href: "/dashboard/work/orders/third-party", icon: Truck },
         { label: "View Reports", href: "/dashboard/work/reports", icon: PieChart }
       ]
     },
