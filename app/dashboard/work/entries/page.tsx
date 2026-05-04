@@ -330,6 +330,7 @@ export default function EntriesPage() {
   const [showDuplicates, setShowDuplicates] = useState(false);
   const [allowCrossDestination, setAllowCrossDestination] = useState(false);
   const allocateButtonClickRef = useRef<{ lastClick: number; clickCount: number }>({ lastClick: 0, clickCount: 0 });
+  const mainRef = useRef<HTMLElement | null>(null);
 
   // Pagination state for available entries
   const [displayLimit, setDisplayLimit] = useState(20); // Show 20 entries initially
@@ -1211,15 +1212,41 @@ export default function EntriesPage() {
   }, [autoRefresh, showSummary]);
 
   useEffect(() => {
-    const handleScroll = () => {
-      setShowScrollTop(window.scrollY > 400);
-    };
+    const getMaxScrollTop = () => {
+      const rootMainScroll = mainRef.current?.scrollTop || 0
+      const bodyScroll = document.body?.scrollTop || 0
+      const docScroll = document.documentElement?.scrollTop || 0
+      const winScroll = window.pageYOffset || 0
+      const scrollingElementScroll = document.scrollingElement?.scrollTop || 0
 
-    window.addEventListener('scroll', handleScroll);
-    return () => window.removeEventListener('scroll', handleScroll);
+      return Math.max(rootMainScroll, bodyScroll, docScroll, winScroll, scrollingElementScroll)
+    }
+
+    const updateScrollTopVisibility = () => {
+      const shouldShow = getMaxScrollTop() > 20
+      setShowScrollTop((prev) => (prev === shouldShow ? prev : shouldShow))
+    }
+
+    updateScrollTopVisibility()
+
+    const mainEl = mainRef.current
+    window.addEventListener('scroll', updateScrollTopVisibility, { passive: true })
+    document.addEventListener('scroll', updateScrollTopVisibility, { passive: true, capture: true })
+    mainEl?.addEventListener('scroll', updateScrollTopVisibility, { passive: true })
+
+    // Fallback polling for edge cases where scroll events are swallowed by nested containers.
+    const pollId = window.setInterval(updateScrollTopVisibility, 300)
+
+    return () => {
+      window.removeEventListener('scroll', updateScrollTopVisibility)
+      document.removeEventListener('scroll', updateScrollTopVisibility, true)
+      mainEl?.removeEventListener('scroll', updateScrollTopVisibility)
+      window.clearInterval(pollId)
+    }
   }, []);
 
   const scrollToTop = () => {
+    mainRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
     window.scrollTo({
       top: 0,
       behavior: 'smooth'
@@ -2461,23 +2488,6 @@ export default function EntriesPage() {
             </CardContent>
           </Card>
 
-          <AnimatePresence>
-            {showScrollTop && (
-              <motion.button
-                initial={{ opacity: 0, scale: 0.8 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.8 }}
-                onClick={scrollToTop}
-                className="fixed bottom-4 right-4 p-2 rounded-full bg-emerald-500/90 text-white shadow-lg hover:bg-emerald-600/90 transition-colors z-50"
-                whileHover={{ scale: 1.1 }}
-                whileTap={{ scale: 0.9 }}
-              >
-                <ArrowUp className="h-6 w-6" />
-                <span className="sr-only">Scroll to top</span>
-              </motion.button>
-            )}
-          </AnimatePresence>
-
           {/* WorkID Dialog - Simple test version */}
           {showUsage && workIdDialogOpen && (
             <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50">
@@ -3659,7 +3669,7 @@ export default function EntriesPage() {
         `}</style>
       )}
 
-      <main className="container mx-auto px-2 sm:px-4 py-4 sm:py-8">
+      <main ref={mainRef} className="container mx-auto px-2 sm:px-4 py-4 sm:py-8">
         <AnimatePresence>
           {showWarningModal && (
             <Dialog open={showWarningModal} onOpenChange={setShowWarningModal}>
@@ -3793,7 +3803,7 @@ export default function EntriesPage() {
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.8 }}
                 onClick={scrollToTop}
-                className="fixed bottom-4 right-4 p-2 rounded-full bg-emerald-500/90 text-white shadow-lg hover:bg-emerald-600/90 transition-colors z-50"
+                className="fixed bottom-4 right-4 p-2 rounded-full bg-emerald-500/90 text-white shadow-lg hover:bg-emerald-600/90 transition-colors z-[10000]"
                 whileHover={{ scale: 1.1 }}
                 whileTap={{ scale: 0.9 }}
               >
