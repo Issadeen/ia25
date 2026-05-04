@@ -25,6 +25,9 @@
     "paths": {
       "@/*": [
         "./*"
+      ],
+      "next-themes": [
+        "./lib/next-themes-compat"
       ]
     },
     "types": [

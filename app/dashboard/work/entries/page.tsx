@@ -257,6 +257,12 @@ export default function EntriesPage() {
     entryId: string;
     newValue: string;
   } | null>(null)
+  const [pendingUsageEdit, setPendingUsageEdit] = useState<{
+    entryKey: string;
+    oldTruckNumber: string;
+    newTruckNumber: string;
+    newQuantity: number;
+  } | null>(null)
   const [isVerifying, setIsVerifying] = useState(false)
   const [pendingOrders, setPendingOrders] = useState<PendingOrderSummary[]>([])
   const [isPendingLoading, setIsPendingLoading] = useState(false)
@@ -458,6 +464,23 @@ export default function EntriesPage() {
             "Quantity updated successfully",
             "success"
           )
+        } else if (
+          pendingUsageEdit &&
+          pendingUsageEdit.entryKey &&
+          pendingUsageEdit.oldTruckNumber &&
+          pendingUsageEdit.newTruckNumber
+        ) {
+          await updateTruckUsage(
+            pendingUsageEdit.entryKey,
+            pendingUsageEdit.oldTruckNumber,
+            pendingUsageEdit.newTruckNumber,
+            pendingUsageEdit.newQuantity
+          )
+
+          setWorkIdDialogOpen(false)
+          setWorkId("")
+          setPendingUsageEdit(null)
+          setEditingUsage(null)
         }
       } else {
         addNotification(
@@ -476,6 +499,13 @@ export default function EntriesPage() {
       setIsVerifying(false)
     }
   }
+
+  // Fail-safe: if an edit is pending, always present Work ID verification dialog.
+  useEffect(() => {
+    if (pendingEdit || pendingUsageEdit) {
+      setWorkIdDialogOpen(true)
+    }
+  }, [pendingEdit, pendingUsageEdit])
 
   const updateRemainingQuantity = async (entryId: string, newValue: number) => {
     const db = getDatabase()
@@ -2270,6 +2300,7 @@ export default function EntriesPage() {
                                 />
                                 <Button
                                   size="sm"
+                                  type="button"
                                   onClick={() => {
                                     setPendingEdit({
                                       entryId: entry.key,
@@ -2282,6 +2313,7 @@ export default function EntriesPage() {
                                 </Button>
                                 <Button
                                   size="sm"
+                                  type="button"
                                   variant="outline"
                                   onClick={() => setEditMode(null)}
                                 >
@@ -2361,20 +2393,22 @@ export default function EntriesPage() {
                                         />
                                         <Button
                                           size="sm"
+                                          type="button"
                                           onClick={() => {
-                                            updateTruckUsage(
-                                              entry.key,
-                                              usage.truckNumber,
-                                              editingUsage.truckNumber,
-                                              editingUsage.quantity
-                                            );
-                                            setEditingUsage(null);
+                                            setPendingUsageEdit({
+                                              entryKey: entry.key,
+                                              oldTruckNumber: usage.truckNumber,
+                                              newTruckNumber: editingUsage.truckNumber,
+                                              newQuantity: editingUsage.quantity,
+                                            });
+                                            setWorkIdDialogOpen(true);
                                           }}
                                         >
                                           Save
                                         </Button>
                                         <Button
                                           size="sm"
+                                          type="button"
                                           variant="outline"
                                           onClick={() => setEditingUsage(null)}
                                         >
@@ -2443,6 +2477,52 @@ export default function EntriesPage() {
               </motion.button>
             )}
           </AnimatePresence>
+
+          {/* WorkID Dialog - Simple test version */}
+          {showUsage && workIdDialogOpen && (
+            <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50">
+              <div className="bg-white dark:bg-gray-900 rounded-lg shadow-lg p-6 w-full sm:max-w-[425px] mx-2">
+                <h2 className="text-lg font-semibold mb-2">Verify Work ID</h2>
+                <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+                  Please enter your Work ID to confirm the changes.
+                </p>
+                <form onSubmit={verifyWorkId}>
+                  <div className="mb-4">
+                    <label className="text-sm font-medium block mb-2">Work ID</label>
+                    <input
+                      type="text"
+                      value={workId}
+                      onChange={(e) => setWorkId(e.target.value)}
+                      required
+                      autoFocus
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                    />
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPendingEdit(null)
+                        setPendingUsageEdit(null)
+                        setWorkId("")
+                        setWorkIdDialogOpen(false)
+                      }}
+                      className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-800"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={isVerifying}
+                      className="px-4 py-2 bg-emerald-600 text-white rounded-md text-sm font-medium hover:bg-emerald-700 disabled:opacity-50"
+                    >
+                      {isVerifying ? "Verifying..." : "Verify"}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
         </motion.div>
       )
     }
@@ -3723,36 +3803,6 @@ export default function EntriesPage() {
             )}
           </AnimatePresence>
         </main>
-
-        <Dialog open={workIdDialogOpen} onOpenChange={setWorkIdDialogOpen}>
-          <DialogContent className="sm:max-w-[425px] mx-2 sm:mx-auto">
-            <DialogHeader>
-              <DialogTitle>Verify Work ID</DialogTitle>
-              <DialogDescription>
-                Please enter your Work ID to confirm the changes.
-              </DialogDescription>
-            </DialogHeader>
-            <form onSubmit={verifyWorkId}>
-              <div className="mt-4">
-                <Label htmlFor="workId">Work ID</Label>
-                <Input
-                  id="workId"
-                  value={workId}
-                  onChange={(e) => setWorkId(e.target.value)}
-                  required
-                />
-              </div>
-              <div className="mt-6 flex justify-end gap-2">
-                <Button variant="outline" onClick={() => setWorkIdDialogOpen(false)}>
-                  Cancel
-                </Button>
-                <Button type="submit" disabled={isVerifying}>
-                  {isVerifying ? <Loader2 className="h-4 w-4 animate-spin" /> : "Verify"}
-                </Button>
-              </div>
-            </form>
-          </DialogContent>
-        </Dialog>
 
         <Dialog open={showWarningModal} onOpenChange={setShowWarningModal}>
           <DialogContent>
